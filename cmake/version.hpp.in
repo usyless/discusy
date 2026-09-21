@@ -1,0 +1,17 @@
+#pragma once
+
+namespace discusy::version {
+    inline constexpr auto version = "@discusy_VERSION@";
+    inline constexpr auto major = "@discusy_VERSION_MAJOR@";
+    inline constexpr auto minor = "@discusy_VERSION_MINOR@";
+    inline constexpr auto patch = "@discusy_VERSION_PATCH@";
+
+    inline constexpr auto version_major = major;
+    inline constexpr auto version_minor = minor;
+    inline constexpr auto version_patch = patch;
+
+    inline constexpr auto full = version;
+    inline constexpr auto string = version;
+
+    inline constexpr auto discusy_header = "DiscordBot (https://github.com/usyless/discusy, @discusy_VERSION@";
+}

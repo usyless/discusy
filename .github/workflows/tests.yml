@@ -1,0 +1,131 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      compiler:
+        description: "Compiler to use"
+        required: true
+        default: "clang-22"
+        type: choice
+        options:
+          - clang-22
+          - gcc-14
+      build_type:
+        description: "Build type"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+          - MinSizeRel
+          - RelWithDebInfo
+      enable_pch:
+        description: "Enable Precompiled Headers (PCH)"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test:
+    name: Build and Run Tests (${{ inputs.compiler }}, ${{ inputs.build_type }})
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies & Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev ninja-build p7zip-full
+
+          # Ensure GCC-14 and libstdc++ are installed
+          sudo apt-get install -y gcc-14 g++-14
+
+          if [ "${{ inputs.compiler }}" = "gcc-14" ]; then
+            echo "CC=gcc-14" >> $GITHUB_ENV
+            echo "CXX=g++-14" >> $GITHUB_ENV
+          else
+            LLVM_VERSION="22"
+            sudo apt-get install -y wget lsb-release software-properties-common gnupg
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh ${LLVM_VERSION} all
+            echo "LLVM_VERSION=${LLVM_VERSION}" >> $GITHUB_ENV
+            echo "CC=/usr/bin/clang-${LLVM_VERSION}" >> $GITHUB_ENV
+            echo "CXX=/usr/bin/clang++-${LLVM_VERSION}" >> $GITHUB_ENV
+          fi
+
+      - name: Install CMake (>= 3.31)
+        run: |
+          if command -v pipx &> /dev/null; then
+            pipx install --force "cmake>=3.31"
+          else
+            sudo python3 -m pip install --break-system-packages --upgrade "cmake>=3.31"
+          fi
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify Tools
+        run: |
+          cmake --version
+          ninja --version
+          $CC --version
+          $CXX --version
+
+      - name: Configure CMake
+        run: |
+          CMAKE_ARGS=(
+            -B build
+            -G Ninja
+            -DCMAKE_BUILD_TYPE="${{ inputs.build_type }}"
+            -DCMAKE_C_COMPILER="$CC"
+            -DCMAKE_CXX_COMPILER="$CXX"
+            -DDISCUSY_BUILD_TESTS=ON
+            -DDISCUSY_ENABLE_PCH="${{ inputs.enable_pch && 'ON' || 'OFF' }}"
+          )
+
+          if [[ -n "$LLVM_VERSION" ]]; then
+            LIBCXX_STATIC=$(find /usr/lib/llvm-${LLVM_VERSION} -name "libc++.a" 2>/dev/null | head -n 1)
+            LIBCXXABI_STATIC=$(find /usr/lib/llvm-${LLVM_VERSION} -name "libc++abi.a" 2>/dev/null | head -n 1)
+
+            DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
+            if [[ -n "$LIBCXX_STATIC" && -n "$LIBCXXABI_STATIC" ]]; then
+              DCMAKE_EXE_LINKER_FLAGS="${DCMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -nostdlib++ -Wl,--start-group ${LIBCXX_STATIC} ${LIBCXXABI_STATIC} -Wl,--end-group -ldl -lpthread -lm -lc -lgcc_s -lgcc"
+            else
+              DCMAKE_EXE_LINKER_FLAGS="${DCMAKE_EXE_LINKER_FLAGS} -stdlib=libc++"
+            fi
+
+            CMAKE_ARGS+=(
+              -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+              -DCMAKE_AR="/usr/bin/llvm-ar-${LLVM_VERSION}"
+              -DCMAKE_NM="/usr/bin/llvm-nm-${LLVM_VERSION}"
+              -DCMAKE_RANLIB="/usr/bin/llvm-ranlib-${LLVM_VERSION}"
+              -DCMAKE_C_COMPILER_AR="/usr/bin/llvm-ar-${LLVM_VERSION}"
+              -DCMAKE_CXX_COMPILER_AR="/usr/bin/llvm-ar-${LLVM_VERSION}"
+              -DCMAKE_C_COMPILER_RANLIB="/usr/bin/llvm-ranlib-${LLVM_VERSION}"
+              -DCMAKE_CXX_COMPILER_RANLIB="/usr/bin/llvm-ranlib-${LLVM_VERSION}"
+              -DCMAKE_LINKER="/usr/bin/ld.lld-${LLVM_VERSION}"
+              -DCMAKE_EXE_LINKER_FLAGS="${DCMAKE_EXE_LINKER_FLAGS}"
+              -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
+              -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
+              -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE
+            )
+          fi
+
+          cmake "${CMAKE_ARGS[@]}"
+
+      - name: Build Unit Tests
+        run: |
+          cmake --build build --target discusy_unit_tests --parallel $(nproc)
+
+      - name: Run Tests (CTest)
+        run: |
+          ctest --test-dir build --output-on-failure --verbose
+
+      - name: Run Tests (Direct Executable Output)
+        run: |
+          ./build/tests/discusy_unit_tests

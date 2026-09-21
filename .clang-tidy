@@ -1,0 +1,37 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  
+  misc-use-after-move,
+  misc-redundant-expression,
+  misc-definitions-in-headers,
+  misc-unconventional-assign-operator,
+  misc-const-correctness,
+
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-rvalue-reference-param-not-moved,
+  cppcoreguidelines-avoid-non-const-global-variables,
+  cppcoreguidelines-interfaces-global-init,
+
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-named-parameter,
+  -bugprone-easily-swappable-parameters,
+  -readability-identifier-naming,
+  -readability-redundant-member-init,
+  -readability-function-cognitive-complexity
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+CheckOptions:
+  readability-identifier-naming.VariableCase: lower_case
+  readability-braces-around-statements.ShortStatementLines: 1
+  modernize-use-override.AllowOverrideAndFinal: true
