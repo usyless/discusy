@@ -27,7 +27,8 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -readability-identifier-naming,
   -readability-redundant-member-init,
-  -readability-function-cognitive-complexity
+  -readability-function-cognitive-complexity,
+  -readability-avoid-nested-conditional-operator
 
 WarningsAsErrors: ''
 HeaderFilterRegex: '.*'
