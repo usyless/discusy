@@ -1601,6 +1601,10 @@ namespace channel {
         channel_type type{};
         std::string name{};
 
+        [[nodiscard]] auto mention(this const auto& self) noexcept {
+            return self.id.mention_channel();
+        }
+
         static channel_mention create(snowflake id_ = {}, snowflake guild_id_ = {}, channel_type type_ = channel_type::GUILD_TEXT, std::string name_ = {}) {
             return channel_mention{
                 .id = id_,
@@ -2276,6 +2280,16 @@ namespace application_commands {
         opt<std::vector<interaction::interaction_context_type>> contexts{};
         snowflake version{};
         opt<entry_point_command_handler_types> handler{};
+
+        [[nodiscard]] std::string mention(this const auto& self) {
+            return ulp::str::concat_strings("</", self.name, ":", self.id.stack_str(), ">");
+        }
+        [[nodiscard]] std::string mention(this const auto& self, std::string_view subcommand) {
+            return ulp::str::concat_strings("</", self.name, " ", subcommand, ":", self.id.stack_str(), ">");
+        }
+        [[nodiscard]] std::string mention(this const auto& self, std::string_view group, std::string_view subcommand) {
+            return ulp::str::concat_strings("</", self.name, " ", group, " ", subcommand, ":", self.id.stack_str(), ">");
+        }
 
         static application_command create(snowflake id_ = {}, snowflake application_id_ = {}, std::string name_ = {}, std::string description_ = {}) {
             return application_command{
@@ -5508,6 +5522,7 @@ namespace interaction {
         [[nodiscard]] snowflake user_id_of(this auto&& self) noexcept;
         [[nodiscard]] std::string_view display_name(this auto&& self) noexcept;
         [[nodiscard]] std::string_view display_name_of(this auto&& self) noexcept;
+        [[nodiscard]] snowflake_mention_str mention(this auto&& self) noexcept;
         [[nodiscard]] bool in_guild(this auto&& self) noexcept;
         [[nodiscard]] snowflake guild_id_of(this auto&& self) noexcept;
         [[nodiscard]] snowflake guild_id_or_default(this auto&& self) noexcept;

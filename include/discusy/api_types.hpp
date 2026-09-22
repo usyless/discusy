@@ -2599,6 +2599,16 @@ namespace application_commands {
         opt<bool> nsfw{};
         opt<discusy::application_commands::entry_point_command_handler_types> handler{};
 
+        [[nodiscard]] std::string mention(this const auto& self) {
+            return ulp::str::concat_strings("</", self.name, ":", self.id ? self.id->stack_str() : snowflake_str{}, ">");
+        }
+        [[nodiscard]] std::string mention(this const auto& self, std::string_view subcommand) {
+            return ulp::str::concat_strings("</", self.name, " ", subcommand, ":", self.id ? self.id->stack_str() : snowflake_str{}, ">");
+        }
+        [[nodiscard]] std::string mention(this const auto& self, std::string_view group, std::string_view subcommand) {
+            return ulp::str::concat_strings("</", self.name, " ", group, " ", subcommand, ":", self.id ? self.id->stack_str() : snowflake_str{}, ">");
+        }
+
         static application_command create(std::string name_ = {}, opt<std::string> description_ = {}, opt<discusy::application_commands::application_command_type> type_ = discusy::application_commands::application_command_type::CHAT_INPUT) {
             return application_command{.name = std::move(name_), .description = std::move(description_), .type = type_};
         }

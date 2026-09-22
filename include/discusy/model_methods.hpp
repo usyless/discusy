@@ -1074,6 +1074,10 @@ inline std::string_view interaction::interaction::display_name_of(this auto&& se
     return self.display_name();
 }
 
+inline snowflake_mention_str interaction::interaction::mention(this auto&& self) noexcept {
+    return self.user_id().mention_user();
+}
+
 inline bool interaction::interaction::in_guild(this auto&& self) noexcept {
     return self.guild_id.has_value();
 }

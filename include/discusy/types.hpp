@@ -160,6 +160,9 @@ struct snowflake {
     [[nodiscard]] constexpr snowflake_mention_str mention_user() const noexcept;
     [[nodiscard]] constexpr snowflake_mention_str mention_channel() const noexcept;
     [[nodiscard]] constexpr snowflake_mention_str mention_role() const noexcept;
+    [[nodiscard]] inline std::string mention_command(std::string_view name) const;
+    [[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view subcommand) const;
+    [[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view group, std::string_view subcommand) const;
 
     [[nodiscard]] constexpr std::uint64_t get_timestamp() const noexcept {
         return (value >> 22) + DISCORD_EPOCH;
@@ -401,6 +404,18 @@ constexpr snowflake_mention_str snowflake::mention_role() const noexcept {
     snowflake_mention_str res{};
     detail::format_mention(res.buf.data(), res.len, "<@&", value);
     return res;
+}
+
+inline std::string snowflake::mention_command(std::string_view name) const {
+    return ulp::str::concat_strings("</", name, ":", stack_str(), ">");
+}
+
+inline std::string snowflake::mention_command(std::string_view name, std::string_view subcommand) const {
+    return ulp::str::concat_strings("</", name, " ", subcommand, ":", stack_str(), ">");
+}
+
+inline std::string snowflake::mention_command(std::string_view name, std::string_view group, std::string_view subcommand) const {
+    return ulp::str::concat_strings("</", name, " ", group, " ", subcommand, ":", stack_str(), ">");
 }
 
 enum class flags_type : std::uint8_t {

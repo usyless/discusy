@@ -53,16 +53,77 @@ namespace discusy::helpers {
     return i.display_name();
 }
 
+// user mentions
 [[nodiscard]] constexpr snowflake_mention_str mention_user(const snowflake id) noexcept {
     return id.mention_user();
 }
+[[nodiscard]] inline auto mention_user(const discusy::user::user& u) noexcept {
+    return u.mention();
+}
+[[nodiscard]] inline auto mention_user(const discusy::guild::guild_member& m) noexcept {
+    return m.mention();
+}
 
+// channel mentions
 [[nodiscard]] constexpr snowflake_mention_str mention_channel(const snowflake id) noexcept {
     return id.mention_channel();
 }
+[[nodiscard]] inline auto mention_channel(const discusy::channel::channel& c) noexcept {
+    return c.mention();
+}
+[[nodiscard]] inline auto mention_channel(const discusy::channel::channel_mention& cm) noexcept {
+    return cm.mention();
+}
 
+// role mentions
 [[nodiscard]] constexpr snowflake_mention_str mention_role(const snowflake id) noexcept {
     return id.mention_role();
+}
+[[nodiscard]] inline auto mention_role(const discusy::permissions::role& r) noexcept {
+    return r.mention();
+}
+
+// command mentions
+[[nodiscard]] inline std::string mention_command(std::string_view name, const snowflake id) {
+    return id.mention_command(name);
+}
+[[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view subcommand, const snowflake id) {
+    return id.mention_command(name, subcommand);
+}
+[[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view group, std::string_view subcommand, const snowflake id) {
+    return id.mention_command(name, group, subcommand);
+}
+[[nodiscard]] inline std::string mention_command(const discusy::application_commands::application_command& cmd) {
+    return cmd.mention();
+}
+[[nodiscard]] inline std::string mention_command(const discusy::application_commands::application_command& cmd, std::string_view subcommand) {
+    return cmd.mention(subcommand);
+}
+[[nodiscard]] inline std::string mention_command(const discusy::application_commands::application_command& cmd, std::string_view group, std::string_view subcommand) {
+    return cmd.mention(group, subcommand);
+}
+
+// generic mention overloads
+[[nodiscard]] inline auto mention(const discusy::user::user& u) noexcept {
+    return u.mention();
+}
+[[nodiscard]] inline auto mention(const discusy::guild::guild_member& m) noexcept {
+    return m.mention();
+}
+[[nodiscard]] inline auto mention(const discusy::channel::channel& c) noexcept {
+    return c.mention();
+}
+[[nodiscard]] inline auto mention(const discusy::channel::channel_mention& cm) noexcept {
+    return cm.mention();
+}
+[[nodiscard]] inline auto mention(const discusy::permissions::role& r) noexcept {
+    return r.mention();
+}
+[[nodiscard]] inline auto mention(const discusy::interaction::interaction& i) noexcept {
+    return i.mention();
+}
+[[nodiscard]] inline std::string mention(const discusy::application_commands::application_command& cmd) {
+    return cmd.mention();
 }
 
 // command options

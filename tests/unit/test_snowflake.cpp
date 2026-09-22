@@ -61,6 +61,10 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         discusy::snowflake_str stack_s{sf};
         std::string_view sv{stack_s.buf.data(), stack_s.len};
         CHECK(sv == "175928847299117063");
+
+        CHECK(sf.mention_command("airhorn") == "</airhorn:175928847299117063>");
+        CHECK(sf.mention_command("airhorn", "play") == "</airhorn play:175928847299117063>");
+        CHECK(sf.mention_command("config", "logging", "set") == "</config logging set:175928847299117063>");
     }
 
     SECTION("Boolean and comparison semantics") {
