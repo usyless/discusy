@@ -159,8 +159,8 @@ struct snowflake {
         return std::string{buf.data(), ptr};
     }
 
-    [[nodiscard]] inline snowflake_str stack_str() const noexcept;
-    [[nodiscard]] inline snowflake_str to_snowflake_str() const noexcept;
+    [[nodiscard]] constexpr snowflake_str stack_str() const noexcept;
+    [[nodiscard]] constexpr snowflake_str to_snowflake_str() const noexcept;
 
     [[nodiscard]] std::string mention_user() const {
         std::array<char, 32> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
@@ -240,13 +240,33 @@ struct snowflake_str {
 
     constexpr snowflake_str() noexcept = default;
 
-    explicit snowflake_str(std::uint64_t val) noexcept {
-        auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
-        *ptr = '\0';
-        len = static_cast<std::uint8_t>(ptr - buf.data());
+    constexpr explicit snowflake_str(std::uint64_t val) noexcept {
+        if consteval {
+            if (val == 0) {
+                buf[0] = '0';
+                buf[1] = '\0';
+                len = 1;
+                return;
+            }
+            std::array<char, 24> temp{};
+            std::size_t i = 0;
+            while (val > 0) {
+                temp[i++] = static_cast<char>('0' + (val % 10));
+                val /= 10;
+            }
+            for (std::size_t j = 0; j < i; ++j) {
+                buf[j] = temp[i - 1 - j];
+            }
+            buf[i] = '\0';
+            len = static_cast<std::uint8_t>(i);
+        } else {
+            auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
+            *ptr = '\0';
+            len = static_cast<std::uint8_t>(ptr - buf.data());
+        }
     }
 
-    explicit snowflake_str(snowflake s) noexcept : snowflake_str(s.value) {}
+    constexpr explicit snowflake_str(snowflake s) noexcept : snowflake_str(s.value) {}
 
     [[nodiscard]] constexpr std::string_view view() const noexcept {
         return std::string_view{buf.data(), len};
@@ -299,11 +319,11 @@ struct snowflake_str {
     };
 };
 
-inline snowflake_str snowflake::to_snowflake_str() const noexcept {
+constexpr snowflake_str snowflake::to_snowflake_str() const noexcept {
     return snowflake_str{value};
 }
 
-inline snowflake_str snowflake::stack_str() const noexcept {
+constexpr snowflake_str snowflake::stack_str() const noexcept {
     return snowflake_str{value};
 }
 
