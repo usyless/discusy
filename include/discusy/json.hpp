@@ -83,7 +83,7 @@ requires ( log::IsLogger<F> )
     }
     return false;
     #else
-    return glz::read<opts>(object, json);
+    return glz::read<opts>(object, json, ctx);
     #endif
 }
 
@@ -114,7 +114,7 @@ requires ( log::IsLogger<F> )
     }
     return false;
     #else
-    return glz::read<opts>(object, json);
+    return glz::read<opts>(object, json, ctx);
     #endif
 }
 
@@ -145,7 +145,7 @@ requires ( log::IsLogger<F> )
     }
     return false;
     #else
-    return glz::read<opts>(object, json);
+    return glz::read<opts>(object, json, ctx);
     #endif
 }
 
@@ -176,7 +176,7 @@ requires ( log::IsLogger<F> )
     }
     return false;
     #else
-    return glz::write<opts>(object, json);
+    return glz::write<opts>(object, json, ctx);
     #endif
 }
 
