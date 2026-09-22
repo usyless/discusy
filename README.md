@@ -55,7 +55,6 @@ However there are some basic concepts to know:
 - The http client is under `discusy::bot::client` and can perform HTTP/1.1 requests with a few configuration options
     - The `api` methods are rate limited for Discords API - don't use these yourself unless if youre manually making Discord API requests
 - The http api is under `discusy::bot::api` and has a method for every single path within the Discord API, however these may only be called after the `discusy::bot::on_shards_ready` event fires at least once to populate internal state
-- Prefer `discusy::snowflake::stack_str` to `discusy::snowflake::str`, as str heap allocates a `std::string` while stack_str is a stack allocated buffer large enough to hold the snowflake
 - Use `discusy::make_vector` and the equivalent set methods instead of initialiser lists when creating vectors - initialiser lists cause an unnecessary copy of all arguments
     - Try to use `discusy::make_array` when you need a non-dynamically sized array, such as for creating global commands
 - Coroutines are `discusy::coro::awaitable<T>`, which is an alias for `boost::asio::awaitable<T>`, make sure you know how to use coroutines before writing your own ones, including how they handle their arguments

@@ -49,6 +49,15 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(sf.mention_channel() == "<#175928847299117063>");
         CHECK(sf.mention_role() == "<@&175928847299117063>");
 
+        constexpr auto const_str = sf.str();
+        constexpr auto const_mu = sf.mention_user();
+        constexpr auto const_mc = sf.mention_channel();
+        constexpr auto const_mr = sf.mention_role();
+        static_assert(const_str.view() == "175928847299117063");
+        static_assert(const_mu.view() == "<@175928847299117063>");
+        static_assert(const_mc.view() == "<#175928847299117063>");
+        static_assert(const_mr.view() == "<@&175928847299117063>");
+
         discusy::snowflake_str stack_s{sf};
         std::string_view sv{stack_s.buf.data(), stack_s.len};
         CHECK(sv == "175928847299117063");

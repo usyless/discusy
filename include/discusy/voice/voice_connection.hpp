@@ -226,7 +226,7 @@ public:
         hb_timer_{strand_},
         reconnect_timeout_timer_{strand_},
         refresh_watchdog_{strand_},
-        recognised_users_{user_id.str()}, // initialise with bot itself as user
+        recognised_users_{std::string{user_id.str()}}, // initialise with bot itself as user
         server_id_{server_id},
         channel_id_{channel_id.value},
         user_id_{user_id},

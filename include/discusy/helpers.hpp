@@ -53,15 +53,15 @@ namespace discusy::helpers {
     return i.display_name();
 }
 
-[[nodiscard]] inline std::string mention_user(const snowflake id) {
+[[nodiscard]] constexpr snowflake_mention_str mention_user(const snowflake id) noexcept {
     return id.mention_user();
 }
 
-[[nodiscard]] inline std::string mention_channel(const snowflake id) {
+[[nodiscard]] constexpr snowflake_mention_str mention_channel(const snowflake id) noexcept {
     return id.mention_channel();
 }
 
-[[nodiscard]] inline std::string mention_role(const snowflake id) {
+[[nodiscard]] constexpr snowflake_mention_str mention_role(const snowflake id) noexcept {
     return id.mention_role();
 }
 

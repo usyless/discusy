@@ -483,7 +483,7 @@ public:
         get_guild_audit_log,
         get,
         discusy::audit_log::audit_log,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/audit-logs", make_query_string(params)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/audit-logs", make_query_string(params)),
         const discusy::snowflake guild_id, const discusy::api::audit_log::get_guild_audit_log_query_params& params = {}
     )
 
@@ -492,7 +492,7 @@ public:
         list_auto_moderation_rules_for_guild,
         get,
         std::vector<discusy::auto_moderation::auto_moderation_rule>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/auto-moderation/rules"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/auto-moderation/rules"),
         const discusy::snowflake guild_id
     )
 
@@ -501,7 +501,7 @@ public:
         get_auto_moderation_rule,
         get,
         discusy::auto_moderation::auto_moderation_rule,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/auto-moderation/rules/", rule_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/auto-moderation/rules/", rule_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake rule_id
     )
 
@@ -511,7 +511,7 @@ public:
         post,
         discusy::auto_moderation::auto_moderation_rule,
         handle_json_body(rule),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/auto-moderation/rules"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/auto-moderation/rules"),
         const discusy::snowflake guild_id, const discusy::api::auto_moderation::create_auto_moderation_rule& rule
     )
 
@@ -521,7 +521,7 @@ public:
         patch,
         discusy::auto_moderation::auto_moderation_rule,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/auto-moderation/rules/", rule_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/auto-moderation/rules/", rule_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake rule_id, const discusy::api::auto_moderation::modify_auto_moderation_rule& update
     )
 
@@ -530,7 +530,7 @@ public:
         delete_auto_moderation_rule,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/auto-moderation/rules/", rule_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/auto-moderation/rules/", rule_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake rule_id
     )
 
@@ -539,7 +539,7 @@ public:
         get_channel,
         get,
         discusy::channel::channel,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str()),
         const discusy::snowflake channel_id
     )
 
@@ -549,7 +549,7 @@ public:
         patch,
         discusy::channel::channel,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::api::channels::modify_channel& update
     )
 
@@ -559,7 +559,7 @@ public:
         put,
         void,
         handle_json_body(status),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/voice-status"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/voice-status"),
         const discusy::snowflake channel_id, const discusy::api::channels::set_voice_channel_status& status
     )
 
@@ -568,7 +568,7 @@ public:
         delete_channel,
         delete_,
         discusy::channel::channel,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str()),
         const discusy::snowflake channel_id
     )
 
@@ -577,7 +577,7 @@ public:
         close_channel,
         delete_,
         discusy::channel::channel,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str()),
         const discusy::snowflake channel_id
     )
 
@@ -587,7 +587,7 @@ public:
         put,
         void,
         handle_json_body(edit),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/permissions/", overwrite_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/permissions/", overwrite_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake overwrite_id, const discusy::api::channels::edit_channel_permissions& edit
     )
 
@@ -596,7 +596,7 @@ public:
         get_channel_invites,
         get,
         std::vector<discusy::invite::invite>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/invites"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/invites"),
         const discusy::snowflake channel_id
     )
 
@@ -606,7 +606,7 @@ public:
         post,
         discusy::invite::invite,
         handle_multipart_body(create, "target_users_file", target_users_file, "application/csv"),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/invites"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/invites"),
         const discusy::snowflake channel_id, const discusy::api::channels::create_channel_invite& create, std::string_view target_users_file = {}
     )
 
@@ -615,7 +615,7 @@ public:
         delete_channel_permission,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/permissions/", overwrite_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/permissions/", overwrite_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake overwrite_id
     )
 
@@ -625,7 +625,7 @@ public:
         post,
         discusy::channel::followed_channel,
         handle_json_body(follow),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/followers"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/followers"),
         const discusy::snowflake channel_id, const discusy::api::channels::follow_announcement_channel& follow
     )
 
@@ -634,7 +634,7 @@ public:
         trigger_typing_indicator,
         post,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/typing"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/typing"),
         const discusy::snowflake channel_id
     )
 
@@ -644,7 +644,7 @@ public:
         put,
         void,
         handle_json_body(add),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/recipients/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/recipients/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake user_id, const discusy::api::channels::group_dm_add_recipient& add
     )
 
@@ -653,7 +653,7 @@ public:
         group_dm_remove_recipient,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/recipients/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/recipients/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake user_id
     )
 
@@ -663,7 +663,7 @@ public:
         post,
         discusy::channel::channel,
         handle_json_body(thr),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/threads"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/threads"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::api::channels::start_thread_from_message& thr
     )
 
@@ -673,7 +673,7 @@ public:
         post,
         discusy::channel::channel,
         handle_json_body(thr),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/threads"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/threads"),
         const discusy::snowflake channel_id, const discusy::api::channels::start_thread_without_message& thr
     )
 
@@ -683,7 +683,7 @@ public:
         post,
         discusy::channel::channel,
         handle_multipart_files_body(thr, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/threads"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/threads"),
         const discusy::snowflake channel_id, const discusy::api::channels::start_thread_in_forum_or_media_channel& thr, upload_files_param files = {}
     )
 
@@ -692,7 +692,7 @@ public:
         join_thread,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members/@me"),
         const discusy::snowflake channel_id
     )
 
@@ -701,7 +701,7 @@ public:
         add_thread_member,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake user_id
     )
 
@@ -710,7 +710,7 @@ public:
         leave_thread,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members/@me"),
         const discusy::snowflake channel_id
     )
 
@@ -719,7 +719,7 @@ public:
         remove_thread_member,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake user_id
     )
 
@@ -728,7 +728,7 @@ public:
         get_thread_member,
         get,
         discusy::channel::thread_member_with_guild,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members/", user_id.to_snowflake_str(), make_query_string(get)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members/", user_id.stack_str(), make_query_string(get)),
         const discusy::snowflake channel_id, const discusy::snowflake user_id, const discusy::api::channels::get_thread_member& get = {}
     )
 
@@ -737,7 +737,7 @@ public:
         list_thread_members,
         get,
         std::vector<discusy::channel::thread_member_with_guild>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/thread-members", make_query_string(list)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/thread-members", make_query_string(list)),
         const discusy::snowflake channel_id, const discusy::api::channels::list_thread_members& list = {}
     )
 
@@ -746,7 +746,7 @@ public:
         list_public_archived_threads,
         get,
         discusy::api::channels::list_archived_threads_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/threads/archived/public", make_query_string(list)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/threads/archived/public", make_query_string(list)),
         const discusy::snowflake channel_id, const discusy::api::channels::list_archived_threads_query& list = {}
     )
 
@@ -755,7 +755,7 @@ public:
         list_private_archived_threads,
         get,
         discusy::api::channels::list_archived_threads_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/threads/archived/private", make_query_string(list)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/threads/archived/private", make_query_string(list)),
         const discusy::snowflake channel_id, const discusy::api::channels::list_archived_threads_query& list = {}
     )
 
@@ -764,7 +764,7 @@ public:
         list_joined_private_archived_threads,
         get,
         discusy::api::channels::list_archived_threads_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/users/@me/threads/archived/private", make_query_string(list)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/users/@me/threads/archived/private", make_query_string(list)),
         const discusy::snowflake channel_id, const discusy::api::channels::list_joined_private_archived_threads_query& list = {}
     )
 
@@ -773,7 +773,7 @@ public:
         get_channel_webhooks,
         get,
         std::vector<discusy::webhook::webhook>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/webhooks"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/webhooks"),
         const discusy::snowflake channel_id
     )
 
@@ -783,7 +783,7 @@ public:
         post,
         discusy::webhook::webhook,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/webhooks"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/webhooks"),
         const discusy::snowflake channel_id, const discusy::api::webhook::create_webhook& create
     )
 
@@ -792,7 +792,7 @@ public:
         get_guild_channels,
         get,
         std::vector<discusy::channel::channel>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/channels"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/channels"),
         const discusy::snowflake guild_id
     )
 
@@ -802,7 +802,7 @@ public:
         patch,
         discusy::guild::guild_member,
         handle_json_body(modify),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::api::guild::modify_guild_member& modify
     )
 
@@ -811,7 +811,7 @@ public:
         get_guild,
         get,
         discusy::guild::guild,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::get_guild_query& query = {}
     )
 
@@ -820,7 +820,7 @@ public:
         get_guild_preview,
         get,
         discusy::guild::guild_preview,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/preview"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/preview"),
         const discusy::snowflake guild_id
     )
 
@@ -830,7 +830,7 @@ public:
         patch,
         discusy::guild::guild,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_guild& update
     )
 
@@ -840,7 +840,7 @@ public:
         post,
         discusy::channel::channel,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/channels"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/channels"),
         const discusy::snowflake guild_id, const discusy::api::guild::create_guild_channel& create
     )
 
@@ -850,7 +850,7 @@ public:
         patch,
         void,
         handle_json_body(positions),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/channels"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/channels"),
         const discusy::snowflake guild_id, discusy::api::guild::modify_guild_channel_positions positions
     )
 
@@ -859,7 +859,7 @@ public:
         list_active_guild_threads,
         get,
         discusy::api::guild::list_active_guild_threads_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/threads/active"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/threads/active"),
         const discusy::snowflake guild_id
     )
 
@@ -868,7 +868,7 @@ public:
         get_guild_member,
         get,
         discusy::guild::guild_member,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id
     )
 
@@ -877,7 +877,7 @@ public:
         list_guild_members,
         get,
         std::vector<discusy::guild::guild_member>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::list_guild_members_query& query = {}
     )
 
@@ -886,7 +886,7 @@ public:
         search_guild_members,
         get,
         std::vector<discusy::guild::guild_member>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/search", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/search", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::search_guild_members_query& query
     )
 
@@ -896,7 +896,7 @@ public:
         put,
         discusy::guild::guild_member,
         handle_json_body(add),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::api::guild::add_guild_member& add
     )
 
@@ -906,7 +906,7 @@ public:
         patch,
         discusy::guild::guild_member,
         handle_json_body(modify),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/@me"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_current_member& modify
     )
 
@@ -917,7 +917,7 @@ public:
         patch,
         discusy::guild::guild_member,
         handle_json_body(modify),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/@me/nick"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/@me/nick"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_current_user_nick& modify
     )
 
@@ -926,7 +926,7 @@ public:
         add_guild_member_role,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str(), "/roles/", role_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str(), "/roles/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::snowflake role_id
     )
 
@@ -935,7 +935,7 @@ public:
         remove_guild_member_role,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str(), "/roles/", role_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str(), "/roles/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::snowflake role_id
     )
 
@@ -944,7 +944,7 @@ public:
         remove_guild_member,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id
     )
 
@@ -953,7 +953,7 @@ public:
         get_guild_bans,
         get,
         std::vector<discusy::guild::ban>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/bans", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/bans", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::get_guild_bans_query& query = {}
     )
 
@@ -962,7 +962,7 @@ public:
         get_guild_ban,
         get,
         discusy::guild::ban,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/bans/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/bans/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id
     )
 
@@ -972,7 +972,7 @@ public:
         put,
         void,
         handle_json_body(ban),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/bans/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/bans/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::api::guild::create_guild_ban& ban = {}
     )
 
@@ -981,7 +981,7 @@ public:
         remove_guild_ban,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/bans/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/bans/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id
     )
 
@@ -991,7 +991,7 @@ public:
         post,
         discusy::api::guild::bulk_guild_ban_response,
         handle_json_body(ban),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/bulk-ban"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/bulk-ban"),
         const discusy::snowflake guild_id, const discusy::api::guild::bulk_guild_ban& ban
     )
 
@@ -1000,7 +1000,7 @@ public:
         get_guild_roles,
         get,
         std::vector<discusy::permissions::role>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles"),
         const discusy::snowflake guild_id
     )
 
@@ -1009,7 +1009,7 @@ public:
         get_guild_role,
         get,
         discusy::permissions::role,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles/", role_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake role_id
     )
 
@@ -1018,7 +1018,7 @@ public:
         get_guild_role_member_counts,
         get,
         discusy::api::guild::role_member_counts,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles/member-counts"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles/member-counts"),
         const discusy::snowflake guild_id
     )
 
@@ -1028,7 +1028,7 @@ public:
         post,
         discusy::permissions::role,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles"),
         const discusy::snowflake guild_id, const discusy::api::guild::create_guild_role& create = {}
     )
 
@@ -1038,7 +1038,7 @@ public:
         patch,
         std::vector<discusy::permissions::role>,
         handle_json_body(positions),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles"),
         const discusy::snowflake guild_id, discusy::api::guild::modify_guild_role_positions positions
     )
 
@@ -1048,7 +1048,7 @@ public:
         patch,
         discusy::permissions::role,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles/", role_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake role_id, const discusy::api::guild::modify_guild_role& update
     )
 
@@ -1057,7 +1057,7 @@ public:
         delete_guild_role,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/roles/", role_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake role_id
     )
 
@@ -1066,7 +1066,7 @@ public:
         get_guild_prune_count,
         get,
         discusy::api::guild::guild_prune_count_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/prune", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/prune", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::get_guild_prune_count_query& query = {}
     )
 
@@ -1076,7 +1076,7 @@ public:
         post,
         discusy::api::guild::guild_prune_count_response,
         handle_json_body(prune),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/prune"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/prune"),
         const discusy::snowflake guild_id, const discusy::api::guild::begin_guild_prune& prune = {}
     )
 
@@ -1085,7 +1085,7 @@ public:
         get_guild_voice_regions,
         get,
         std::vector<discusy::voice::voice_region>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/regions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/regions"),
         const discusy::snowflake guild_id
     )
 
@@ -1094,7 +1094,7 @@ public:
         get_guild_invites,
         get,
         std::vector<discusy::invite::invite>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/invites"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/invites"),
         const discusy::snowflake guild_id
     )
 
@@ -1103,7 +1103,7 @@ public:
         get_guild_integrations,
         get,
         std::vector<discusy::guild::integration>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/integrations"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/integrations"),
         const discusy::snowflake guild_id
     )
 
@@ -1112,7 +1112,7 @@ public:
         delete_guild_integration,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/integrations/", integration_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/integrations/", integration_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake integration_id
     )
 
@@ -1121,7 +1121,7 @@ public:
         get_guild_widget_settings,
         get,
         discusy::guild::guild_widget_settings,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/widget"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/widget"),
         const discusy::snowflake guild_id
     )
 
@@ -1131,7 +1131,7 @@ public:
         patch,
         discusy::guild::guild_widget_settings,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/widget"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/widget"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_guild_widget& update
     )
 
@@ -1140,7 +1140,7 @@ public:
         get_guild_widget,
         get,
         discusy::guild::guild_widget,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/widget.json"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/widget.json"),
         const discusy::snowflake guild_id
     )
 
@@ -1149,7 +1149,7 @@ public:
         get_guild_vanity_url,
         get,
         discusy::invite::invite,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/vanity-url"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/vanity-url"),
         const discusy::snowflake guild_id
     )
 
@@ -1159,7 +1159,7 @@ public:
         get_guild_widget_image,
         get,
         http_api::raw_data,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/widget.png", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/widget.png", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild::get_guild_widget_image_query& query = {}
     )
 
@@ -1168,7 +1168,7 @@ public:
         get_guild_welcome_screen,
         get,
         discusy::guild::welcome_screen,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/welcome-screen"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/welcome-screen"),
         const discusy::snowflake guild_id
     )
 
@@ -1178,7 +1178,7 @@ public:
         patch,
         discusy::guild::welcome_screen,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/welcome-screen"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/welcome-screen"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_guild_welcome_screen& update
     )
 
@@ -1187,7 +1187,7 @@ public:
         get_guild_onboarding,
         get,
         discusy::guild::guild_onboarding,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/onboarding"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/onboarding"),
         const discusy::snowflake guild_id
     )
 
@@ -1197,7 +1197,7 @@ public:
         put,
         discusy::guild::guild_onboarding,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/onboarding"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/onboarding"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_guild_onboarding& update
     )
 
@@ -1207,7 +1207,7 @@ public:
         put,
         discusy::guild::incidents_data,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/incident-actions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/incident-actions"),
         const discusy::snowflake guild_id, const discusy::api::guild::modify_guild_incident_actions& update
     )
 
@@ -1216,7 +1216,7 @@ public:
         get_guild_webhooks,
         get,
         std::vector<discusy::webhook::webhook>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/webhooks"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/webhooks"),
         const discusy::snowflake guild_id
     )
 
@@ -1225,7 +1225,7 @@ public:
         get_channel_message,
         get,
         discusy::message::message,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1235,7 +1235,7 @@ public:
         post,
         discusy::message::message,
         handle_multipart_files_body(msg, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages"),
         const discusy::snowflake channel_id, const discusy::api::message::create_message& msg, upload_files_param files = {}
     )
 
@@ -1244,7 +1244,7 @@ public:
         create_reaction,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", ulp::str::url_encode(emoji), "/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", ulp::str::url_encode(emoji), "/@me"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const std::string_view emoji
     )
 
@@ -1253,7 +1253,7 @@ public:
         create_reaction,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", format_emoji(emoji), "/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", format_emoji(emoji), "/@me"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::emoji::emoji& emoji
     )
 
@@ -1262,7 +1262,7 @@ public:
         delete_message,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1271,7 +1271,7 @@ public:
         get_channel_messages,
         get,
         std::vector<discusy::message::message>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages", make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::api::message::get_channel_messages_query& query = {}
     )
 
@@ -1280,7 +1280,7 @@ public:
         search_guild_messages,
         get,
         discusy::api::message::search_guild_messages_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/messages/search", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/messages/search", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::message::search_guild_messages_query& query = {}
     )
 
@@ -1289,7 +1289,7 @@ public:
         crosspost_message,
         post,
         discusy::message::message,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/crosspost"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/crosspost"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1298,7 +1298,7 @@ public:
         delete_own_reaction,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", ulp::str::url_encode(emoji), "/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", ulp::str::url_encode(emoji), "/@me"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const std::string_view emoji
     )
 
@@ -1307,7 +1307,7 @@ public:
         delete_own_reaction,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", format_emoji(emoji), "/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", format_emoji(emoji), "/@me"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::emoji::emoji& emoji
     )
 
@@ -1316,7 +1316,7 @@ public:
         delete_user_reaction,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", ulp::str::url_encode(emoji), "/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", ulp::str::url_encode(emoji), "/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const std::string_view emoji, const discusy::snowflake user_id
     )
 
@@ -1325,7 +1325,7 @@ public:
         delete_user_reaction,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", format_emoji(emoji), "/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", format_emoji(emoji), "/", user_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::emoji::emoji& emoji, const discusy::snowflake user_id
     )
 
@@ -1334,7 +1334,7 @@ public:
         get_reactions,
         get,
         std::vector<discusy::user::user>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", ulp::str::url_encode(emoji), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", ulp::str::url_encode(emoji), make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const std::string_view emoji, const discusy::api::message::get_reactions_query& query = {}
     )
 
@@ -1343,7 +1343,7 @@ public:
         get_reactions,
         get,
         std::vector<discusy::user::user>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", format_emoji(emoji), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", format_emoji(emoji), make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::emoji::emoji& emoji, const discusy::api::message::get_reactions_query& query = {}
     )
 
@@ -1352,7 +1352,7 @@ public:
         delete_all_reactions,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1361,7 +1361,7 @@ public:
         delete_all_reactions_for_emoji,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", ulp::str::url_encode(emoji)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", ulp::str::url_encode(emoji)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const std::string_view emoji
     )
 
@@ -1370,7 +1370,7 @@ public:
         delete_all_reactions_for_emoji,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/reactions/", format_emoji(emoji)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str(), "/reactions/", format_emoji(emoji)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::emoji::emoji& emoji
     )
 
@@ -1380,7 +1380,7 @@ public:
         patch,
         discusy::message::message,
         handle_multipart_files_body(edit, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::api::message::edit_message& edit, upload_files_param files = {}
     )
 
@@ -1390,7 +1390,7 @@ public:
         post,
         void,
         handle_json_body(del),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/bulk-delete"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/bulk-delete"),
         const discusy::snowflake channel_id, const discusy::api::message::bulk_delete_messages& del
     )
 
@@ -1399,7 +1399,7 @@ public:
         get_channel_pins,
         get,
         discusy::api::message::get_channel_pins_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/pins", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/pins", make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::api::message::get_channel_pins_query& query = {}
     )
 
@@ -1408,7 +1408,7 @@ public:
         pin_message,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/pins/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/pins/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1417,7 +1417,7 @@ public:
         unpin_message,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/messages/pins/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/messages/pins/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1427,7 +1427,7 @@ public:
         get_pinned_messages,
         get,
         std::vector<discusy::message::message>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/pins"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/pins"),
         const discusy::snowflake channel_id
     )
 
@@ -1437,7 +1437,7 @@ public:
         pin_message_deprecated,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/pins/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/pins/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1447,7 +1447,7 @@ public:
         unpin_message_deprecated,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/pins/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/pins/", message_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1456,7 +1456,7 @@ public:
         get_answer_voters,
         get,
         discusy::api::poll::get_answer_voters_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/polls/", message_id.to_snowflake_str(), "/answers/", std::to_string(answer_id), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/polls/", message_id.stack_str(), "/answers/", std::to_string(answer_id), make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::integer answer_id, const discusy::api::poll::get_answer_voters_query& query = {}
     )
 
@@ -1465,7 +1465,7 @@ public:
         end_poll,
         post,
         discusy::message::message,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/polls/", message_id.to_snowflake_str(), "/expire"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/polls/", message_id.stack_str(), "/expire"),
         const discusy::snowflake channel_id, const discusy::snowflake message_id
     )
 
@@ -1475,7 +1475,7 @@ public:
         post,
         discusy::api::interaction::interaction_callback_response,
         handle_multipart_files_body(resp, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/interactions/", interaction_id.to_snowflake_str(), "/", interaction_token, "/callback", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/interactions/", interaction_id.stack_str(), "/", interaction_token, "/callback", make_query_string(query)),
         const discusy::snowflake interaction_id, const std::string_view interaction_token, const discusy::api::interaction::interaction_response& resp, upload_files_param files = {}, const discusy::api::interaction::create_interaction_response_query& query = {}
     )
 
@@ -1523,7 +1523,7 @@ public:
         get_followup_message,
         get,
         discusy::message::message,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.stack_str(), make_query_string(query)),
         const std::string_view interaction_token, const discusy::snowflake message_id, const discusy::api::webhook::get_webhook_message_query& query = {}
     )
 
@@ -1533,7 +1533,7 @@ public:
         patch,
         discusy::message::message,
         handle_multipart_files_body(edit, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.stack_str(), make_query_string(query)),
         const std::string_view interaction_token, const discusy::snowflake message_id, const discusy::api::webhook::edit_webhook_message& edit, upload_files_param files = {}, const discusy::api::webhook::edit_webhook_message_query& query = {}
     )
 
@@ -1542,7 +1542,7 @@ public:
         delete_followup_message,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", state_.application_id, "/", interaction_token, "/messages/", message_id.stack_str()),
         const std::string_view interaction_token, const discusy::snowflake message_id
     )
 
@@ -1561,7 +1561,7 @@ public:
         delete_global_application_command,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.stack_str()),
         const discusy::snowflake command_id
     )
 
@@ -1580,7 +1580,7 @@ public:
         list_guild_emojis,
         get,
         std::vector<discusy::emoji::emoji>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/emojis"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/emojis"),
         const discusy::snowflake guild_id
     )
 
@@ -1589,7 +1589,7 @@ public:
         get_guild_emoji,
         get,
         discusy::emoji::emoji,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake emoji_id
     )
 
@@ -1599,7 +1599,7 @@ public:
         post,
         discusy::emoji::emoji,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/emojis"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/emojis"),
         const discusy::snowflake guild_id, const discusy::api::emoji::create_guild_emoji& create
     )
 
@@ -1609,7 +1609,7 @@ public:
         patch,
         discusy::emoji::emoji,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake emoji_id, const discusy::api::emoji::modify_guild_emoji& update
     )
 
@@ -1618,7 +1618,7 @@ public:
         delete_guild_emoji,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake emoji_id
     )
 
@@ -1636,7 +1636,7 @@ public:
         get_application_emoji,
         get,
         discusy::emoji::emoji,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake emoji_id
     )
 
@@ -1656,7 +1656,7 @@ public:
         patch,
         discusy::emoji::emoji,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake emoji_id, const discusy::api::emoji::modify_application_emoji& update
     )
 
@@ -1665,7 +1665,7 @@ public:
         delete_application_emoji,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/emojis/", emoji_id.stack_str()),
         const discusy::snowflake emoji_id
     )
 
@@ -1674,7 +1674,7 @@ public:
         get_sticker,
         get,
         discusy::sticker::sticker,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stickers/", sticker_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stickers/", sticker_id.stack_str()),
         const discusy::snowflake sticker_id
     )
 
@@ -1691,7 +1691,7 @@ public:
         get_sticker_pack,
         get,
         discusy::sticker::sticker_pack,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/sticker-packs/", pack_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/sticker-packs/", pack_id.stack_str()),
         const discusy::snowflake pack_id
     )
 
@@ -1700,7 +1700,7 @@ public:
         list_guild_stickers,
         get,
         std::vector<discusy::sticker::sticker>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/stickers"),
         const discusy::snowflake guild_id
     )
 
@@ -1709,7 +1709,7 @@ public:
         get_guild_sticker,
         get,
         discusy::sticker::sticker,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers/", sticker_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/stickers/", sticker_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sticker_id
     )
 
@@ -1720,7 +1720,7 @@ public:
         post,
         discusy::sticker::sticker,
         handle_multipart_named_file_body(create, "file", file),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/stickers"),
         const discusy::snowflake guild_id, const discusy::api::sticker::create_guild_sticker& create, discusy::upload_file_view file
     )
 
@@ -1730,7 +1730,7 @@ public:
         patch,
         discusy::sticker::sticker,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers/", sticker_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/stickers/", sticker_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sticker_id, const discusy::api::sticker::modify_guild_sticker& update
     )
 
@@ -1739,7 +1739,7 @@ public:
         delete_guild_sticker,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers/", sticker_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/stickers/", sticker_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sticker_id
     )
 
@@ -1749,7 +1749,7 @@ public:
         post,
         void,
         handle_json_body(send),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.to_snowflake_str(), "/send-soundboard-sound"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/send-soundboard-sound"),
         const discusy::snowflake channel_id, const discusy::api::soundboard::send_soundboard_sound& send
     )
 
@@ -1766,7 +1766,7 @@ public:
         list_guild_soundboard_sounds,
         get,
         discusy::api::soundboard::list_guild_soundboard_sounds_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/soundboard-sounds"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/soundboard-sounds"),
         const discusy::snowflake guild_id
     )
 
@@ -1775,7 +1775,7 @@ public:
         get_guild_soundboard_sound,
         get,
         discusy::soundboard::soundboard_sound,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/soundboard-sounds/", sound_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/soundboard-sounds/", sound_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sound_id
     )
 
@@ -1785,7 +1785,7 @@ public:
         post,
         discusy::soundboard::soundboard_sound,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/soundboard-sounds"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/soundboard-sounds"),
         const discusy::snowflake guild_id, const discusy::api::soundboard::create_guild_soundboard_sound& create
     )
 
@@ -1795,7 +1795,7 @@ public:
         patch,
         discusy::soundboard::soundboard_sound,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/soundboard-sounds/", sound_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/soundboard-sounds/", sound_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sound_id, const discusy::api::soundboard::modify_guild_soundboard_sound& update
     )
 
@@ -1804,7 +1804,7 @@ public:
         delete_guild_soundboard_sound,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/soundboard-sounds/", sound_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/soundboard-sounds/", sound_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake sound_id
     )
 
@@ -1823,7 +1823,7 @@ public:
         get_stage_instance,
         get,
         discusy::stage_instance::stage_instance,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.stack_str()),
         const discusy::snowflake channel_id
     )
 
@@ -1833,7 +1833,7 @@ public:
         patch,
         discusy::stage_instance::stage_instance,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.stack_str()),
         const discusy::snowflake channel_id, const discusy::api::stage_instance::modify_stage_instance& update
     )
 
@@ -1842,7 +1842,7 @@ public:
         delete_stage_instance,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/stage-instances/", channel_id.stack_str()),
         const discusy::snowflake channel_id
     )
 
@@ -1859,7 +1859,7 @@ public:
         get_current_user_voice_state,
         get,
         discusy::voice::voice_state,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/voice-states/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/voice-states/@me"),
         const discusy::snowflake guild_id
     )
 
@@ -1868,7 +1868,7 @@ public:
         get_user_voice_state,
         get,
         discusy::voice::voice_state,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/voice-states/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/voice-states/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id
     )
 
@@ -1878,7 +1878,7 @@ public:
         patch,
         void,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/voice-states/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/voice-states/@me"),
         const discusy::snowflake guild_id, const discusy::api::voice::modify_current_user_voice_state& update
     )
 
@@ -1888,7 +1888,7 @@ public:
         patch,
         void,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/voice-states/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/voice-states/", user_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake user_id, const discusy::api::voice::modify_user_voice_state& update
     )
 
@@ -1925,7 +1925,7 @@ public:
         add_target_users,
         put,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.stack_str()),
         const std::string_view invite_code, const discusy::snowflake user_id
     )
 
@@ -1934,7 +1934,7 @@ public:
         remove_target_users,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.stack_str()),
         const std::string_view invite_code, const discusy::snowflake user_id
     )
 
@@ -1991,7 +1991,7 @@ public:
         get_guild_templates,
         get,
         std::vector<discusy::guild_template::guild_template>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/templates"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/templates"),
         const discusy::snowflake guild_id
     )
 
@@ -2001,7 +2001,7 @@ public:
         post,
         discusy::guild_template::guild_template,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/templates"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/templates"),
         const discusy::snowflake guild_id, const discusy::api::guild_template::create_guild_template& create
     )
 
@@ -2010,7 +2010,7 @@ public:
         sync_guild_template,
         put,
         discusy::guild_template::guild_template,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/templates/", ulp::str::url_encode(template_code)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/templates/", ulp::str::url_encode(template_code)),
         const discusy::snowflake guild_id, const std::string_view template_code
     )
 
@@ -2020,7 +2020,7 @@ public:
         patch,
         discusy::guild_template::guild_template,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/templates/", ulp::str::url_encode(template_code)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/templates/", ulp::str::url_encode(template_code)),
         const discusy::snowflake guild_id, const std::string_view template_code, const discusy::api::guild_template::modify_guild_template& update
     )
 
@@ -2029,7 +2029,7 @@ public:
         delete_guild_template,
         delete_,
         discusy::guild_template::guild_template,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/templates/", ulp::str::url_encode(template_code)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/templates/", ulp::str::url_encode(template_code)),
         const discusy::snowflake guild_id, const std::string_view template_code
     )
 
@@ -2038,7 +2038,7 @@ public:
         list_scheduled_events_for_guild,
         get,
         std::vector<discusy::guild_scheduled_event::guild_scheduled_event>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::guild_scheduled_event::list_scheduled_events_for_guild_query& query = {}
     )
 
@@ -2048,7 +2048,7 @@ public:
         post,
         discusy::guild_scheduled_event::guild_scheduled_event,
         handle_json_body(create),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events"),
         const discusy::snowflake guild_id, const discusy::api::guild_scheduled_event::create_guild_scheduled_event& create
     )
 
@@ -2057,7 +2057,7 @@ public:
         get_guild_scheduled_event,
         get,
         discusy::guild_scheduled_event::guild_scheduled_event,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events/", event_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events/", event_id.stack_str(), make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::snowflake event_id, const discusy::api::guild_scheduled_event::get_guild_scheduled_event_query& query = {}
     )
 
@@ -2067,7 +2067,7 @@ public:
         patch,
         discusy::guild_scheduled_event::guild_scheduled_event,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events/", event_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events/", event_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake event_id, const discusy::api::guild_scheduled_event::modify_guild_scheduled_event& update
     )
 
@@ -2076,7 +2076,7 @@ public:
         delete_guild_scheduled_event,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events/", event_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events/", event_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake event_id
     )
 
@@ -2085,7 +2085,7 @@ public:
         get_guild_scheduled_event_users,
         get,
         std::vector<discusy::guild_scheduled_event::guild_scheduled_event_user>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/scheduled-events/", event_id.to_snowflake_str(), "/users", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/scheduled-events/", event_id.stack_str(), "/users", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::snowflake event_id, const discusy::api::guild_scheduled_event::get_guild_scheduled_event_users_query& query = {}
     )
 
@@ -2102,7 +2102,7 @@ public:
         get_user,
         get,
         discusy::user::user,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/", user_id.stack_str()),
         const discusy::snowflake user_id
     )
 
@@ -2131,7 +2131,7 @@ public:
         get_current_user_guild_member,
         get,
         discusy::guild::guild_member,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/@me/guilds/", guild_id.to_snowflake_str(), "/member"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/@me/guilds/", guild_id.stack_str(), "/member"),
         const discusy::snowflake guild_id
     )
 
@@ -2140,7 +2140,7 @@ public:
         leave_guild,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/@me/guilds/", guild_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/users/@me/guilds/", guild_id.stack_str()),
         const discusy::snowflake guild_id
     )
 
@@ -2203,7 +2203,7 @@ public:
         get_webhook,
         get,
         discusy::webhook::webhook,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str()),
         const discusy::snowflake webhook_id
     )
 
@@ -2212,7 +2212,7 @@ public:
         get_webhook_with_token,
         get,
         discusy::webhook::webhook,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token),
         const discusy::snowflake webhook_id, const std::string_view webhook_token
     )
 
@@ -2222,7 +2222,7 @@ public:
         patch,
         discusy::webhook::webhook,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str()),
         const discusy::snowflake webhook_id, const discusy::api::webhook::modify_webhook& update
     )
 
@@ -2232,7 +2232,7 @@ public:
         patch,
         discusy::webhook::webhook,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const discusy::api::webhook::modify_webhook_with_token& update
     )
 
@@ -2241,7 +2241,7 @@ public:
         delete_webhook,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str()),
         const discusy::snowflake webhook_id
     )
 
@@ -2250,7 +2250,7 @@ public:
         delete_webhook_with_token,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token),
         const discusy::snowflake webhook_id, const std::string_view webhook_token
     )
 
@@ -2261,7 +2261,7 @@ public:
         post,
         discusy::message::message,
         handle_multipart_files_body(execute, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const discusy::api::webhook::execute_webhook& execute, upload_files_param files = {}, const discusy::api::webhook::execute_webhook_query& query = {}
     )
 
@@ -2272,7 +2272,7 @@ public:
         post,
         void,
         handle_raw_body(payload),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, "/slack", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, "/slack", make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const std::string_view payload, const discusy::api::webhook::execute_compatible_webhook_query& query = {}
     )
 
@@ -2283,7 +2283,7 @@ public:
         post,
         void,
         handle_raw_body(payload),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, "/github", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, "/github", make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const std::string_view payload, const discusy::api::webhook::execute_compatible_webhook_query& query = {}
     )
 
@@ -2292,7 +2292,7 @@ public:
         get_webhook_message,
         get,
         discusy::message::message,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, "/messages/", message_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, "/messages/", message_id.stack_str(), make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const discusy::snowflake message_id, const discusy::api::webhook::get_webhook_message_query& query = {}
     )
 
@@ -2302,7 +2302,7 @@ public:
         patch,
         discusy::message::message,
         handle_multipart_files_body(edit, files),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, "/messages/", message_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, "/messages/", message_id.stack_str(), make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const discusy::snowflake message_id, const discusy::api::webhook::edit_webhook_message& edit, upload_files_param files = {}, const discusy::api::webhook::edit_webhook_message_query& query = {}
     )
 
@@ -2311,7 +2311,7 @@ public:
         delete_webhook_message,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.to_snowflake_str(), "/", webhook_token, "/messages/", message_id.to_snowflake_str(), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/webhooks/", webhook_id.stack_str(), "/", webhook_token, "/messages/", message_id.stack_str(), make_query_string(query)),
         const discusy::snowflake webhook_id, const std::string_view webhook_token, const discusy::snowflake message_id, const discusy::api::webhook::delete_webhook_message_query& query = {}
     )
 
@@ -2329,7 +2329,7 @@ public:
         get_entitlement,
         get,
         discusy::entitlement::entitlement,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.stack_str()),
         const discusy::snowflake entitlement_id
     )
 
@@ -2338,7 +2338,7 @@ public:
         consume_entitlement,
         post,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.to_snowflake_str(), "/consume"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.stack_str(), "/consume"),
         const discusy::snowflake entitlement_id
     )
 
@@ -2357,7 +2357,7 @@ public:
         delete_test_entitlement,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/entitlements/", entitlement_id.stack_str()),
         const discusy::snowflake entitlement_id
     )
 
@@ -2374,7 +2374,7 @@ public:
         list_sku_subscriptions,
         get,
         std::vector<discusy::subscription::subscription>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/skus/", sku_id.to_snowflake_str(), "/subscriptions", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/skus/", sku_id.stack_str(), "/subscriptions", make_query_string(query)),
         const discusy::snowflake sku_id, const discusy::api::subscription::list_sku_subscriptions_query& query = {}
     )
 
@@ -2383,7 +2383,7 @@ public:
         get_sku_subscription,
         get,
         discusy::subscription::subscription,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/skus/", sku_id.to_snowflake_str(), "/subscriptions/", subscription_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/skus/", sku_id.stack_str(), "/subscriptions/", subscription_id.stack_str()),
         const discusy::snowflake sku_id, const discusy::snowflake subscription_id
     )
 
@@ -2412,7 +2412,7 @@ public:
         get_lobby,
         get,
         discusy::lobby::lobby,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str()),
         const discusy::snowflake lobby_id
     )
 
@@ -2422,7 +2422,7 @@ public:
         patch,
         discusy::lobby::lobby,
         handle_json_body(update),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str()),
         const discusy::snowflake lobby_id, const discusy::api::lobby::modify_lobby& update
     )
 
@@ -2431,7 +2431,7 @@ public:
         delete_lobby,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str()),
         const discusy::snowflake lobby_id
     )
 
@@ -2441,7 +2441,7 @@ public:
         put,
         discusy::lobby::lobby_member,
         handle_json_body(add),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake lobby_id, const discusy::snowflake user_id, const discusy::api::lobby::add_lobby_member& add = {}
     )
 
@@ -2451,7 +2451,7 @@ public:
         post,
         std::vector<discusy::lobby::lobby_member>,
         handle_json_body(members),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/bulk"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/bulk"),
         const discusy::snowflake lobby_id, discusy::api::lobby::bulk_update_lobby_members members
     )
 
@@ -2460,7 +2460,7 @@ public:
         remove_lobby_member,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/", user_id.stack_str()),
         const discusy::snowflake lobby_id, const discusy::snowflake user_id
     )
 
@@ -2469,7 +2469,7 @@ public:
         leave_lobby,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/@me"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/@me"),
         const discusy::snowflake lobby_id
     )
 
@@ -2479,7 +2479,7 @@ public:
         patch,
         discusy::lobby::lobby,
         handle_json_body(link),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/channel-linking"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/channel-linking"),
         const discusy::snowflake lobby_id, const discusy::api::lobby::link_channel_to_lobby& link
     )
 
@@ -2489,7 +2489,7 @@ public:
         patch,
         discusy::lobby::lobby,
         handle_raw_body("{}"),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/channel-linking"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/channel-linking"),
         const discusy::snowflake lobby_id
     )
 
@@ -2499,7 +2499,7 @@ public:
         post,
         discusy::lobby::lobby_message,
         handle_json_body(msg),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/messages"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/messages"),
         const discusy::snowflake lobby_id, const discusy::api::lobby::send_lobby_message& msg
     )
 
@@ -2508,7 +2508,7 @@ public:
         get_lobby_messages,
         get,
         std::vector<discusy::lobby::lobby_message>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/messages", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/messages", make_query_string(query)),
         const discusy::snowflake lobby_id, const discusy::api::lobby::get_lobby_messages_query& query = {}
     )
 
@@ -2518,7 +2518,7 @@ public:
         put,
         void,
         handle_json_body(metadata),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/messages/", message_id.to_snowflake_str(), "/moderation-metadata"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/messages/", message_id.stack_str(), "/moderation-metadata"),
         const discusy::snowflake lobby_id, const discusy::snowflake message_id, const discusy::api::lobby::update_lobby_message_moderation_metadata& metadata
     )
 
@@ -2527,7 +2527,7 @@ public:
         create_lobby_channel_invite_for_self,
         post,
         discusy::lobby::lobby_invite,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/@me/invites"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/@me/invites"),
         const discusy::snowflake lobby_id
     )
 
@@ -2536,7 +2536,7 @@ public:
         create_lobby_channel_invite_for_user,
         post,
         discusy::lobby::lobby_invite,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.to_snowflake_str(), "/members/", user_id.to_snowflake_str(), "/invites"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/lobbies/", lobby_id.stack_str(), "/members/", user_id.stack_str(), "/invites"),
         const discusy::snowflake lobby_id, const discusy::snowflake user_id
     )
 
@@ -2554,7 +2554,7 @@ public:
         get_global_application_command,
         get,
         discusy::application_commands::application_command,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.stack_str()),
         const discusy::snowflake command_id
     )
 
@@ -2564,7 +2564,7 @@ public:
         patch,
         discusy::application_commands::application_command,
         handle_json_body(cmd),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/commands/", command_id.stack_str()),
         const discusy::snowflake command_id, const discusy::api::application_commands::application_command& cmd
     )
 
@@ -2573,7 +2573,7 @@ public:
         get_guild_application_commands,
         get,
         std::vector<discusy::application_commands::application_command>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands", make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands", make_query_string(query)),
         const discusy::snowflake guild_id, const discusy::api::application_commands::get_application_commands_query& query = {}
     )
 
@@ -2583,7 +2583,7 @@ public:
         post,
         discusy::application_commands::application_command,
         handle_json_body(cmd),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands"),
         const discusy::snowflake guild_id, const discusy::api::application_commands::application_command& cmd
     )
 
@@ -2592,7 +2592,7 @@ public:
         get_guild_application_command,
         get,
         discusy::application_commands::application_command,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/", command_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake command_id
     )
 
@@ -2602,7 +2602,7 @@ public:
         patch,
         discusy::application_commands::application_command,
         handle_json_body(cmd),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/", command_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake command_id, const discusy::api::application_commands::application_command& cmd
     )
 
@@ -2611,7 +2611,7 @@ public:
         delete_guild_application_command,
         delete_,
         void,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/", command_id.to_snowflake_str()),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/", command_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake command_id
     )
 
@@ -2621,7 +2621,7 @@ public:
         put,
         std::vector<discusy::application_commands::application_command>,
         handle_json_body(cmds),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands"),
         const discusy::snowflake guild_id, std::span<const discusy::api::application_commands::application_command> cmds
     )
 
@@ -2630,7 +2630,7 @@ public:
         get_guild_application_command_permissions,
         get,
         std::vector<discusy::application_commands::guild_application_command_permissions>,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/permissions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/permissions"),
         const discusy::snowflake guild_id
     )
 
@@ -2639,7 +2639,7 @@ public:
         get_application_command_permissions,
         get,
         discusy::application_commands::guild_application_command_permissions,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/", command_id.to_snowflake_str(), "/permissions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/", command_id.stack_str(), "/permissions"),
         const discusy::snowflake guild_id, const discusy::snowflake command_id
     )
 
@@ -2650,7 +2650,7 @@ public:
         put,
         discusy::application_commands::guild_application_command_permissions,
         handle_json_body(perms),
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.to_snowflake_str(), "/commands/", command_id.to_snowflake_str(), "/permissions"),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/applications/", state_.application_id, "/guilds/", guild_id.stack_str(), "/commands/", command_id.stack_str(), "/permissions"),
         const discusy::snowflake guild_id, const discusy::snowflake command_id, const discusy::api::application_commands::edit_application_command_permissions& perms
     )
 };
