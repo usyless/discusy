@@ -1571,8 +1571,6 @@ namespace channel {
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto send_embed(this auto&& self, message::embed e, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto send_file(this auto&& self, discusy::upload_file f, std::string content = {}, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto send_file(this auto&& self, discusy::upload_file_view f, std::string content = {}, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto send_files(this auto&& self, discusy::upload_files_param files, std::string content = {}, CompletionToken&& token = ctx::io_context::dct_t());
@@ -5087,8 +5085,6 @@ namespace message {
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_embed(this auto&& self, embed e, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_file(this auto&& self, discusy::upload_file f, std::string content = {}, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_file(this auto&& self, discusy::upload_file_view f, std::string content = {}, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_files(this auto&& self, discusy::upload_files_param files, std::string content = {}, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t());
@@ -5404,8 +5400,6 @@ namespace interaction {
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_components(this auto&& self, std::vector<components::component> components_, bool ephemeral = false, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_file(this auto&& self, discusy::upload_file f, std::string content = {}, bool ephemeral = false, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_file(this auto&& self, discusy::upload_file_view f, std::string content = {}, bool ephemeral = false, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_files(this auto&& self, discusy::upload_files_param files, std::string content = {}, bool ephemeral = false, CompletionToken&& token = ctx::io_context::dct_t());
@@ -5429,8 +5423,6 @@ namespace interaction {
         auto followup(this auto&& self, std::string content, bool ephemeral = false, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto followup_with(this auto&& self, api::webhook::execute_webhook msg, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto followup_file(this auto&& self, discusy::upload_file f, std::string content = {}, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto followup_file(this auto&& self, discusy::upload_file_view f, std::string content = {}, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
@@ -5462,11 +5454,7 @@ namespace interaction {
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_to_component_components(this auto&& self, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_to_component_file(this auto&& self, discusy::upload_file f, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_to_component_file(this auto&& self, discusy::upload_file_view f, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_to_component_file(this auto&& self, discusy::upload_file f, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_to_component_file(this auto&& self, discusy::upload_file_view f, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
@@ -5474,11 +5462,7 @@ namespace interaction {
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_to_component_files(this auto&& self, discusy::upload_files_param files, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_component_file(this auto&& self, discusy::upload_file f, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_component_file(this auto&& self, discusy::upload_file_view f, CompletionToken&& token = ctx::io_context::dct_t());
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_component_file(this auto&& self, discusy::upload_file f, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_component_file(this auto&& self, discusy::upload_file_view f, std::vector<components::component> components_, CompletionToken&& token = ctx::io_context::dct_t());
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>

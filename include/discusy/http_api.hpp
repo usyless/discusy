@@ -308,7 +308,7 @@ private:
 
     // a json payload plus a single named file part (eg. sticker uploads)
     template <typename T>
-    [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_named_file_body(const T& obj, std::string_view name, const discusy::upload_file& file) {
+    [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_named_file_body(const T& obj, std::string_view name, discusy::upload_file_view file) {
         std::string json;
         if (discusy::json::write_json(obj, json)) {
             return std::unexpected("Failure to write json");
@@ -323,7 +323,7 @@ private:
     }
 
     // a single named file part with no json payload alongside it
-    [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_only_file_body(std::string_view name, const discusy::upload_file& file) {
+    [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_only_file_body(std::string_view name, discusy::upload_file_view file) {
         std::string body;
         discusy::multipart::add_multipart_part(body, name, file.data, file.filename, file.content_type);
         discusy::multipart::finish_multipart(body);
@@ -1721,7 +1721,7 @@ public:
         discusy::sticker::sticker,
         handle_multipart_named_file_body(create, "file", file),
         ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.to_snowflake_str(), "/stickers"),
-        const discusy::snowflake guild_id, const discusy::api::sticker::create_guild_sticker& create, const discusy::upload_file& file
+        const discusy::snowflake guild_id, const discusy::api::sticker::create_guild_sticker& create, discusy::upload_file_view file
     )
 
     // https://docs.discord.com/developers/resources/sticker#modify-guild-sticker
@@ -1945,7 +1945,7 @@ public:
         void,
         handle_multipart_only_file_body("target_users_file", file),
         ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users"),
-        const std::string_view invite_code, const discusy::upload_file& file
+        const std::string_view invite_code, discusy::upload_file_view file
     )
 
     // https://docs.discord.com/developers/resources/invite#bulk-add-target-users

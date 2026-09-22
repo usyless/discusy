@@ -194,11 +194,6 @@ auto discusy::channel::channel::send_embed(this auto&& self, discusy::message::e
     return self.bot_ptr_->api.template create_message<ReturnResult>(self.id, api::message::create_message{.embeds{make_vector(std::move(e))}})(std::forward<CompletionToken>(token));
 }
 
-template <bool ReturnResult, typename CompletionToken>
-auto discusy::channel::channel::send_file(this auto&& self, http_api::upload_file f, std::string content, CompletionToken&& token) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template send_files<ReturnResult>(arr, std::move(content), std::forward<CompletionToken>(token));
-}
 
 template <bool ReturnResult, typename CompletionToken>
 auto discusy::channel::channel::send_file(this auto&& self, http_api::upload_file_view f, std::string content, CompletionToken&& token) {
@@ -265,11 +260,6 @@ auto discusy::message::message::reply_embed(this auto&& self, discusy::message::
     return self.bot_ptr_->api.template create_message<ReturnResult>(self.channel_id, msg)(std::forward<CompletionToken>(token));
 }
 
-template <bool ReturnResult, typename CompletionToken>
-auto discusy::message::message::reply_file(this auto&& self, http_api::upload_file f, std::string content, const bool ping, CompletionToken&& token) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template reply_files<ReturnResult>(arr, std::move(content), ping, std::forward<CompletionToken>(token));
-}
 
 template <bool ReturnResult, typename CompletionToken>
 auto discusy::message::message::reply_file(this auto&& self, http_api::upload_file_view f, std::string content, const bool ping, CompletionToken&& token) {
@@ -397,11 +387,6 @@ auto interaction::interaction::reply_components(this auto&& self, std::vector<co
     return self.template reply_with<ReturnResult>(std::move(data), std::forward<CompletionToken>(token));
 }
 
-template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::reply_file(this auto&& self, http_api::upload_file f, std::string content, const bool ephemeral, CompletionToken&& token) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template reply_files<ReturnResult>(arr, std::move(content), ephemeral, std::forward<CompletionToken>(token));
-}
 
 template <bool ReturnResult, typename CompletionToken>
 auto interaction::interaction::reply_file(this auto&& self, http_api::upload_file_view f, std::string content, const bool ephemeral, CompletionToken&& token) {
@@ -491,11 +476,6 @@ auto interaction::interaction::followup_with(this auto&& self, api::webhook::exe
     return self.bot_ptr_->api.template create_followup_message<ReturnResult>(self.token, msg)(std::forward<CompletionToken>(token));
 }
 
-template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::followup_file(this auto&& self, http_api::upload_file f, std::string content, CompletionToken&& token) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template followup_files<ReturnResult>(arr, std::move(content), std::forward<CompletionToken>(token));
-}
 
 template <bool ReturnResult, typename CompletionToken>
 auto interaction::interaction::followup_file(this auto&& self, http_api::upload_file_view f, std::string content, CompletionToken&& token) {
@@ -606,21 +586,9 @@ auto interaction::interaction::reply_to_component_components(this auto&& self, s
 }
 
 template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::reply_to_component_file(this auto&& self, http_api::upload_file f, CompletionToken&& token_) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template reply_to_component_files<ReturnResult>(arr, std::forward<CompletionToken>(token_));
-}
-
-template <bool ReturnResult, typename CompletionToken>
 auto interaction::interaction::reply_to_component_file(this auto&& self, http_api::upload_file_view f, CompletionToken&& token_) {
     const std::array<http_api::upload_file_view, 1> arr{f};
     return self.template reply_to_component_files<ReturnResult>(arr, std::forward<CompletionToken>(token_));
-}
-
-template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::reply_to_component_file(this auto&& self, http_api::upload_file f, std::vector<components::component> components_, CompletionToken&& token_) {
-    const std::array<http_api::upload_file, 1> arr{std::move(f)};
-    return self.template reply_to_component_files<ReturnResult>(arr, std::move(components_), std::forward<CompletionToken>(token_));
 }
 
 template <bool ReturnResult, typename CompletionToken>
@@ -652,18 +620,8 @@ auto interaction::interaction::reply_to_component_files(this auto&& self, http_a
 }
 
 template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::reply_component_file(this auto&& self, http_api::upload_file f, CompletionToken&& token_) {
-    return self.template reply_to_component_file<ReturnResult>(std::move(f), std::forward<CompletionToken>(token_));
-}
-
-template <bool ReturnResult, typename CompletionToken>
 auto interaction::interaction::reply_component_file(this auto&& self, http_api::upload_file_view f, CompletionToken&& token_) {
     return self.template reply_to_component_file<ReturnResult>(f, std::forward<CompletionToken>(token_));
-}
-
-template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::reply_component_file(this auto&& self, http_api::upload_file f, std::vector<components::component> components_, CompletionToken&& token_) {
-    return self.template reply_to_component_file<ReturnResult>(std::move(f), std::move(components_), std::forward<CompletionToken>(token_));
 }
 
 template <bool ReturnResult, typename CompletionToken>

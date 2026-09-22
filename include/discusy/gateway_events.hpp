@@ -734,10 +734,6 @@ namespace messages {
             return self.message.template reply_embed<ReturnResult>(std::move(e), ping, std::forward<CompletionToken>(token));
         }
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
-        auto reply_file(this auto&& self, discusy::upload_file f, std::string content = {}, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t()) {
-            return self.message.template reply_file<ReturnResult>(std::move(f), std::move(content), ping, std::forward<CompletionToken>(token));
-        }
-        template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
         auto reply_file(this auto&& self, discusy::upload_file_view f, std::string content = {}, bool ping = false, CompletionToken&& token = ctx::io_context::dct_t()) {
             return self.message.template reply_file<ReturnResult>(f, std::move(content), ping, std::forward<CompletionToken>(token));
         }
