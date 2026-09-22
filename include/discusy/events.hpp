@@ -310,7 +310,7 @@ namespace user {
         void set_bot_void(this auto&& self, discusy::bot* b) noexcept { self.bot_ptr_ = b; }
         decltype(auto) set_bot(this auto&& self, discusy::bot* b) noexcept { self.set_bot_void(b); return std::forward<decltype(self)>(self); }
 
-        [[nodiscard]] std::string mention(this const auto& self) {
+        [[nodiscard]] snowflake_mention_str mention(this const auto& self) {
             return self.id.mention_user();
         }
         [[nodiscard]] std::string_view display_name(this const auto& self) noexcept {
@@ -552,7 +552,7 @@ namespace permissions {
         decltype(auto) add_flags(this auto&& self, role_flags f) noexcept { self.flags.add_flags(f); return std::forward<decltype(self)>(self); }
         decltype(auto) add_flag(this auto&& self, role_flags f) noexcept { return std::forward<decltype(self)>(self).add_flags(f); }
 
-        [[nodiscard]] std::string mention(this const auto& self) {
+        [[nodiscard]] snowflake_mention_str mention(this const auto& self) {
             return self.id.mention_role();
         }
     };
@@ -862,8 +862,8 @@ namespace guild {
             if (self.user->global_name && !self.user->global_name->empty()) return *self.user->global_name;
             return self.user->username;
         }
-        [[nodiscard]] std::string mention(this const auto& self) {
-            return self.user ? self.user->mention() : std::string{};
+        [[nodiscard]] snowflake_mention_str mention(this const auto& self) {
+            return self.user ? self.user->mention() : snowflake_mention_str{};
         }
 
         template <bool ReturnResult = false, typename CompletionToken = ctx::io_context::dct_t>
@@ -1562,7 +1562,7 @@ namespace channel {
         void set_bot_void(this auto&& self, discusy::bot* b) noexcept { self.bot_ptr_ = b; }
         decltype(auto) set_bot(this auto&& self, discusy::bot* b) noexcept { self.set_bot_void(b); return std::forward<decltype(self)>(self); }
 
-        [[nodiscard]] std::string mention(this const auto& self) {
+        [[nodiscard]] snowflake_mention_str mention(this const auto& self) {
             return self.id.mention_channel();
         }
 
