@@ -36,7 +36,11 @@ cmake_dependent_option(DISCUSY_USE_STATIC_MSVCRT
 option(DISCUSY_NO_CACHES "Disable the caches of channels/users/guilds/etc from existing at all" ON)
 
 # Voice & Audio Features
-option(DISCUSY_ENABLE_VOICE "Enable voice support" OFF)
+if(PROJECT_IS_TOP_LEVEL)
+    option(DISCUSY_ENABLE_VOICE "Enable voice support" ON)
+else()
+    option(DISCUSY_ENABLE_VOICE "Enable voice support" OFF)
+endif()
 cmake_dependent_option(DISCUSY_NO_DEDICATED_AUDIO_THREAD
     "Disable the dedicated voice threads" OFF
     "DISCUSY_ENABLE_VOICE" OFF
