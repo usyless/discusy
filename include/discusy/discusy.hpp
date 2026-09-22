@@ -441,7 +441,7 @@ public:
                                                 ? boost::asio::error::operation_aborted
                                                 : boost::asio::error::timed_out)
                                             : members_chunk_ec;
-                                        boost::asio::post(target_exec,
+                                        boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
                                                 self_ptr->complete(ec);
                                             })
@@ -452,7 +452,7 @@ public:
                                         std::scoped_lock lock{state->mtx};
                                         data = std::move(state->accumulated);
                                         }
-                                        boost::asio::post(target_exec,
+                                        boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
                                                 self_ptr->complete(boost::system::error_code{}, std::move(data));
                                             })
@@ -600,13 +600,13 @@ public:
                                                 ? boost::asio::error::operation_aborted
                                                 : boost::asio::error::timed_out)
                                             : channel_info_ec;
-                                        boost::asio::post(target_exec,
+                                        boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
                                                 self_ptr->complete(ec);
                                             })
                                         );
                                     } else {
-                                        boost::asio::post(target_exec,
+                                        boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
                                                 self_ptr->complete(boost::system::error_code{}, std::move(data));
                                             })
@@ -819,7 +819,7 @@ public:
                         boost::asio::bind_allocator(alloc, [state, ex, alloc](const boost::system::error_code& read_ec, std::size_t bytes_transferred) mutable {
                             if (state->completed.exchange(true, std::memory_order_acq_rel)) return;
 
-                            boost::asio::post(ex,
+                            boost::asio::dispatch(ex,
                                 boost::asio::bind_allocator(alloc, [state, read_ec, bytes_transferred]() mutable {
                                     if (read_ec && read_ec != boost::asio::error::eof) {
                                         state->complete(read_ec, std::string{});

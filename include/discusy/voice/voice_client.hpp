@@ -372,7 +372,7 @@ private:
 
             auto ex = get_executor();
 
-            boost::asio::post(ex,
+            boost::asio::dispatch(ex,
                 boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, conn = std::move(conn)]() mutable {
                     self_ptr->complete(ec, std::move(conn));
                 })

@@ -5,7 +5,7 @@ set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF CACHE BOOL "" FORCE)
 
 project(
     discusy
-    VERSION 1.0.0
+    VERSION 1.0.1
     LANGUAGES C CXX
 )
 

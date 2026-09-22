@@ -643,7 +643,7 @@ public:
                 state->id = id;
 
                 if (slot.is_connected()) {
-                    slot.assign([weak_core, weak_state = std::weak_ptr<State>(state), ex, alloc](boost::asio::cancellation_type type) {
+                    slot.assign([weak_core, weak_state = std::weak_ptr<State>(state), ex, alloc, executor](boost::asio::cancellation_type type) {
                         if (type == boost::asio::cancellation_type::none) return;
                         std::shared_ptr<State> state = weak_state.lock();
                         if (!state) return;
@@ -654,9 +654,13 @@ public:
                             if (state->reg_state.exchange(2, std::memory_order_acq_rel) == 1) core->unregister(state->id);
                         }
 
-                        boost::asio::post(ex, 
-                            boost::asio::bind_allocator(alloc, [state]() mutable {
-                                state->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                        boost::asio::post(executor, 
+                            boost::asio::bind_allocator(alloc, [state = std::move(state), alloc, ex]() mutable {
+                                boost::asio::dispatch(ex, 
+                                    boost::asio::bind_allocator(alloc, [state = std::move(state)]() mutable {
+                                        state->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                                    })
+                                );
                             })
                         );
                     });
@@ -691,7 +695,7 @@ public:
                             if (state->reg_state.exchange(2, std::memory_order_acq_rel) == 1) core->unregister(state->id);
                         }
 
-                        boost::asio::post(ex, 
+                        boost::asio::dispatch(ex, 
                             boost::asio::bind_allocator(alloc, [state = this->state, data = data]() mutable {
                                 state->complete(boost::system::error_code{}, std::move(data));
                             })
@@ -702,7 +706,7 @@ public:
                     void on_callback_destroyed() override final {
                         if (state->completed.exchange(true, std::memory_order_acq_rel)) return;
 
-                        boost::asio::post(ex, 
+                        boost::asio::dispatch(ex, 
                             boost::asio::bind_allocator(alloc, [state = this->state]() mutable {
                                 state->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                             })
