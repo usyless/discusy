@@ -3008,6 +3008,10 @@ namespace invite {
         decltype(auto) set_guild_scheduled_event_id(this auto&& self, opt<snowflake> gseid) noexcept { self.guild_scheduled_event_id = gseid; return std::forward<decltype(self)>(self); }
     };
 
+    struct bulk_add_delete_target_users {
+        std::vector<snowflake> user_ids{}; // max of 1000
+    };
+
     struct target_users_job_status {
         target_users_job_status_code status{};
         integer total_users{};

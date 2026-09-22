@@ -297,6 +297,8 @@ namespace invite {
     constexpr inline std::size_t MAX_USES_MAX = 100;
     constexpr inline std::size_t CODE_MIN_LENGTH = 2;
     constexpr inline std::size_t CODE_MAX_LENGTH = 32;
+    constexpr inline std::size_t MAX_BULK_ADD_TARGET_USERS = 1000;
+    constexpr inline std::size_t MAX_BULK_REMOVE_TARGET_USERS = MAX_BULK_ADD_TARGET_USERS;
 }
 
 // https://discord.com/developers/docs/resources/lobby

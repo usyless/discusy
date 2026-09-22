@@ -1920,6 +1920,24 @@ public:
         const std::string_view invite_code
     )
 
+    // https://docs.discord.com/developers/resources/invite#add-target-user
+    DISCUSY_API_EMPTY_BODY(
+        add_target_users,
+        put,
+        void,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.to_snowflake_str()),
+        const std::string_view invite_code, const discusy::snowflake user_id
+    )
+
+    // https://docs.discord.com/developers/resources/invite#remove-target-user
+    DISCUSY_API_EMPTY_BODY(
+        remove_target_users,
+        delete_,
+        void,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/", user_id.to_snowflake_str()),
+        const std::string_view invite_code, const discusy::snowflake user_id
+    )
+
     // https://docs.discord.com/developers/resources/invite#update-target-users
     DISCUSY_API_MULTIPART_JSON_BODY(
         update_target_users,
@@ -1928,6 +1946,26 @@ public:
         handle_multipart_only_file_body("target_users_file", file),
         ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users"),
         const std::string_view invite_code, const discusy::upload_file& file
+    )
+
+    // https://docs.discord.com/developers/resources/invite#bulk-add-target-users
+    DISCUSY_API_JSON_BODY(
+        bulk_add_target_users,
+        post,
+        void,
+        handle_json_body(bulk_add),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/bulk-add"),
+        const std::string_view invite_code, const discusy::api::invite::bulk_add_delete_target_users& bulk_add
+    )
+
+    // https://docs.discord.com/developers/resources/invite#bulk-delete-target-users
+    DISCUSY_API_JSON_BODY(
+        bulk_delete_target_users,
+        post,
+        void,
+        handle_json_body(bulk_delete),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/invites/", ulp::str::url_encode(invite_code), "/target-users/bulk-delete"),
+        const std::string_view invite_code, const discusy::api::invite::bulk_add_delete_target_users& bulk_delete
     )
 
     // https://docs.discord.com/developers/resources/invite#get-target-users-job-status
