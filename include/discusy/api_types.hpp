@@ -1092,6 +1092,7 @@ namespace channels {
         opt<discusy::invite::invite_target_type> target_type{};
         opt<snowflake> target_user_id{}; // required if target_type == STREAM
         opt<snowflake> target_application_id{}; // required if target_type == EMBEDDED_APPLICATION
+        opt<std::vector<snowflake>> target_user_ids{};
         opt<std::vector<snowflake>> role_ids{};
 
         static create_channel_invite create() noexcept {
@@ -1104,6 +1105,13 @@ namespace channels {
         decltype(auto) set_target_type(this auto&& self, opt<discusy::invite::invite_target_type> tt) noexcept { self.target_type = tt; return std::forward<decltype(self)>(self); }
         decltype(auto) set_target_user_id(this auto&& self, opt<snowflake> tuid) noexcept { self.target_user_id = tuid; return std::forward<decltype(self)>(self); }
         decltype(auto) set_target_application_id(this auto&& self, opt<snowflake> taid) noexcept { self.target_application_id = taid; return std::forward<decltype(self)>(self); }
+        decltype(auto) set_target_user_ids(this auto&& self, opt<std::vector<snowflake>> user_ids) { self.target_user_ids = std::move(user_ids); return std::forward<decltype(self)>(self); }
+        DISCUSY_VARIADIC_SETTER(set_target_user_ids, snowflake)
+        decltype(auto) add_target_user_id(this auto&& self, snowflake uid) {
+            if (!self.target_user_ids) self.target_user_ids.emplace();
+            self.target_user_ids->emplace_back(uid);
+            return std::forward<decltype(self)>(self);
+        }
         decltype(auto) set_role_ids(this auto&& self, opt<std::vector<snowflake>> rids) { self.role_ids = std::move(rids); return std::forward<decltype(self)>(self); }
         DISCUSY_VARIADIC_SETTER(set_role_ids, snowflake)
         decltype(auto) add_role_id(this auto&& self, snowflake rid) {
