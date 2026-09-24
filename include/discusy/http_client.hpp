@@ -10,9 +10,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
-#include <unordered_map>
 #include <variant>
-#include <vector>
 
 #include <boost/asio.hpp>
 #include <boost/asio/co_composed.hpp>
@@ -22,6 +20,8 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/url.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
+#include <boost/container/small_vector.hpp>
 
 #include <glaze/glaze.hpp>
 
@@ -88,9 +88,15 @@ namespace http {
 
     [[nodiscard]] inline std::string generate_route_key(http::method m, std::string_view path) {
         path = path.substr(ulp::str::strlen(urls::REST_BASE) + 1);
-        const auto segments = ulp::str::split_by(path, '/');
+        boost::container::small_vector<std::string_view, 16> segments;
+        ulp::str::split_by_for_each(path, '/', [&](std::string_view part) {
+            segments.emplace_back(part);
+        });
+
         const auto method_name = boost::beast::http::to_string(m);
-        std::string route_key{method_name};
+        std::string route_key;
+        route_key.reserve(method_name.size() + 1 + path.size());
+        route_key.append(method_name);
         
         for (size_t i = 0; i < segments.size(); ++i) {
             route_key += '/';
@@ -211,9 +217,9 @@ public:
     rate_limiter rate_limiter_;
 
 protected:
-    std::unordered_map<http::pool_endpoint_key, std::vector<http::pooled_connection>, http::pool_endpoint_hash, http::pool_endpoint_equal> connection_pool_;
-    mutable std::mutex pool_mtx_;
-    std::size_t max_pool_size_{256};
+    using pooled_conn_list = boost::container::small_vector<http::pooled_connection, 4>;
+    boost::unordered::concurrent_flat_map<http::pool_endpoint_key, pooled_conn_list, http::pool_endpoint_hash, http::pool_endpoint_equal> connection_pool_;
+    std::atomic<std::size_t> max_pool_size_{256};
 
     static constexpr std::chrono::seconds eviction_timeout_{107};
     ctx::io_context::executor_timer_t eviction_timer_;
@@ -222,14 +228,12 @@ protected:
         static constexpr auto max_idle_time = std::chrono::seconds{117};
         const auto now = std::chrono::steady_clock::now();
 
-        std::vector<http::pooled_connection> connections_to_close;
-        {
-        std::scoped_lock lock{pool_mtx_};
-        std::erase_if(connection_pool_, [&](auto& item) {
+        pooled_conn_list connections_to_close;
+        connection_pool_.erase_if([&](auto& item) {
             auto& connections = item.second;
             for (auto it = connections.begin(); it != connections.end(); ) {
                 if ((now - it->last_used) > max_idle_time) {
-                    connections_to_close.emplace_back(std::move(*it));
+                    if (it->stream) connections_to_close.emplace_back(std::move(*it));
                     it = connections.erase(it);
                 } else {
                     ++it;
@@ -237,27 +241,24 @@ protected:
             }
             return connections.empty();
         });
-        }
 
         for (auto& conn : connections_to_close) {
             boost::beast::error_code ignored_ec;
-            if (conn.stream) {
-                http::get_lowest_layer(*conn.stream).socket().close(ignored_ec);
-            }
+            http::get_lowest_layer(*conn.stream).socket().close(ignored_ec);
         }
     }
 
 public:
     std::optional<http::pooled_connection> checkout_connection(const std::string_view host, const std::string_view port, bool is_ssl) {
-        std::scoped_lock lock{pool_mtx_};
-
-        auto it = connection_pool_.find(std::tuple{host, port, is_ssl});
-        if (it != connection_pool_.end() && !it->second.empty()) {
-            auto conn = std::move(it->second.back());
-            it->second.pop_back();
-            return conn;
-        }
-        return std::nullopt;
+        std::optional<http::pooled_connection> conn;
+        connection_pool_.visit(std::make_tuple(host, port, is_ssl), [&conn](auto& entry) {
+            auto& connections = entry.second;
+            if (!connections.empty()) {
+                conn.emplace(std::move(connections.back()));
+                connections.pop_back();
+            }
+        });
+        return conn;
     }
 
     bool checkin_connection(const std::string_view host, const std::string_view port, bool is_ssl, http::pooled_connection conn) {
@@ -267,19 +268,22 @@ public:
         
         lowest.expires_never();
         conn.last_used = std::chrono::steady_clock::now();
-        
-        std::scoped_lock lock{pool_mtx_};
-        auto it = connection_pool_.find(std::tuple{host, port, is_ssl});
-        if (it == connection_pool_.end()) {
-            connection_pool_[http::pool_endpoint_key{std::string(host), std::string(port), is_ssl}].emplace_back(std::move(conn));
-            return true;
+        const auto limit = max_pool_size_.load(std::memory_order_relaxed);
+
+        bool inserted = false;
+        bool visited = connection_pool_.visit(std::tuple{host, port, is_ssl}, [&](auto& entry) {
+            if (entry.second.size() < limit) {
+                entry.second.emplace_back(std::move(conn));
+                inserted = true;
+            }
+        }) != 0UZ;
+
+        if (!visited) {
+            pooled_conn_list vec;
+            vec.emplace_back(std::move(conn));
+            inserted = connection_pool_.emplace(http::pool_endpoint_key{.host = std::string(host), .port = std::string(port), .is_ssl = is_ssl}, std::move(vec));
         }
-        
-        if (it->second.size() < max_pool_size_) {
-            it->second.emplace_back(std::move(conn));
-            return true;
-        }
-        return false;
+        return inserted;
     }
 
     http_client_base(boost::asio::ssl::context& ssl_ctx, ctx::io_context& ctx) 
@@ -287,7 +291,6 @@ public:
 
     // call after stopping and re-starting io context
     void start() {
-        std::scoped_lock lock{pool_mtx_};
         connection_pool_.clear();
 
         eviction_timer_.expires_after(eviction_timeout_);
@@ -302,18 +305,15 @@ public:
 
     void stop() {
         // eviction timer not cancelled as this is only called when the io context is stopped, so cancelled anyway
-        std::scoped_lock lock{pool_mtx_};
         connection_pool_.clear();
     }
 
     void set_max_pool_size(std::size_t max_size) noexcept {
-        std::scoped_lock lock{pool_mtx_};
-        max_pool_size_ = max_size;
+        max_pool_size_.store(max_size, std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::size_t get_max_pool_size() const noexcept {
-        std::scoped_lock lock{pool_mtx_};
-        return max_pool_size_;
+        return max_pool_size_.load(std::memory_order_relaxed);
     }
 };
 
