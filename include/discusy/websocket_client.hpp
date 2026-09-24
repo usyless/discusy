@@ -2,13 +2,13 @@
 
 #include <chrono>
 #include <cstdint>
-#include <deque>
 #include <memory>
 #include <new>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <boost/circular_buffer.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/ssl/stream.hpp>
@@ -31,6 +31,23 @@ using boost::asio::ip::tcp;
 inline constexpr std::uint16_t CLOSE_LOCAL = 100;     // our own graceful close completed
 inline constexpr std::uint16_t CLOSE_TRANSPORT = 101; // died outside of a websocket close frame
 
+struct message_t { // NOLINT(cppcoreguidelines-special-member-functions)
+    std::string payload;
+    bool rate_limited{false};
+    bool binary{false};
+
+    message_t() = default;
+
+    message_t(message_t&&) noexcept = default;
+    message_t& operator=(message_t&&) noexcept = default;
+    // no copies
+    message_t(const message_t&) = delete;
+    message_t& operator=(const message_t&) = delete;
+
+    message_t(std::string p, bool rate_limit = false, bool is_bin = false)
+        : payload(std::move(p)), rate_limited(rate_limit), binary(is_bin) {}
+};
+
 // all methods must be called from the strand_ itself
 template <typename openHandler, typename closeHandler, typename messageHandler, typename connectHandler>
 requires (
@@ -39,12 +56,6 @@ requires (
 )
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class websocket_client : public std::enable_shared_from_this<websocket_client<openHandler, closeHandler, messageHandler, connectHandler>> {
-    struct message_t {
-        std::string payload;
-        bool rate_limited{false};
-        bool binary{false};
-    };
-
     using stream_t = websocket::stream<net::ssl::stream<ctx::io_context::strand_tcp_stream_t>>;
 
     ctx::io_context::strand_t strand_;
@@ -54,7 +65,7 @@ class websocket_client : public std::enable_shared_from_this<websocket_client<op
     std::shared_ptr<stream_t> ws_;
     ctx::io_context::strand_timer_t timer_;
 
-    std::deque<message_t> pending_;
+    boost::circular_buffer<message_t> pending_{128};
     message_t current_msg_;
 
     std::uint64_t connection_id_ = 0;
@@ -159,7 +170,13 @@ public:
         closed_ = false;
         close_requested_ = false;
         ready_posted_ = false;
-        std::erase_if(pending_, [](const auto& msg) { return !msg.rate_limited; });
+        for (auto it = pending_.begin(); it != pending_.end(); ) {
+            if (!it->rate_limited) {
+                it = pending_.erase(it);
+            } else {
+                ++it;
+            }
+        }
         read_buffer_.consume(read_buffer_.size());
 
         if (!set_url(url)) return false;
@@ -174,7 +191,10 @@ public:
         if (stopped_) return;
 
         try {
-            pending_.emplace_back(std::move(payload), true, binary);
+            if (pending_.full()) {
+                pending_.set_capacity(pending_.capacity() * 2);
+            }
+            pending_.push_back(message_t{std::move(payload), true, binary});
             drain();
         } catch (const std::bad_alloc&) {
             #ifdef DISCUSY_LOGGING
@@ -187,7 +207,10 @@ public:
         if (stopped_) return;
 
         try {
-            pending_.emplace_front(std::move(payload), false, binary);
+            if (pending_.full()) {
+                pending_.set_capacity(pending_.capacity() * 2);
+            }
+            pending_.push_front(message_t{std::move(payload), false, binary});
 
             if (timer_active_) {
                 timer_.cancel();

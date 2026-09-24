@@ -361,7 +361,18 @@ FetchContent_Declare(
     SYSTEM
 )
 
-set(BOOST_INCLUDE_LIBRARIES beast asio system url container)
+set(BOOST_INCLUDE_LIBRARIES 
+    beast
+    asio
+    system
+    url
+    container
+    circular_buffer
+    mpl
+    multi_index
+    type_erasure
+    unordered
+)
 
 if(DISCUSY_EXTRA_BOOST_LIBS)
     list(APPEND BOOST_INCLUDE_LIBRARIES ${DISCUSY_EXTRA_BOOST_LIBS})
@@ -389,6 +400,12 @@ target_link_libraries(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
     Boost::asio
     Boost::url
     Boost::container
+    Boost::type_erasure
+    Boost::circular_buffer
+    Boost::mpl
+    Boost::multi_index
+    Boost::type_erasure
+    Boost::unordered
     libzstd_static
 )
 
