@@ -1,9 +1,11 @@
 #pragma once
 
 #include <chrono>
-#include <mutex>
-#include <shared_mutex>
-#include <unordered_map>
+#include <atomic>
+#include <string>
+#include <string_view>
+
+#include <boost/unordered/concurrent_flat_map.hpp>
 
 #include <usylibpp/strings.hpp>
 
@@ -29,23 +31,22 @@ class rate_limiter {
         [[nodiscard]] size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
     };
 
-    std::shared_mutex mtx_;
-    std::unordered_map<std::string, bucket_state, transparent_string_hash, std::equal_to<>> buckets_;
-    std::unordered_map<std::string, std::string, transparent_string_hash, std::equal_to<>> route_to_bucket_;
-    std::chrono::steady_clock::time_point global_reset_at_{};
+    boost::unordered::concurrent_flat_map<std::string, bucket_state, transparent_string_hash, std::equal_to<>> buckets_;
+    boost::unordered::concurrent_flat_map<std::string, std::string, transparent_string_hash, std::equal_to<>> route_to_bucket_;
+    std::atomic<std::chrono::steady_clock::time_point> global_reset_at_{};
 
-    std::chrono::steady_clock::time_point last_cleanup_{std::chrono::steady_clock::now()};
+    std::atomic<std::chrono::steady_clock::time_point> last_cleanup_{std::chrono::steady_clock::now()};
 
-    // must hold mutex
     void perform_cleanup(std::chrono::steady_clock::time_point now) {
-        if (now - last_cleanup_ < std::chrono::minutes{5}) return;
-        last_cleanup_ = now;
+        auto last = last_cleanup_.load(std::memory_order_relaxed);
+        if (now - last < std::chrono::minutes{5}) return;
+        if (!last_cleanup_.compare_exchange_strong(last, now, std::memory_order_relaxed)) return;
 
-        std::erase_if(buckets_, [now](const auto& pair) {
+        buckets_.erase_if([now](const auto& pair) {
             return pair.second.reset_at < now;
         });
 
-        std::erase_if(route_to_bucket_, [this](const auto& pair) {
+        route_to_bucket_.erase_if([this](const auto& pair) {
             return !buckets_.contains(pair.second);
         });
         
@@ -57,32 +58,31 @@ class rate_limiter {
 public:
     [[nodiscard]] std::chrono::milliseconds get_delay(const std::string& route_key) {
         const auto now = std::chrono::steady_clock::now();
-        
+        perform_cleanup(now);
 
-        {
-        std::shared_lock lock{mtx_};
-        if (now - last_cleanup_ > std::chrono::minutes{5}) {
-            lock.unlock();
-            {
-            std::scoped_lock lock_exclusive{mtx_};
-            perform_cleanup(now);
-            }
-            lock.lock();
+        const auto global_reset = global_reset_at_.load(std::memory_order_relaxed);
+        if (global_reset > now) {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(global_reset - now);
         }
 
-        if (global_reset_at_ > now) {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(global_reset_at_ - now);
-        }
+        std::string bucket;
+        bool has_bucket = false;
+        route_to_bucket_.cvisit(route_key, [&](const auto& pair) {
+            bucket = pair.second;
+            has_bucket = true;
+        });
 
-        if (auto b_it = route_to_bucket_.find(route_key); b_it != route_to_bucket_.end()) {
-            if (auto s_it = buckets_.find(b_it->second); s_it != buckets_.end()) {
-                auto& state = s_it->second;
+        if (has_bucket) {
+            std::chrono::milliseconds delay{0};
+            buckets_.cvisit(bucket, [&](const auto& pair) {
+                const auto& state = pair.second;
                 if (state.remaining <= 0 && state.reset_at > now) {
-                    return std::chrono::duration_cast<std::chrono::milliseconds>(state.reset_at - now);
+                    delay = std::chrono::duration_cast<std::chrono::milliseconds>(state.reset_at - now);
                 }
-            }
+            });
+            return delay;
         }
-        }
+
         return std::chrono::milliseconds{0};
     }
 
@@ -97,17 +97,14 @@ public:
             const auto sec = ulp::str::to_number<double>(reset_after);
             if (!sec) return;
 
-            {
-            std::scoped_lock lock{mtx_};
+            const auto now = std::chrono::steady_clock::now();
+            perform_cleanup(now);
 
-            perform_cleanup(std::chrono::steady_clock::now());
-
-            route_to_bucket_[route_key] = bucket;
-            auto& state = buckets_[bucket];
-            state.remaining = *remain;
-            
-            state.reset_at = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(*sec * 1000));
-            }
+            route_to_bucket_.insert_or_assign(route_key, std::string(bucket));
+            buckets_.insert_or_assign(std::string(bucket), bucket_state{
+                .remaining = *remain,
+                .reset_at = now + std::chrono::milliseconds(static_cast<int>(*sec * 1000)),
+            });
         }
     }
 
@@ -128,8 +125,7 @@ public:
         if (delay.count() == 0) delay = std::chrono::milliseconds{1000}; // just in case
         
         if (data.global) {
-            std::scoped_lock lock{mtx_};
-            global_reset_at_ = std::chrono::steady_clock::now() + delay;
+            global_reset_at_.store(std::chrono::steady_clock::now() + delay, std::memory_order_relaxed);
         }
 
         return delay;

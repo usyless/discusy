@@ -19,7 +19,6 @@
 #include <array> // IWYU pragma: keep
 #include <random> // IWYU pragma: keep
 #include <queue> // IWYU pragma: keep
-#include <deque> // IWYU pragma: keep
 #include <stdexcept> // IWYU pragma: keep
 #include <ranges> // IWYU pragma: keep
 #include <version> // IWYU pragma: keep
@@ -56,6 +55,16 @@
 #include <boost/beast/http.hpp> // IWYU pragma: keep
 #include <boost/url.hpp> // IWYU pragma: keep
 #include <boost/asio/cancel_after.hpp> // IWYU pragma: keep
+#include <boost/unordered/concurrent_flat_map.hpp> // IWYU pragma: keep
+#include <boost/circular_buffer.hpp> // IWYU pragma: keep
+#include <boost/container/small_vector.hpp> // IWYU pragma: keep
+#include <boost/type_erasure/any.hpp> // IWYU pragma: keep
+#include <boost/type_erasure/callable.hpp> // IWYU pragma: keep
+#include <boost/mpl/vector.hpp> // IWYU pragma: keep
+#include <boost/multi_index_container.hpp> // IWYU pragma: keep
+#include <boost/multi_index/hashed_index.hpp> // IWYU pragma: keep
+#include <boost/multi_index/member.hpp> // IWYU pragma: keep
+#include <boost/multi_index/tag.hpp> // IWYU pragma: keep
 
 #include <glaze/glaze.hpp> // IWYU pragma: keep
 #include <glaze/base64/base64.hpp> // IWYU pragma: keep
