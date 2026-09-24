@@ -59,10 +59,10 @@ struct state {
     std::shared_mutex presence_mtx{};
 
     opt<std::stop_source> sharding_required{std::nullopt};
-    opt<std::stop_callback<std::function<void()>>> sharding_required_cb{std::nullopt};
+    opt<std::stop_callback<std::move_only_function<void()>>> sharding_required_cb{std::nullopt};
 
     opt<std::stop_source> fatal_error{std::nullopt};
-    opt<std::stop_callback<std::function<void()>>> fatal_error_cb{std::nullopt};
+    opt<std::stop_callback<std::move_only_function<void()>>> fatal_error_cb{std::nullopt};
 };
 
 }
