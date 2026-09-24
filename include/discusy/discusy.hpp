@@ -14,6 +14,7 @@
 #include <new>
 #include <stop_token>
 #include <fstream>
+#include <functional>
 
 #include <boost/asio.hpp>
 #include <boost/asio/stream_file.hpp>
@@ -1084,7 +1085,7 @@ private:
 
             state_.shards_ready_counter.emplace(total_shards, [this]() {
                 io_ctx.post([this, me = state_.me]() mutable {
-                    std::vector<std::function<void()>> to_execute;
+                    std::vector<std::move_only_function<void()>> to_execute;
                     {
                     std::scoped_lock q_lock{pending_shard_operations_mtx_};
                     to_execute = std::move(pending_shard_operations_queue_);
@@ -1335,7 +1336,7 @@ private:
 
     // always acquire shards_mutex before this
     std::mutex pending_shard_operations_mtx_;
-    std::vector<std::function<void()>> pending_shard_operations_queue_;
+    std::vector<std::move_only_function<void()>> pending_shard_operations_queue_;
 
     callback_id on_user_update_id_{0};
     bool http_only_{false};
