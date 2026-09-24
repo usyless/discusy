@@ -1,8 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <vector>
 
 #include <boost/asio.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
 
 #include "types.hpp"
 #include "io_context.hpp"
@@ -30,14 +33,10 @@ public:
         std::shared_ptr<ctx::io_context::strand_timer_t> timer{tmr.timer_};
         timer->expires_after(interval);
 
-        {
-        std::scoped_lock lock{timers_mtx_};
         timers_.emplace(id, std::move(tmr));
-        }
 
         timer->async_wait([i = this, interval, func = std::make_shared<std::decay_t<F>>(std::forward<F>(f)), id, timer](this auto&& self, asio::ec_t ec) -> void {
             if (ec) {
-                std::scoped_lock lock{i->timers_mtx_};
                 i->timers_.erase(id);
                 return;
             }
@@ -63,18 +62,12 @@ public:
         std::shared_ptr<ctx::io_context::strand_timer_t> timer{tmr.timer_};
         timer->expires_after(time);
 
-        {
-        std::scoped_lock lock{timers_mtx_};
         timers_.emplace(id, std::move(tmr));
-        }
         
         timer->async_wait([this, f = std::forward<F>(f), id, timer](asio::ec_t ec) mutable -> void {
             if (!ec) io_ctx_.handle_callback_coro_normal(std::move(f), id);
 
-            {
-            std::scoped_lock lock{timers_mtx_};
             timers_.erase(id);
-            }
         });
         return id;
     }
@@ -82,20 +75,19 @@ public:
     bool stop_interval(const timer id) {
         if (id == 0) return false;
 
-        std::unordered_map<timer, t>::node_type handle;
+        std::optional<t> entry;
+        const bool erased = timers_.erase_if(id, [&entry](auto& val) {
+            entry.emplace(std::move(val.second));
+            return true;
+        }) != 0UZ;
 
-        {
-        std::scoped_lock lock{timers_mtx_};
-        auto it = timers_.find(id);
-        if (it == timers_.end()) return false;
+        if (!erased || !entry) return false;
 
-        handle = timers_.extract(it);
+        if (entry->timer_) {
+            boost::asio::dispatch(entry->strand_, [timer = std::move(entry->timer_)]() mutable {
+                timer->cancel();
+            });
         }
-
-        auto strand = handle.mapped().strand_;
-        boost::asio::dispatch(strand, [handle = std::move(handle)]() mutable {
-            handle.mapped().timer_->cancel();
-        });
         return true;
     }
 
@@ -104,14 +96,14 @@ public:
     }
 
     void clear() {
-        std::unordered_map<timer, t> dying;
-        {
-        std::scoped_lock lock{timers_mtx_};
-        dying = std::move(timers_);
-        timers_.clear();
-        }
+        std::vector<t> dying;
+        dying.reserve(timers_.size());
+        timers_.erase_if([&dying](auto& val) {
+            dying.emplace_back(std::move(val.second));
+            return true;
+        });
 
-        for (auto& [_, entry] : dying) {
+        for (auto& entry : dying) {
             auto strand = entry.strand_;
             boost::asio::dispatch(strand, [timer = std::move(entry.timer_)]() mutable {
                 if (timer) timer->cancel();
@@ -130,15 +122,13 @@ private:
     ctx::io_context& io_ctx_;
     std::atomic<timer> timers_idx_{0};
 
-    std::mutex timers_mtx_;
-
     struct t {
         std::shared_ptr<ctx::io_context::strand_timer_t> timer_;
-        const ctx::io_context::strand_t strand_;
+        ctx::io_context::strand_t strand_;
 
         t(const ctx::io_context::strand_t& strand) : timer_{std::make_shared<ctx::io_context::strand_timer_t>(strand)}, strand_{strand} {}
     };
-    std::unordered_map<timer, t> timers_;
+    boost::unordered::concurrent_flat_map<timer, t> timers_;
 };
 
 }
