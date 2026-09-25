@@ -8,13 +8,17 @@
 #include <optional>
 #include <shared_mutex>
 #include <type_traits>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
 
-#include "macros.hpp"
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/tag.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
+
 #include "types.hpp"
 #include "enum_helpers.hpp"
 #include "intents.hpp"
@@ -78,25 +82,17 @@ template <> struct hash_for<guild_scoped_id> { using type = guild_scoped_id_hash
 template <> struct hash_for<void> { using type = void; };
 template <typename T> using hash_for_t = hash_for<T>::type;
 
-template <bool Grouped, typename GroupKey, typename Key, typename KeyHash, typename GroupHash>
-struct group_map_selector { using type = no_group; };
-
-template <typename GroupKey, typename Key, typename KeyHash, typename GroupHash>
-struct group_map_selector<true, GroupKey, Key, KeyHash, GroupHash> {
-    using type = std::unordered_map<GroupKey, std::unordered_set<Key, KeyHash>, GroupHash>;
-};
-
 }
 
 template <typename Key, typename Value, typename GroupKey = void>
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class cache {
 public:
-    static constexpr bool grouped = !std::is_void_v<GroupKey>;
+    static constexpr bool grouped = true;
 
     using key_type = Key;
     using value_type = Value;
-    using group_key_type = std::conditional_t<grouped, GroupKey, cache_detail::no_group>;
+    using group_key_type = GroupKey;
     using ptr = std::shared_ptr<const Value>;
     using snapshot_t = std::vector<std::pair<Key, ptr>>;
 
@@ -119,8 +115,9 @@ public:
     // null if absent
     [[nodiscard]] ptr get(const Key& key) const {
         std::shared_lock lock{mtx_};
-        const auto it = map_.find(key);
-        return (it == map_.end()) ? ptr{} : it->second.value;
+        const auto& key_idx = container_.template get<by_key>();
+        const auto it = key_idx.find(key);
+        return (it == key_idx.end()) ? ptr{} : it->value;
     }
 
     [[nodiscard]] opt<Value> copy(const Key& key) const {
@@ -131,27 +128,28 @@ public:
 
     [[nodiscard]] bool contains(const Key& key) const {
         std::shared_lock lock{mtx_};
-        const auto it = map_.find(key);
-        return (it != map_.end()) && bool(it->second.value);
+        const auto& key_idx = container_.template get<by_key>();
+        const auto it = key_idx.find(key);
+        return (it != key_idx.end()) && bool(it->value);
     }
 
     [[nodiscard]] std::size_t size() const {
         std::shared_lock lock{mtx_};
-        return map_.size();
+        return container_.size();
     }
 
     [[nodiscard]] bool empty() const {
         std::shared_lock lock{mtx_};
-        return map_.empty();
+        return container_.empty();
     }
 
     [[nodiscard]] std::vector<Key> keys() const {
         std::vector<Key> out;
         {
             std::shared_lock lock{mtx_};
-            out.reserve(map_.size());
-            for (const auto& [key, entry] : map_) {
-                if (entry.value) out.emplace_back(key);
+            out.reserve(container_.size());
+            for (const auto& entry : container_.template get<by_key>()) {
+                if (entry.value) out.emplace_back(entry.key);
             }
         }
         return out;
@@ -161,8 +159,8 @@ public:
         std::vector<ptr> out;
         {
             std::shared_lock lock{mtx_};
-            out.reserve(map_.size());
-            for (const auto& [key, entry] : map_) {
+            out.reserve(container_.size());
+            for (const auto& entry : container_.template get<by_key>()) {
                 if (entry.value) out.emplace_back(entry.value);
             }
         }
@@ -173,9 +171,9 @@ public:
         snapshot_t out;
         {
             std::shared_lock lock{mtx_};
-            out.reserve(map_.size());
-            for (const auto& [key, entry] : map_) {
-                if (entry.value) out.emplace_back(key, entry.value);
+            out.reserve(container_.size());
+            for (const auto& entry : container_.template get<by_key>()) {
+                if (entry.value) out.emplace_back(entry.key, entry.value);
             }
         }
         return out;
@@ -203,60 +201,53 @@ public:
         }
     }
 
-    [[nodiscard]] std::vector<Key> keys_in_group(const group_key_type& group) const requires grouped {
+    [[nodiscard]] std::vector<Key> keys_in_group(const group_key_type& group) const {
         std::vector<Key> out;
         {
             std::shared_lock lock{mtx_};
-            const auto it = groups_.find(group);
-            if (it == groups_.end()) return out;
-
-            out.reserve(it->second.size());
-            for (const auto& key : it->second) out.emplace_back(key);
+            const auto& group_idx = container_.template get<by_group>();
+            const auto [first, last] = group_idx.equal_range(group);
+            for (auto it = first; it != last; ++it) {
+                if (it->value) out.emplace_back(it->key);
+            }
         }
         return out;
     }
 
-    [[nodiscard]] std::vector<ptr> in_group(const group_key_type& group) const requires grouped {
+    [[nodiscard]] std::vector<ptr> in_group(const group_key_type& group) const {
         std::vector<ptr> out;
         {
             std::shared_lock lock{mtx_};
-            const auto it = groups_.find(group);
-            if (it == groups_.end()) return out;
-
-            out.reserve(it->second.size());
-            for (const auto& key : it->second) {
-                const auto entry = map_.find(key);
-                if (entry != map_.end() && entry->second.value) out.emplace_back(entry->second.value);
+            const auto& group_idx = container_.template get<by_group>();
+            const auto [first, last] = group_idx.equal_range(group);
+            for (auto it = first; it != last; ++it) {
+                if (it->value) out.emplace_back(it->value);
             }
         }
         return out;
     }
 
-    [[nodiscard]] snapshot_t snapshot_group(const group_key_type& group) const requires grouped {
+    [[nodiscard]] snapshot_t snapshot_group(const group_key_type& group) const {
         snapshot_t out;
         {
             std::shared_lock lock{mtx_};
-            const auto it = groups_.find(group);
-            if (it == groups_.end()) return out;
-
-            out.reserve(it->second.size());
-            for (const auto& key : it->second) {
-                const auto entry = map_.find(key);
-                if (entry != map_.end() && entry->second.value) out.emplace_back(key, entry->second.value);
+            const auto& group_idx = container_.template get<by_group>();
+            const auto [first, last] = group_idx.equal_range(group);
+            for (auto it = first; it != last; ++it) {
+                if (it->value) out.emplace_back(it->key, it->value);
             }
         }
         return out;
     }
 
-    [[nodiscard]] std::size_t group_size(const group_key_type& group) const requires grouped {
+    [[nodiscard]] std::size_t group_size(const group_key_type& group) const {
         std::shared_lock lock{mtx_};
-        const auto it = groups_.find(group);
-        return (it == groups_.end()) ? 0 : it->second.size();
+        return container_.template get<by_group>().count(group);
     }
 
     template <typename F>
     requires ( std::invocable<F&, const Key&, const ptr&> || std::invocable<F&, const Key&, const Value&> )
-    void for_each_in_group(const group_key_type& group, F&& f) const requires grouped {
+    void for_each_in_group(const group_key_type& group, F&& f) const {
         for (const auto& [key, value] : snapshot_group(group)) {
             if constexpr (std::invocable<F&, const Key&, const ptr&>) {
                 if constexpr (std::is_same_v<std::invoke_result_t<F&, const Key&, const ptr&>, bool>) {
@@ -276,138 +267,286 @@ public:
         }
     }
 
-    void insert(const Key& key, Value value) requires (!grouped) {
+    void insert(const Key& key, Value value, const group_key_type& group) {
         auto shared = std::make_shared<const Value>(std::move(value));
 
         std::scoped_lock lock{mtx_};
-        map_[key].value = std::move(shared);
+        auto& key_idx = container_.template get<by_key>();
+        auto it = key_idx.find(key);
+        if (it != key_idx.end()) {
+            key_idx.modify(it, [&](entry_t& entry) {
+                entry.group = group;
+                entry.value = std::move(shared);
+            });
+        } else {
+            key_idx.emplace(entry_t{key, group, std::move(shared)});
+        }
     }
 
-    void insert(const Key& key, ptr value) requires (!grouped) {
+    void insert(const Key& key, ptr value, const group_key_type& group) {
         std::scoped_lock lock{mtx_};
-        map_[key].value = std::move(value);
-    }
-
-    void insert(const Key& key, Value value, const group_key_type& group) requires grouped {
-        auto shared = std::make_shared<const Value>(std::move(value));
-
-        std::scoped_lock lock{mtx_};
-        auto& entry = map_[key];
-        if (entry.value && (entry.group != group)) unlink_group(entry.group, key);
-
-        entry.value = std::move(shared);
-        entry.group = group;
-        groups_[group].emplace(key);
-    }
-
-    void insert(const Key& key, ptr value, const group_key_type& group) requires grouped {
-        std::scoped_lock lock{mtx_};
-        auto& entry = map_[key];
-        if (entry.value && (entry.group != group)) unlink_group(entry.group, key);
-
-        entry.value = std::move(value);
-        entry.group = group;
-        groups_[group].emplace(key);
+        auto& key_idx = container_.template get<by_key>();
+        auto it = key_idx.find(key);
+        if (it != key_idx.end()) {
+            key_idx.modify(it, [&](entry_t& entry) {
+                entry.group = group;
+                entry.value = std::move(value);
+            });
+        } else {
+            key_idx.emplace(entry_t{key, group, std::move(value)});
+        }
     }
 
     template <typename F>
     requires ( std::invocable<F&, Value&> )
     bool modify(const Key& key, F&& f) {
         std::scoped_lock lock{mtx_};
-        const auto it = map_.find(key);
-        if ((it == map_.end()) || !it->second.value) return false;
+        auto& key_idx = container_.template get<by_key>();
+        const auto it = key_idx.find(key);
+        if ((it == key_idx.end()) || !it->value) return false;
 
-        auto updated = std::make_shared<Value>(*it->second.value);
+        auto updated = std::make_shared<Value>(*it->value);
         std::invoke(f, *updated);
-        it->second.value = std::move(updated);
+        key_idx.modify(it, [&](entry_t& entry) {
+            entry.value = std::move(updated);
+        });
         return true;
     }
 
     template <typename F>
     requires ( std::invocable<F&, Value&> )
-    void upsert(const Key& key, F&& f) requires (!grouped) {
+    void upsert(const Key& key, const group_key_type& group, F&& f) {
         std::scoped_lock lock{mtx_};
-        auto& entry = map_[key];
-
-        auto updated = entry.value ? std::make_shared<Value>(*entry.value) : std::make_shared<Value>();
-        std::invoke(f, *updated);
-        entry.value = std::move(updated);
-    }
-
-    template <typename F>
-    requires ( std::invocable<F&, Value&> )
-    void upsert(const Key& key, const group_key_type& group, F&& f) requires grouped {
-        std::scoped_lock lock{mtx_};
-        auto& entry = map_[key];
-
-        const bool had_value = bool(entry.value);
-        const auto old_group = entry.group;
-
-        auto updated = had_value ? std::make_shared<Value>(*entry.value) : std::make_shared<Value>();
-        std::invoke(f, *updated);
-
-        if (had_value && (old_group != group)) unlink_group(old_group, key);
-
-        entry.value = std::move(updated);
-        entry.group = group;
-        groups_[group].emplace(key);
+        auto& key_idx = container_.template get<by_key>();
+        auto it = key_idx.find(key);
+        if (it != key_idx.end()) {
+            auto updated = it->value ? std::make_shared<Value>(*it->value) : std::make_shared<Value>();
+            std::invoke(f, *updated);
+            key_idx.modify(it, [&](entry_t& entry) {
+                entry.group = group;
+                entry.value = std::move(updated);
+            });
+        } else {
+            auto updated = std::make_shared<Value>();
+            std::invoke(f, *updated);
+            key_idx.emplace(entry_t{key, group, std::move(updated)});
+        }
     }
 
     bool erase(const Key& key) {
         std::scoped_lock lock{mtx_};
-        const auto it = map_.find(key);
-        if (it == map_.end()) return false;
-
-        if constexpr (grouped) unlink_group(it->second.group, key);
-
-        map_.erase(it);
-        return true;
+        return container_.template get<by_key>().erase(key) > 0;
     }
 
-    void erase_group(const group_key_type& group) requires grouped {
+    void erase_group(const group_key_type& group) {
         std::scoped_lock lock{mtx_};
-        const auto it = groups_.find(group);
-        if (it == groups_.end()) return;
-
-        for (const auto& key : it->second) map_.erase(key);
-        groups_.erase(it);
+        container_.template get<by_group>().erase(group);
     }
 
     void clear() {
         std::scoped_lock lock{mtx_};
-        map_.clear();
-        if constexpr (grouped) groups_.clear();
+        container_.clear();
     }
 
     void reserve(const std::size_t n) {
         std::scoped_lock lock{mtx_};
+        container_.template get<by_key>().reserve(n);
+    }
+
+private:
+    struct by_key {};
+    struct by_group {};
+
+    using key_hash = cache_detail::hash_for_t<Key>;
+    using group_hash = cache_detail::hash_for_t<GroupKey>;
+
+    struct entry_t {
+        Key key;
+        group_key_type group;
+        ptr value{};
+    };
+
+    using container_t = boost::multi_index_container<
+        entry_t,
+        boost::multi_index::indexed_by<
+            boost::multi_index::hashed_unique<
+                boost::multi_index::tag<by_key>,
+                boost::multi_index::member<entry_t, Key, &entry_t::key>,
+                key_hash
+            >,
+            boost::multi_index::hashed_non_unique<
+                boost::multi_index::tag<by_group>,
+                boost::multi_index::member<entry_t, group_key_type, &entry_t::group>,
+                group_hash
+            >
+        >
+    >;
+
+    mutable std::shared_mutex mtx_;
+    container_t container_;
+    std::atomic_bool enabled_{false};
+};
+
+template <typename Key, typename Value>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+class cache<Key, Value, void> {
+public:
+    static constexpr bool grouped = false;
+
+    using key_type = Key;
+    using value_type = Value;
+    using group_key_type = cache_detail::no_group;
+    using ptr = std::shared_ptr<const Value>;
+    using snapshot_t = std::vector<std::pair<Key, ptr>>;
+
+    cache() = default;
+
+    cache(const cache&) = delete;
+    cache& operator=(const cache&) = delete;
+    cache(cache&&) = delete;
+    cache& operator=(cache&&) = delete;
+
+    [[nodiscard]] bool enabled() const noexcept {
+        return enabled_.load(std::memory_order_acquire);
+    }
+
+    void set_enabled(const bool value) {
+        enabled_.store(value, std::memory_order_release);
+        if (!value) clear();
+    }
+
+    // null if absent
+    [[nodiscard]] ptr get(const Key& key) const {
+        ptr res{};
+        map_.cvisit(key, [&](const auto& entry) {
+            res = entry.second;
+        });
+        return res;
+    }
+
+    [[nodiscard]] opt<Value> copy(const Key& key) const {
+        const auto p = get(key);
+        if (!p) return std::nullopt;
+        return *p;
+    }
+
+    [[nodiscard]] bool contains(const Key& key) const {
+        return map_.contains(key);
+    }
+
+    [[nodiscard]] std::size_t size() const {
+        return map_.size();
+    }
+
+    [[nodiscard]] bool empty() const {
+        return map_.empty();
+    }
+
+    [[nodiscard]] std::vector<Key> keys() const {
+        std::vector<Key> out;
+        out.reserve(map_.size());
+        map_.cvisit_all([&](const auto& entry) {
+            if (entry.second) out.emplace_back(entry.first);
+        });
+        return out;
+    }
+
+    [[nodiscard]] std::vector<ptr> all() const {
+        std::vector<ptr> out;
+        out.reserve(map_.size());
+        map_.cvisit_all([&](const auto& entry) {
+            if (entry.second) out.emplace_back(entry.second);
+        });
+        return out;
+    }
+
+    [[nodiscard]] snapshot_t snapshot() const {
+        snapshot_t out;
+        out.reserve(map_.size());
+        map_.cvisit_all([&](const auto& entry) {
+            if (entry.second) out.emplace_back(entry.first, entry.second);
+        });
+        return out;
+    }
+
+    template <typename F>
+    requires ( std::invocable<F&, const Key&, const ptr&> || std::invocable<F&, const Key&, const Value&> )
+    void for_each(F&& f) const {
+        for (const auto& [key, value] : snapshot()) {
+            if constexpr (std::invocable<F&, const Key&, const ptr&>) {
+                if constexpr (std::is_same_v<std::invoke_result_t<F&, const Key&, const ptr&>, bool>) {
+                    if (!std::invoke(f, key, value)) return;
+                } else {
+                    std::invoke(f, key, value);
+                }
+            } else {
+                if (value) {
+                    if constexpr (std::is_same_v<std::invoke_result_t<F&, const Key&, const Value&>, bool>) {
+                        if (!std::invoke(f, key, *value)) return;
+                    } else {
+                        std::invoke(f, key, *value);
+                    }
+                }
+            }
+        }
+    }
+
+    void insert(const Key& key, Value value) {
+        map_.insert_or_assign(key, std::make_shared<const Value>(std::move(value)));
+    }
+
+    void insert(const Key& key, ptr value) {
+        map_.insert_or_assign(key, std::move(value));
+    }
+
+    template <typename F>
+    requires ( std::invocable<F&, Value&> )
+    bool modify(const Key& key, F&& f) {
+        bool modified = false;
+        map_.visit(key, [&](auto& entry) {
+            if (!entry.second) return;
+            auto updated = std::make_shared<Value>(*entry.second);
+            std::invoke(f, *updated);
+            entry.second = std::move(updated);
+            modified = true;
+        });
+        return modified;
+    }
+
+    template <typename F>
+    requires ( std::invocable<F&, Value&> )
+    void upsert(const Key& key, F&& f) {
+        const bool visited = map_.visit(key, [&](auto& entry) {
+            auto updated = entry.second ? std::make_shared<Value>(*entry.second) : std::make_shared<Value>();
+            std::invoke(f, *updated);
+            entry.second = std::move(updated);
+        }) > 0;
+        if (!visited) {
+            auto val = std::make_shared<Value>();
+            std::invoke(f, *val);
+            map_.try_emplace_or_visit(key, val, [&](auto& entry) {
+                auto updated = entry.second ? std::make_shared<Value>(*entry.second) : std::make_shared<Value>();
+                std::invoke(f, *updated);
+                entry.second = std::move(updated);
+            });
+        }
+    }
+
+    bool erase(const Key& key) {
+        return map_.erase(key) > 0;
+    }
+
+    void clear() {
+        map_.clear();
+    }
+
+    void reserve(const std::size_t n) {
         map_.reserve(n);
     }
 
 private:
     using key_hash = cache_detail::hash_for_t<Key>;
-    using group_hash = std::conditional_t<grouped, cache_detail::hash_for_t<GroupKey>, cache_detail::no_group>;
-
-    struct entry_t {
-        ptr value{};
-        DISCUSY_NO_UNIQUE_ADDRESS group_key_type group{};
-    };
-
-    using group_map_t = cache_detail::group_map_selector<grouped, group_key_type, Key, key_hash, group_hash>::type;
-
-    // must hold the exclusive lock
-    void unlink_group(const group_key_type& group, const Key& key) requires grouped {
-        const auto it = groups_.find(group);
-        if (it == groups_.end()) return;
-
-        it->second.erase(key);
-        if (it->second.empty()) groups_.erase(it);
-    }
-
-    mutable std::shared_mutex mtx_;
-    std::unordered_map<Key, entry_t, key_hash> map_;
-    DISCUSY_NO_UNIQUE_ADDRESS group_map_t groups_{};
-
+    boost::unordered::concurrent_flat_map<Key, ptr, key_hash> map_;
     std::atomic_bool enabled_{false};
 };
 
