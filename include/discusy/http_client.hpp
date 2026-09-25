@@ -1072,7 +1072,7 @@ public:
     using http_client_base::http_client_base;
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = {}, CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<false>(
             m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
             std::forward<CompletionToken>(token)
@@ -1080,7 +1080,7 @@ public:
     }
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto api_request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = {}, CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto api_request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<true>(
             m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
             std::forward<CompletionToken>(token)
@@ -1595,7 +1595,7 @@ public:
     using http_client_base::http_client_base;
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = {}, CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<false>(
             m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
             std::forward<CompletionToken>(token)
@@ -1603,7 +1603,7 @@ public:
     }
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto api_request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = {}, CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto api_request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<true>(
             m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
             std::forward<CompletionToken>(token)
