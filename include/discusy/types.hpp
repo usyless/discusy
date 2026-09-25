@@ -201,6 +201,14 @@ struct snowflake {
         return value;
     }
 
+    [[nodiscard]] friend constexpr std::size_t hash_value(const snowflake s) noexcept {
+        std::uint64_t x = s.value;
+        x ^= x >> 33;
+        x *= 0xff51afd7ed558ccdULL;
+        x ^= x >> 33;
+        return static_cast<std::size_t>(x);
+    }
+
     struct glaze {
         using T = snowflake;
         // maybe add mimic?
@@ -284,6 +292,10 @@ struct snowflake_str {
     }
     constexpr auto operator<=>(std::string_view sv) const noexcept {
         return view() <=> sv;
+    }
+
+    [[nodiscard]] friend std::size_t hash_value(const snowflake_str& s) noexcept {
+        return std::hash<std::string_view>{}(s.view());
     }
 
     struct glaze {
