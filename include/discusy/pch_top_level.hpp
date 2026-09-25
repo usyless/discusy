@@ -69,7 +69,7 @@
 #include <zstd.h> // IWYU pragma: keep
 
 #ifdef __linux__
-#include <sys/prctl.h>
+#include <sys/prctl.h> // IWYU pragma: keep
 #endif
 
 #ifdef DISCUSY_VOICE
