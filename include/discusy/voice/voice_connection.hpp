@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <concepts>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -210,10 +211,8 @@ struct channel_moved {
     snowflake new_channel_id;
 };
 
-template <typename escalationCB>
-requires ( std::invocable<std::decay_t<escalationCB>, escalation_action> )
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-class connection : public std::enable_shared_from_this<connection<escalationCB>> {
+class connection : public std::enable_shared_from_this<connection> {
 public:
     template <typename F>
     requires ( std::invocable<F&, escalation_action> )
@@ -424,15 +423,15 @@ public:
     }
 
     void set_underrun_grace_frames(const std::uint32_t frames) {
-        if (udp_client_) udp_client_->set_underrun_grace_frames(frames);
+        if (udp_client_ != nullptr) udp_client_->set_underrun_grace_frames(frames);
     }
 
     void set_max_catchup_frames(const std::uint32_t frames) {
-        if (udp_client_) udp_client_->set_max_catchup_frames(frames);
+        if (udp_client_ != nullptr) udp_client_->set_max_catchup_frames(frames);
     }
 
     void set_not_ready_hold_frames(const std::uint32_t frames) {
-        if (udp_client_) udp_client_->set_not_ready_hold_frames(frames);
+        if (udp_client_ != nullptr) udp_client_->set_not_ready_hold_frames(frames);
     }
 
     [[nodiscard]] audio_stats get_audio_stats() const noexcept {
@@ -441,7 +440,7 @@ public:
     }
 
     void reset_audio_stats() noexcept {
-        if (udp_client_) udp_client_->reset_stats();
+        if (udp_client_ != nullptr) udp_client_->reset_stats();
     }
 
     bool set_inband_fec(const bool enabled) {
@@ -789,7 +788,7 @@ private:
 
         closed_.store(true, std::memory_order_release);
 
-        if (udp_client_) udp_client_->close();
+        if (udp_client_ != nullptr) udp_client_->close();
 
         stop_heartbeat();
         reconnect_timeout_timer_.cancel();
@@ -892,7 +891,7 @@ private:
         ssrc_ = 0;
         last_hb_nonce_ = -1;
 
-        if (udp_client_) udp_client_->reset_session();
+        if (udp_client_ != nullptr) udp_client_->reset_session();
 
         reconnect();
     }
@@ -987,7 +986,8 @@ private:
                 #ifdef DISCUSY_LOGGING
                 log("Voice session no longer valid ({}), asking for a new one", +code);
                 #endif
-                return escalate(escalation_action::requires_gateway_reconnect);
+                escalate(escalation_action::requires_gateway_reconnect);
+                return;
             }
 
             case VoiceCloseCode::Disconnected:
@@ -995,7 +995,8 @@ private:
                 #ifdef DISCUSY_LOGGING
                 log("Disconnected by discord ({}), waiting for the gateway to say why", +code);
                 #endif
-                return await_gateway_instruction();
+                await_gateway_instruction();
+                return;
             }
 
             case VoiceCloseCode::AuthenticationFailed:
@@ -1010,7 +1011,8 @@ private:
                 #ifdef DISCUSY_LOGGING
                 log("Fatal close code {}, shutting down voice.", +code);
                 #endif
-                return escalate(escalation_action::fatal);
+                escalate(escalation_action::fatal);
+                return;
             }
 
             default: break;
@@ -1096,7 +1098,8 @@ private:
             #ifdef DISCUSY_LOGGING
             log("Giving up after {} failed voice connection attempts", reconnect_attempts_ - 1);
             #endif
-            return escalate(escalation_action::fatal);
+            escalate(escalation_action::fatal);
+            return;
         }
 
         const auto delay = reconnect_backoff_time_;
@@ -1634,7 +1637,7 @@ private:
         dave_.encryptor_->SetKeyRatchet(std::move(key_ratchet));
         }
 
-        if (udp_client_) udp_client_->kick_drain();
+        if (udp_client_ != nullptr) udp_client_->kick_drain();
         maybe_signal_ready();
         return true;
     }
@@ -1650,7 +1653,7 @@ private:
         dave_.encryptor_->SetPassthroughMode(passthrough);
         }
 
-        if (udp_client_) udp_client_->kick_drain();
+        if (udp_client_ != nullptr) udp_client_->kick_drain();
         maybe_signal_ready();
     }
 
@@ -1748,10 +1751,10 @@ public:
     Callback<voice_closed> on_closed{io_ctx_};
     Callback<channel_moved> on_channel_move{io_ctx_};
 private:
-    struct open_cb    { connection* s; void operator()() const { if(s) s->handle_ws_open(); } };
-    struct connect_cb { connection* s; void operator()() const { if(s) s->handle_ws_connect_ready(); } };
-    struct close_cb   { connection* s; void operator()(std::uint16_t c) const { if(s) s->handle_ws_close(c); } };
-    struct message_cb { connection* s; void operator()(std::string_view m, bool b) const { if(s) s->handle_ws_message(m, b); } };
+    struct open_cb    { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
+    struct connect_cb { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
+    struct close_cb   { connection* s; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
+    struct message_cb { connection* s; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
 
     using ws_client_t = ws::websocket_client<open_cb, close_cb, message_cb, connect_cb>;
 
@@ -1822,7 +1825,8 @@ private:
     std::shared_ptr<udp_client_t> udp_client_shared_;
     udp_client_t* udp_client_ = nullptr;
 
-    using escalation_cb_t = std::decay_t<escalationCB>;
+    // Escalation cb is tiny anyway, fits in SBO
+    using escalation_cb_t = std::move_only_function<void(escalation_action)>;
 
     escalation_cb_t on_escalation_;
 

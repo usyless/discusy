@@ -5,6 +5,7 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
 
 #include "../types.hpp"
 #include "../gateway_events.hpp" // includes events
@@ -16,6 +17,16 @@
 #include "../asio_helpers.hpp"
 
 namespace discusy::voice {
+
+struct voice_connection_data {
+    snowflake channel_id{};
+    std::string session_id{};
+    std::shared_ptr<connection> conn{};
+    bool refreshing{false};
+
+    bool muted{false};
+    bool deaf{false};
+};
 
 // using the template is janky but icba with forward references for now
 template <typename botT>
@@ -58,8 +69,9 @@ private:
 
 public:
     static constexpr auto required_intents = intent::guilds | intent::guild_voice_states;
-    using connection = discusy::voice::connection<connection_escalation_cb>;
+    using connection = discusy::voice::connection;
     using connection_ref = std::shared_ptr<connection>;
+    using data = voice_connection_data;
 
     // this does not mean the connection will be valid, just that it was created
     Callback<connection_ref> on_connection_created{bot_.io_ctx};
@@ -75,18 +87,18 @@ private:
         snowflake channel_id{};
         bool muted = false;
         bool deaf = false;
-        {
-        std::scoped_lock lock{connections_mtx_};
-        const auto it = connections_.find(guild_id);
-        if (it == connections_.end()) return;
+        bool found = false;
 
-        if (it->second.refreshing) return; // one in flight already
+        connections_.visit(guild_id, [&](auto& entry) {
+            if (entry.second.refreshing) return;
+            entry.second.refreshing = true;
+            channel_id = entry.second.channel_id;
+            muted = entry.second.muted;
+            deaf = entry.second.deaf;
+            found = true;
+        });
 
-        it->second.refreshing = true;
-        channel_id = it->second.channel_id;
-        muted = it->second.muted;
-        deaf = it->second.deaf;
-        }
+        if (!found) return;
 
         if (!channel_id) {
             clear_refreshing(guild_id);
@@ -106,9 +118,9 @@ private:
     }
 
     void clear_refreshing(const snowflake guild_id) {
-        std::scoped_lock lock{connections_mtx_};
-        const auto it = connections_.find(guild_id);
-        if (it != connections_.end()) it->second.refreshing = false;
+        connections_.visit(guild_id, [](auto& entry) {
+            entry.second.refreshing = false;
+        });
     }
 
     static void destroy_connection(connection_ref conn) {
@@ -185,35 +197,37 @@ private:
                 connection_ref needs_rebuild;
                 connection_ref moved_conn;
                 snowflake new_channel_id{};
-                {
-                std::scoped_lock lock{connections_mtx_};
-                const auto it = connections_.find(*e.guild_id);
-                if (it == connections_.end()) return;
 
                 if (e.channel_id) {
-                    const bool was_refreshing = it->second.refreshing;
-                    const bool same_session = (it->second.session_id == e.session_id);
-                    const bool channel_changed = (it->second.conn && (it->second.conn->get_channel_id() != *e.channel_id)) || (it->second.channel_id != *e.channel_id);
+                    bool matched = false;
+                    connections_.visit(*e.guild_id, [&](auto& entry) {
+                        matched = true;
+                        auto& d = entry.second;
+                        const bool was_refreshing = d.refreshing;
+                        const bool same_session = (d.session_id == e.session_id);
+                        const bool channel_changed = (d.conn && (d.conn->get_channel_id() != *e.channel_id)) || (d.channel_id != *e.channel_id);
 
-                    it->second.channel_id = *e.channel_id;
-                    it->second.session_id = e.session_id;
-                    it->second.refreshing = false;
+                        d.channel_id = *e.channel_id;
+                        d.session_id = e.session_id;
+                        d.refreshing = false;
 
-                    it->second.muted = e.self_mute;
-                    it->second.deaf = e.self_deaf;
+                        d.muted = e.self_mute;
+                        d.deaf = e.self_deaf;
 
-                    if (channel_changed && it->second.conn) {
-                        moved_conn = it->second.conn;
-                        new_channel_id = *e.channel_id;
-                    }
+                        if (channel_changed && d.conn) {
+                            moved_conn = d.conn;
+                            new_channel_id = *e.channel_id;
+                        }
 
-                    if (was_refreshing && same_session) needs_rebuild = it->second.conn;
+                        if (was_refreshing && same_session) needs_rebuild = d.conn;
+                    });
 
-                    if (!needs_rebuild && !moved_conn) return;
+                    if (!matched || (!needs_rebuild && !moved_conn)) return;
                 } else {
-                    dying = std::move(it->second.conn);
-                    connections_.erase(it);
-                }
+                    connections_.erase_if(*e.guild_id, [&](auto& entry) {
+                        dying = std::move(entry.second.conn);
+                        return true;
+                    });
                 }
 
                 if (moved_conn) {
@@ -248,16 +262,13 @@ private:
                 connection_ref conn;
                 std::string session_id;
                 snowflake channel_id{};
-                {
-                std::scoped_lock lock{connections_mtx_};
-                const auto it = connections_.find(e.guild_id);
-                if (it == connections_.end()) return; // an initial join is still being awaited
 
-                conn = it->second.conn;
-                session_id = it->second.session_id;
-                channel_id = it->second.channel_id;
-                it->second.refreshing = false;
-                }
+                connections_.visit(e.guild_id, [&](auto& entry) {
+                    conn = entry.second.conn;
+                    session_id = entry.second.session_id;
+                    channel_id = entry.second.channel_id;
+                    entry.second.refreshing = false;
+                });
 
                 if (!conn || session_id.empty()) return;
 
@@ -268,13 +279,11 @@ private:
                 if (!e.bitrate || !e.guild_id) return;
 
                 connection_ref conn;
-                {
-                std::scoped_lock lock{connections_mtx_};
-                const auto it = connections_.find(*e.guild_id);
-                if ((it == connections_.end()) || (it->second.channel_id != e.id)) return;
-
-                conn = it->second.conn;
-                }
+                connections_.cvisit(*e.guild_id, [&](const auto& entry) {
+                    if (entry.second.channel_id == e.id) {
+                        conn = entry.second.conn;
+                    }
+                });
 
                 if (conn) conn->set_bitrate(static_cast<std::uint32_t>(*e.bitrate));
             });
@@ -284,15 +293,11 @@ private:
                 if (total_shards == 0) return;
 
                 std::vector<snowflake> affected;
-                {
-                std::scoped_lock lock{connections_mtx_};
-                affected.reserve(connections_.size());
-                for (const auto& [guild_id, entry] : connections_) {
-                    if (guild_id.guild_shard_id(total_shards) == shard_id) {
-                        affected.emplace_back(guild_id);
+                connections_.cvisit_all([&](const auto& entry) {
+                    if (entry.first.guild_shard_id(total_shards) == shard_id) {
+                        affected.emplace_back(entry.first);
                     }
-                }
-                }
+                });
 
                 for (const auto guild_id : affected) {
                     #ifdef DISCUSY_LOGGING
@@ -408,13 +413,12 @@ private:
         void start(std::shared_ptr<join_state> self_ptr) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
-            {
-            std::unique_lock lock{self->connections_mtx_};
-            const auto it = self->connections_.find(guild_id);
-            if (it != self->connections_.end()) {
-                auto existing = it->second.conn;
-                lock.unlock();
+            connection_ref existing;
+            self->connections_.cvisit(guild_id, [&](const auto& entry) {
+                existing = entry.second.conn;
+            });
 
+            if (existing) {
                 if (!self->bot_.update_voice_state(send_event::update_voice_state{
                     .guild_id{guild_id},
                     .channel_id{channel_id},
@@ -429,7 +433,6 @@ private:
                 }
 
                 return finish(std::move(self_ptr), boost::system::error_code{}, std::move(existing));
-            }
             }
 
             auto token_def = boost::asio::bind_executor(strand_, boost::asio::bind_allocator(allocator, boost::asio::deferred));
@@ -585,24 +588,23 @@ private:
             conn->start();
 
             connection_ref replaced;
-            {
-            std::scoped_lock lock{self->connections_mtx_};
-
-            const auto it = self->connections_.find(guild_id);
-            if (it != self->connections_.end()) {
-                replaced = std::move(it->second.conn);
-                self->connections_.erase(it);
-            }
-
-            self->connections_.emplace(guild_id, data{
+            data new_entry{
                 .channel_id = channel_id,
                 .session_id{std::move(voice_state_update_event.session_id)},
                 .conn = conn,
                 .refreshing = false,
                 .muted = options.muted,
                 .deaf = options.deaf,
-            });
-            }
+            };
+
+            self->connections_.try_emplace_or_visit(
+                guild_id,
+                new_entry,
+                [&](auto& entry) {
+                    replaced = std::move(entry.second.conn);
+                    entry.second = std::move(new_entry);
+                }
+            );
 
             discusy::voice::client<botT>::destroy_connection(std::move(replaced));
 
@@ -702,14 +704,10 @@ public:
 
     bool disconnect(const snowflake guild_id) {
         connection_ref conn;
-        {
-        std::scoped_lock lock{connections_mtx_};
-        const auto it = connections_.find(guild_id);
-        if (it != connections_.end()) {
-            conn = std::move(it->second.conn);
-            connections_.erase(it);
-        }
-        }
+        connections_.erase_if(guild_id, [&](auto& entry) {
+            conn = std::move(entry.second.conn);
+            return true;
+        });
 
         const auto success = bot_.update_voice_state(send_event::update_voice_state{
             .guild_id{guild_id}, // channel id is null by default
@@ -720,11 +718,12 @@ public:
         return success;
     }
 
-    [[nodiscard]] connection_ref get(const snowflake guild_id) {
-        std::scoped_lock lock{connections_mtx_};
-        const auto it = connections_.find(guild_id);
-        if (it == connections_.end()) return nullptr;
-        return it->second.conn;
+    [[nodiscard]] connection_ref get(const snowflake guild_id) const {
+        connection_ref conn;
+        connections_.cvisit(guild_id, [&](const auto& entry) {
+            conn = entry.second.conn;
+        });
+        return conn;
     }
 
     ~client() {
@@ -733,15 +732,17 @@ public:
         if (on_channel_update_ != 0UZ) bot_.gateway_callbacks.on_channel_update.unregister(on_channel_update_);
         if (on_shard_session_invalidated_ != 0UZ) bot_.state_.shard_session_invalidated.unregister(on_shard_session_invalidated_);
 
-        std::unordered_map<snowflake, data> dying;
-        {
-        std::scoped_lock lock{connections_mtx_};
-        dying = std::move(connections_);
-        connections_.clear();
-        }
+        std::vector<connection_ref> dying;
+        dying.reserve(connections_.size());
+        connections_.erase_if([&](auto& entry) {
+            if (entry.second.conn) {
+                dying.emplace_back(std::move(entry.second.conn));
+            }
+            return true;
+        });
 
-        for (auto& [_, entry] : dying) {
-            destroy_connection(std::move(entry.conn));
+        for (auto& conn : dying) {
+            destroy_connection(std::move(conn));
         }
     }
 
@@ -753,16 +754,6 @@ private:
         register_persistent_listeners();
     }
 
-    struct data {
-        snowflake channel_id;
-        std::string session_id;
-        connection_ref conn;
-        bool refreshing{false};
-
-        bool muted{false};
-        bool deaf{false};
-    };
-
     std::once_flag listeners_flag_{};
     callback_id on_voice_state_update_{0};
     callback_id on_voice_server_update_{0};
@@ -771,8 +762,7 @@ private:
 
     std::atomic<std::chrono::milliseconds> audio_ready_timeout_{std::chrono::seconds{10}};
 
-    std::mutex connections_mtx_;
-    std::unordered_map<snowflake, data> connections_;
+    boost::unordered::concurrent_flat_map<snowflake, voice_connection_data> connections_;
 };
 
 }
