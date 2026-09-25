@@ -58,9 +58,6 @@
 #include <boost/unordered/concurrent_flat_map.hpp> // IWYU pragma: keep
 #include <boost/circular_buffer.hpp> // IWYU pragma: keep
 #include <boost/container/small_vector.hpp> // IWYU pragma: keep
-#include <boost/type_erasure/any.hpp> // IWYU pragma: keep
-#include <boost/type_erasure/callable.hpp> // IWYU pragma: keep
-#include <boost/mpl/vector.hpp> // IWYU pragma: keep
 #include <boost/multi_index_container.hpp> // IWYU pragma: keep
 #include <boost/multi_index/hashed_index.hpp> // IWYU pragma: keep
 #include <boost/multi_index/member.hpp> // IWYU pragma: keep

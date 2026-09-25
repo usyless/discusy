@@ -5,6 +5,10 @@
 #include <utility>
 #include <concepts>
 #include <mutex>
+#include <atomic>
+#include <memory>
+
+#include <boost/container/small_vector.hpp>
 
 #include "coro.hpp"
 #include "io_context.hpp"
@@ -109,16 +113,18 @@ class Callback {
     };
 
     struct Snapshot {
-        std::vector<std::shared_ptr<callback_interface>> callbacks;
+        boost::container::small_vector<std::shared_ptr<callback_interface>, 4> callbacks;
         std::size_t system_count{0};
+        std::size_t async_count{0};
+        std::size_t active_count{0};
     };
 
     struct Core {
         boost::asio::any_io_executor exec;
-        std::vector<entry> callbacks;
+        boost::container::small_vector<entry, 4> callbacks;
         std::atomic<callback_id> cb_idx{0};
         size_t stale_count{0};
-        std::shared_ptr<const Snapshot> snapshot;
+        std::atomic<std::shared_ptr<const Snapshot>> snapshot{nullptr};
         std::atomic<std::size_t> active_count{0};
         std::size_t async_count{0};
         std::mutex mtx;
@@ -127,7 +133,7 @@ class Callback {
 
         void rebuild_snapshot() {
             if (stale_count > 0) {
-                std::vector<entry> compacted;
+                boost::container::small_vector<entry, 4> compacted;
                 compacted.reserve(callbacks.size() - stale_count);
                 for (auto& e : callbacks) {
                     if (e.func && !e.func->unregistered.load(std::memory_order_relaxed)) {
@@ -162,9 +168,11 @@ class Callback {
             }
 
             snap->system_count = sys_c;
-            snapshot = std::move(snap);
+            snap->async_count = async_c;
+            snap->active_count = active;
             async_count = async_c;
             active_count.store(active, std::memory_order_release);
+            snapshot.store(std::move(snap), std::memory_order_release);
         }
 
         bool unregister(const callback_id id) {
@@ -197,19 +205,8 @@ class Callback {
             return true;
         }
 
-        struct SnapshotView {
-            std::shared_ptr<const Snapshot> data;
-            std::size_t async_count;
-            std::size_t active_count;
-        };
-
-        SnapshotView get_snapshot() {
-            std::scoped_lock lock{mtx};
-            return SnapshotView{
-                .data = snapshot,
-                .async_count = async_count,
-                .active_count = active_count.load(std::memory_order_acquire),
-            };
+        [[nodiscard]] std::shared_ptr<const Snapshot> get_snapshot() const noexcept {
+            return snapshot.load(std::memory_order_acquire);
         }
     };
 
@@ -351,7 +348,7 @@ public:
     ~Callback() {
         if (!core_) return;
 
-        std::vector<std::shared_ptr<callback_interface>> pending;
+        boost::container::small_vector<std::shared_ptr<callback_interface>, 4> pending;
         {
         std::scoped_lock lock{core_->mtx};
         if (!core_->callbacks.empty()) {
@@ -526,17 +523,17 @@ public:
     void fire(T&& data) {
         if (!core_ || core_->active_count.load(std::memory_order_acquire) == 0) return;
         auto snap = core_->get_snapshot();
-        if (!snap.data || (snap.active_count == 0) || snap.data->callbacks.empty()) return;
+        if (!snap || (snap->active_count == 0) || snap->callbacks.empty()) return;
 
         attach_bot(data, bot_ptr_);
 
         try {
-            if (snap.async_count == 0) {
-                io_ctx_.submit([snap = std::move(snap.data), data = std::move(data)]() mutable {
+            if (snap->async_count == 0) {
+                io_ctx_.submit([snap = std::move(snap), data = std::move(data)]() mutable {
                     fire_sync_internal(std::move(snap), data);
                 });
             } else {
-                io_ctx_.co_launch_detached([snap = std::move(snap.data), data = std::move(data)]() mutable {
+                io_ctx_.co_launch_detached([snap = std::move(snap), data = std::move(data)]() mutable {
                     return fire_async_internal(std::move(snap), std::move(data));
                 });
             }
@@ -557,18 +554,18 @@ public:
     void fire_json(std::string&& json) {
         if (!core_ || core_->active_count.load(std::memory_order_acquire) == 0) return;
         auto snap = core_->get_snapshot();
-        if (!snap.data || (snap.active_count == 0) || snap.data->callbacks.empty()) return;
+        if (!snap || (snap->active_count == 0) || snap->callbacks.empty()) return;
 
         try {
-            if (snap.async_count == 0) {
-                io_ctx_.submit([bot_ptr_ = bot_ptr_, snap = std::move(snap.data), json = std::move(json)]() mutable {
+            if (snap->async_count == 0) {
+                io_ctx_.submit([bot_ptr_ = bot_ptr_, snap = std::move(snap), json = std::move(json)]() mutable {
                     W p{};
                     if (json::parse_json(p, json)) return;
                     attach_bot(p.d, bot_ptr_);
                     fire_sync_internal(std::move(snap), p.d);
                 });
             } else {
-                io_ctx_.co_launch_detached([bot_ptr_ = bot_ptr_, snap = std::move(snap.data), json = std::move(json)]() mutable -> coro::awaitable<void> {
+                io_ctx_.co_launch_detached([bot_ptr_ = bot_ptr_, snap = std::move(snap), json = std::move(json)]() mutable -> coro::awaitable<void> {
                     W p{};
                     if (json::parse_json(p, json)) co_return;
                     attach_bot(p.d, bot_ptr_);
@@ -750,7 +747,7 @@ public:
 template <std::integral N>
 class CounterCallback {
 public:
-    CounterCallback(N target, std::function<void()> callback) noexcept
+    CounterCallback(N target, std::move_only_function<void()> callback) noexcept
         : counter_{target}, callback_{std::move(callback)} {}
 
     void arrive() {
@@ -761,7 +758,7 @@ public:
 
 private:
     std::atomic<N> counter_;
-    std::function<void()> callback_;
+    std::move_only_function<void()> callback_;
 };
 
 }

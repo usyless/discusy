@@ -368,9 +368,7 @@ set(BOOST_INCLUDE_LIBRARIES
     url
     container
     circular_buffer
-    mpl
     multi_index
-    type_erasure
     unordered
 )
 
@@ -400,11 +398,8 @@ target_link_libraries(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
     Boost::asio
     Boost::url
     Boost::container
-    Boost::type_erasure
     Boost::circular_buffer
-    Boost::mpl
     Boost::multi_index
-    Boost::type_erasure
     Boost::unordered
     libzstd_static
 )
