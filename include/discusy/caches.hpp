@@ -82,6 +82,9 @@ template <> struct hash_for<guild_scoped_id> { using type = guild_scoped_id_hash
 template <> struct hash_for<void> { using type = void; };
 template <typename T> using hash_for_t = hash_for<T>::type;
 
+struct by_key {};
+struct by_group {};
+
 }
 
 template <typename Key, typename Value, typename GroupKey = void>
@@ -354,8 +357,8 @@ public:
     }
 
 private:
-    struct by_key {};
-    struct by_group {};
+    using by_key = cache_detail::by_key;
+    using by_group = cache_detail::by_group;
 
     using key_hash = cache_detail::hash_for_t<Key>;
     using group_hash = cache_detail::hash_for_t<GroupKey>;

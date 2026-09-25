@@ -488,11 +488,8 @@ private:
         identify.token = cfg_.token;
         identify.intents = cfg_.intents;
         identify.shard = {shard_id_, total_shards_}; // maybe need to consider how new shards and stuff works?
-        {
-        std::shared_lock lock{state_.presence_mtx};
-        if (state_.presence) {
-            identify.presence.emplace(*state_.presence);
-        }
+        if (auto p = state_.presence.load(std::memory_order_acquire)) {
+            identify.presence.emplace(*p);
         }
 
         std::string out;

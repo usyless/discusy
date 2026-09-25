@@ -676,10 +676,7 @@ public:
         std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
         if (!lock.owns_lock()) return false;
 
-        {
-        std::scoped_lock p_lock{state_.presence_mtx};
-        state_.presence.emplace(presence);
-        }
+        state_.presence.store(std::make_shared<const send_event::update_presence>(presence), std::memory_order_release);
 
         const auto total_shards = total_shards_.load();
         if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
@@ -936,8 +933,7 @@ private:
             #endif
         }
         if (cfg_.initial_presence) {
-            std::scoped_lock lock{state_.presence_mtx}; // probably not needed
-            state_.presence.emplace(std::move(*cfg_.initial_presence));
+            state_.presence.store(std::make_shared<const send_event::update_presence>(std::move(*cfg_.initial_presence)), std::memory_order_release);
         }
         if (cfg_.max_pool_size) {
             client.set_max_pool_size(*cfg_.max_pool_size);

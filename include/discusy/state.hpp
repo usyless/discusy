@@ -4,6 +4,8 @@
 #include <shared_mutex>
 #include <string>
 #include <stop_token>
+#include <atomic>
+#include <memory>
 
 #include <boost/asio/ssl.hpp>
 
@@ -55,8 +57,7 @@ struct state {
     opt<std::once_flag> ready_flag{std::nullopt};
     std::shared_mutex details_mtx{};
 
-    opt<discusy::send_event::update_presence> presence{};
-    std::shared_mutex presence_mtx{};
+    std::atomic<std::shared_ptr<const discusy::send_event::update_presence>> presence{nullptr};
 
     opt<std::stop_source> sharding_required{std::nullopt};
     opt<std::stop_callback<std::move_only_function<void()>>> sharding_required_cb{std::nullopt};
