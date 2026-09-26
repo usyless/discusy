@@ -10,6 +10,7 @@
 #include <array>
 #include <thread>
 #include <vector>
+#include <version>
 #include <set>
 
 #include <sodium.h>
@@ -1830,7 +1831,11 @@ private:
     udp_client_t* udp_client_ = nullptr;
 
     // Escalation cb is tiny anyway, fits in SBO
+    #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
     using escalation_cb_t = std::move_only_function<void(escalation_action)>;
+    #else
+    using escalation_cb_t = std::function<void(escalation_action)>;
+    #endif
 
     escalation_cb_t on_escalation_;
 

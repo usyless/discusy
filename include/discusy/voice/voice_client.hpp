@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <new>
+#include <version>
 
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
@@ -441,11 +442,11 @@ private:
 
             auto token_def = boost::asio::bind_executor(strand_, boost::asio::bind_allocator(allocator, boost::asio::deferred));
 
-            auto voice_state_update = self->bot_.gateway_callbacks.on_voice_state_update.when_system([guild_id = guild_id, channel_id = channel_id, muted = options.muted, deaf = options.deaf, me = self->bot_id_](const recieve_event::voice_state_update& e) {
+            auto voice_state_update = self->bot_.gateway_callbacks.on_voice_state_update.when([guild_id = guild_id, channel_id = channel_id, muted = options.muted, deaf = options.deaf, me = self->bot_id_](const recieve_event::voice_state_update& e) {
                 return (e.user_id == me) && (e.guild_id.value_or(0) == guild_id) && (e.channel_id.value_or(0) == channel_id) && (e.self_mute == muted) && (e.self_deaf == deaf);
             }, token_def);
 
-            auto voice_server_update = self->bot_.gateway_callbacks.on_voice_server_update.when_system([guild_id = guild_id](const recieve_event::voice_server_update& e) {
+            auto voice_server_update = self->bot_.gateway_callbacks.on_voice_server_update.when([guild_id = guild_id](const recieve_event::voice_server_update& e) {
                 return e.guild_id == guild_id;
             }, token_def);
 

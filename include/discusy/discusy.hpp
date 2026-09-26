@@ -15,6 +15,7 @@
 #include <stop_token>
 #include <fstream>
 #include <functional>
+#include <version>
 
 #include <boost/asio.hpp>
 #include <boost/asio/stream_file.hpp>
@@ -300,7 +301,7 @@ public:
                 std::shared_ptr<chunk_state> state = std::allocate_shared<chunk_state>(alloc, alloc, exec_strand, std::forward<decltype(handler)>(handler), self->io_ctx.executor_);
                 state->accumulated.nonce = std::string(nonce.data(), nonce.size());
 
-                auto on_members_chunk = self->gateway_callbacks.on_guild_members_chunk.when_system([state, nonce = std::move(nonce), alloc](const recieve_event::guild_members_chunk& e) -> bool {
+                auto on_members_chunk = self->gateway_callbacks.on_guild_members_chunk.when([state, nonce = std::move(nonce), alloc](const recieve_event::guild_members_chunk& e) -> bool {
                     if (!e.nonce || (*e.nonce != std::string_view{nonce})) {
                         return false;
                     }
@@ -545,7 +546,7 @@ public:
                 auto exec_strand = self->io_ctx.make_strand();
                 std::shared_ptr<request_state> state = std::allocate_shared<request_state>(alloc, exec_strand, std::forward<decltype(handler)>(handler), self->io_ctx.executor_);
 
-                auto channel_info = self->gateway_callbacks.on_channel_info.when_system([id = info.guild_id](const recieve_event::channel_info& e) -> bool {
+                auto channel_info = self->gateway_callbacks.on_channel_info.when([id = info.guild_id](const recieve_event::channel_info& e) -> bool {
                     return e.guild_id == id;
                 }, boost::asio::bind_executor(exec_strand, boost::asio::bind_allocator(alloc, boost::asio::deferred)));
 
@@ -1081,7 +1082,13 @@ private:
 
             state_.shards_ready_counter.emplace(total_shards, [this]() {
                 io_ctx.post([this, me = state_.me]() mutable {
-                    std::vector<std::move_only_function<void()>> to_execute;
+                    std::vector<
+                    #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+                        std::move_only_function<void()>
+                    #else
+                        std::function<void()>
+                    #endif
+                    > to_execute;
                     {
                     std::scoped_lock q_lock{pending_shard_operations_mtx_};
                     to_execute = std::move(pending_shard_operations_queue_);
@@ -1332,7 +1339,13 @@ private:
 
     // always acquire shards_mutex before this
     std::mutex pending_shard_operations_mtx_;
-    std::vector<std::move_only_function<void()>> pending_shard_operations_queue_;
+    std::vector<
+    #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+        std::move_only_function<void()>
+    #else
+        std::function<void()>
+    #endif
+    > pending_shard_operations_queue_;
 
     callback_id on_user_update_id_{0};
     bool http_only_{false};

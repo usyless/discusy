@@ -5,6 +5,7 @@
 #include <string>
 #include <stop_token>
 #include <atomic>
+#include <version>
 #include <memory>
 
 #include <boost/asio/ssl.hpp>
@@ -60,10 +61,22 @@ struct state {
     std::atomic<std::shared_ptr<const discusy::send_event::update_presence>> presence{nullptr};
 
     opt<std::stop_source> sharding_required{std::nullopt};
-    opt<std::stop_callback<std::move_only_function<void()>>> sharding_required_cb{std::nullopt};
+    opt<std::stop_callback<
+    #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+        std::move_only_function<void()>
+    #else
+        std::function<void()>
+    #endif
+    >> sharding_required_cb{std::nullopt};
 
     opt<std::stop_source> fatal_error{std::nullopt};
-    opt<std::stop_callback<std::move_only_function<void()>>> fatal_error_cb{std::nullopt};
+    opt<std::stop_callback<
+    #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+        std::move_only_function<void()>
+    #else
+        std::function<void()>
+    #endif
+    >> fatal_error_cb{std::nullopt};
 };
 
 }
