@@ -15,10 +15,13 @@ namespace discusy {
 
 // unsure of whether to use boost::asio::post or boost::asio::dispatch here
 // validate use of this captures, since it lives with the bot object, the io context will be stopped if anything clearing this?
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class Timers {
 public:
     explicit Timers(ctx::io_context& ctx) noexcept : io_ctx_{ctx} {}
+    Timers(const Timers& other) = delete;
+    Timers& operator=(const Timers& other) = delete;
+    Timers(Timers&& other) = delete;
+    Timers& operator=(Timers&& other) = delete;
 
     /**
     * Starts an interval that schedules and executes a function on every tick.

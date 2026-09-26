@@ -32,9 +32,14 @@ namespace detail {
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class audio_runtime {
 public:
+    audio_runtime(const audio_runtime&) = delete;
+    audio_runtime& operator=(const audio_runtime&) = delete;
+
+    audio_runtime(audio_runtime&&) = delete;
+    audio_runtime& operator=(audio_runtime&&) = delete;
+
     using strand_t = boost::asio::strand<boost::asio::io_context::executor_type>;
 
     [[nodiscard]] static audio_runtime& instance() {
@@ -52,9 +57,6 @@ public:
     }
 
     [[nodiscard]] std::size_t thread_count() const noexcept { return nodes_.size(); }
-
-    audio_runtime(const audio_runtime&) = delete;
-    audio_runtime& operator=(const audio_runtime&) = delete;
 
 private:
     struct node {

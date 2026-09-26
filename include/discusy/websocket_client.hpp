@@ -31,12 +31,13 @@ using boost::asio::ip::tcp;
 inline constexpr std::uint16_t CLOSE_LOCAL = 100;     // our own graceful close completed
 inline constexpr std::uint16_t CLOSE_TRANSPORT = 101; // died outside of a websocket close frame
 
-struct message_t { // NOLINT(cppcoreguidelines-special-member-functions)
+struct message_t {
     std::string payload;
     bool rate_limited{false};
     bool binary{false};
 
     message_t() = default;
+    constexpr ~message_t() noexcept = default;
 
     message_t(message_t&&) noexcept = default;
     message_t& operator=(message_t&&) noexcept = default;
@@ -54,7 +55,6 @@ requires (
     std::invocable<std::decay_t<openHandler>&> && std::invocable<std::decay_t<connectHandler>&> &&
     std::invocable<std::decay_t<closeHandler>&, std::uint16_t> && std::invocable<std::decay_t<messageHandler>&, std::string_view, bool>
 )
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class websocket_client : public std::enable_shared_from_this<websocket_client<openHandler, closeHandler, messageHandler, connectHandler>> {
     using stream_t = websocket::stream<net::ssl::stream<ctx::io_context::strand_tcp_stream_t>>;
 
@@ -112,6 +112,11 @@ class websocket_client : public std::enable_shared_from_this<websocket_client<op
     }
 
 public:
+    websocket_client(websocket_client&&) = delete;
+    websocket_client& operator=(websocket_client&&) = delete;
+    websocket_client(const websocket_client&) = delete;
+    websocket_client& operator=(const websocket_client&) = delete;
+
     explicit websocket_client(ctx::io_context::strand_t strand, net::ssl::context& ctx)
         : strand_{std::move(strand)},
           ctx_{ctx},

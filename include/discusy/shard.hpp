@@ -36,12 +36,12 @@
 namespace discusy {
 
 // Don't construct this class yourself, make a discusy::bot instead
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class shard {
 public:
-    // delete copy constructors
     shard(const shard& other) = delete;
     shard& operator=(const shard& other) = delete;
+    shard(shard&& other) = delete;
+    shard& operator=(shard&& other) = delete;
 
     explicit shard(ctx::io_context& ctx, const std::uint32_t shard_id, const std::uint32_t total_shards, const config& cfg, state& state) : 
         state_{state},

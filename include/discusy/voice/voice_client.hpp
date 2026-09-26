@@ -30,7 +30,6 @@ struct voice_connection_data {
 
 // using the template is janky but icba with forward references for now
 template <typename botT>
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class client {
 private:
     botT& bot_;
@@ -68,6 +67,11 @@ private:
     };
 
 public:
+    client(client&&) = delete;
+    client& operator=(client&&) = delete;
+    client(const client&) = delete;
+    client& operator=(const client&) = delete;
+
     static constexpr auto required_intents = intent::guilds | intent::guild_voice_states;
     using connection = discusy::voice::connection;
     using connection_ref = std::shared_ptr<connection>;

@@ -211,9 +211,13 @@ struct channel_moved {
     snowflake new_channel_id;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class connection : public std::enable_shared_from_this<connection> {
 public:
+    connection(connection&&) = delete;
+    connection& operator=(connection&&) = delete;
+    connection(const connection&) = delete;
+    connection& operator=(const connection&) = delete;
+
     template <typename F>
     requires ( std::invocable<F&, escalation_action> )
     connection(ctx::io_context& ctx, state& state, snowflake server_id, snowflake channel_id, snowflake user_id, std::string session_id, std::string token, std::string endpoint, F&& escalation_cb) : 
