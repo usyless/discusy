@@ -317,7 +317,7 @@ public:
     }
 };
 
-class http_client_callback : public http_client_base {
+class http_client_callback final : public http_client_base {
 private:
     template <bool Api, typename Handler>
     struct request_state {
@@ -1089,7 +1089,7 @@ public:
 };
 
 // TODO: this client isn't used anwyay, but it runs on the system executor by default? it should probably recurse coroutines to switch strands
-class http_client_coro : public http_client_base {
+class http_client_coro final : public http_client_base {
 private:
     template <bool Api, discusy::asio::ctf<http::response> CompletionToken>
     auto request_impl_(http::method m, std::string url, std::string body, headers req_headers, http::options opts, CompletionToken&& token) {
