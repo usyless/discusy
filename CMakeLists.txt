@@ -89,13 +89,13 @@ endmacro()
 # Dependency Versions
 set_tracked_cache_version(DISCUSY_USYLIBPP_VERSION "main" "Version (git tag/branch) to use for usylibpp")
 set_tracked_cache_version(DISCUSY_ZSTD_VERSION "1.5.7" "Version (git tag/branch) to use for zstd - without the leading v")
-set_tracked_cache_version(DISCUSY_BOOST_VERSION "1.92.0" "Version (git tag/branch) to use for boost")
-set_tracked_cache_version(DISCUSY_GLAZE_VERSION "v8.4.0" "Version (git tag/branch) to use for glaze")
+set_tracked_cache_version(DISCUSY_BOOST_VERSION "boost-1.92.0" "Version (git tag/branch) to use for boost")
+set_tracked_cache_version(DISCUSY_GLAZE_VERSION "v9.0.0" "Version (git tag/branch) to use for glaze")
 set_tracked_cache_version(DISCUSY_OPENSSL_VERSION "4.0.1" "Version (git tag/branch) to use for openssl (UNUSED FOR NOW)")
 set_tracked_cache_version(DISCUSY_LIBSODIUM_VERSION "1.0.22-RELEASE" "Version (git tag/branch) to use for libsodium")
 set_tracked_cache_version(DISCUSY_NLOHMANN_JSON_VERSION "v3.12.0" "Version (git tag/branch) to use for nlohmann json")
-set_tracked_cache_version(DISCUSY_MLSPP_VERSION "92aaa4134fa45ec39957a7c81a342401fba7feb2" "Version (git tag/branch) to use for mlspp")
-set_tracked_cache_version(DISCUSY_LIBDAVE_VERSION "v1.2.0/cpp" "Version (git tag/branch) to use for libdave")
+set_tracked_cache_version(DISCUSY_MLSPP_VERSION "fc724c3100ce3b5d8565dbd6d93648a440991a8c" "Version (git tag/branch) to use for mlspp")
+set_tracked_cache_version(DISCUSY_LIBDAVE_VERSION "v1.2.1/cpp" "Version (git tag/branch) to use for libdave")
 set_tracked_cache_version(DISCUSY_OPUS_VERSION "v1.6.1" "Version (git tag/branch) to use for opus")
 set_tracked_cache_version(DISCUSY_MIMALLOC_VERSION "v3.5.3" "Version (git tag/branch) to use for mimalloc")
 set_tracked_cache_version(DISCUSY_CATCH2_VERSION "v3.16.0" "Version (git tag/branch) to use for Catch2")
@@ -355,7 +355,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     Boost
-    URL "https://github.com/boostorg/boost/releases/download/boost-${DISCUSY_BOOST_VERSION}/boost-${DISCUSY_BOOST_VERSION}-cmake.7z"
+    URL "https://github.com/boostorg/boost/releases/download/${DISCUSY_BOOST_VERSION}/${DISCUSY_BOOST_VERSION}-cmake.7z"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     EXCLUDE_FROM_ALL
     SYSTEM

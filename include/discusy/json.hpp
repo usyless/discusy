@@ -11,6 +11,7 @@
 namespace discusy::json {
 
 namespace detail {
+    // This probably isnt needed anymore as 9.0.0 fixes contexts not working after a failure
     constexpr void reset_ctx(glz::context& ctx) noexcept {
         ctx.error = glz::error_code::none;
         ctx.custom_error_message = {};
