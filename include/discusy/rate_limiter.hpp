@@ -86,7 +86,7 @@ public:
         return std::chrono::milliseconds{0};
     }
 
-    void update(const std::string& route_key, auto&& headers) {
+    void update(const std::string& route_key, const auto& headers) {
         auto bucket = headers["x-ratelimit-bucket"];
         auto remaining = headers["x-ratelimit-remaining"];
         auto reset_after = headers["x-ratelimit-reset-after"];
