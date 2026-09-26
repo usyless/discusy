@@ -12,10 +12,13 @@
 
 namespace discusy::zstd {
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class stream_decompressor {
 public:
-    stream_decompressor() : dctx_(ZSTD_createDCtx(), ZSTD_freeDCtx) {
+    static constexpr std::size_t buffer_size = 64UZ * 1024;
+    
+    stream_decompressor() // NOLINT(cppcoreguidelines-pro-type-member-init)
+        : dctx_(ZSTD_createDCtx(), ZSTD_freeDCtx),
+        output_{ .dst = tmp_.data(), .size = tmp_.size(), .pos = 0 } {
         if (!dctx_) throw std::runtime_error("ZSTD_createDCtx failed");
         ptr_ = dctx_.get();
     }
@@ -25,6 +28,9 @@ public:
     stream_decompressor(const stream_decompressor&) = delete;
     stream_decompressor& operator=(const stream_decompressor&) = delete;
 
+    stream_decompressor(stream_decompressor&&) = delete;
+    stream_decompressor& operator=(stream_decompressor&&) = delete;
+
     [[nodiscard]] std::string push(const std::string_view chunk) {
         ZSTD_inBuffer input{ .src=chunk.data(), .size=chunk.size(), .pos=0 };
         std::string decompressed_payload;
@@ -32,20 +38,19 @@ public:
         decompressed_payload.reserve(chunk.size() * 4);
 
         do {
-            std::array<std::uint8_t, 64UZ * 1024> tmp; // NOLINT(cppcoreguidelines-pro-type-member-init)
-            ZSTD_outBuffer output{ .dst=tmp.data(), .size=tmp.size(), .pos=0 };
+            output_.pos = 0;
 
-            size_t remaining_hint = ZSTD_decompressStream(ptr_, &output, &input);
+            size_t remaining_hint = ZSTD_decompressStream(ptr_, &output_, &input);
 
             if (ZSTD_isError(remaining_hint) != 0U) {
                 throw std::runtime_error(ulp::str::concat_strings("ZSTD_decompressStream failed: ", ZSTD_getErrorName(remaining_hint)));
             }
 
-            if (output.pos > 0) {
-                decompressed_payload.append(reinterpret_cast<const char*>(tmp.data()), output.pos);
+            if (output_.pos > 0) {
+                decompressed_payload.append(reinterpret_cast<const char*>(tmp_.data()), output_.pos);
             }
             
-            if (input.pos == input.size && output.pos < sizeof(tmp)) {
+            if (input.pos == input.size && output_.pos < tmp_.size()) {
                 break;
             }
         } while (true);
@@ -60,6 +65,8 @@ public:
 private:
     std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> dctx_;
     ZSTD_DCtx* ptr_;
+    std::array<std::uint8_t, buffer_size> tmp_;
+    ZSTD_outBuffer output_;
 };
 
 }
