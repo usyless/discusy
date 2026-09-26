@@ -88,7 +88,6 @@ struct by_group {};
 }
 
 template <typename Key, typename Value, typename GroupKey = void>
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class cache {
 public:
     static constexpr bool grouped = true;
@@ -105,6 +104,8 @@ public:
     cache& operator=(const cache&) = delete;
     cache(cache&&) = delete;
     cache& operator=(cache&&) = delete;
+
+    ~cache() noexcept = default;
 
     [[nodiscard]] bool enabled() const noexcept {
         return enabled_.load(std::memory_order_acquire);
@@ -391,7 +392,6 @@ private:
 };
 
 template <typename Key, typename Value>
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class cache<Key, Value, void> {
 public:
     static constexpr bool grouped = false;
@@ -408,6 +408,8 @@ public:
     cache& operator=(const cache&) = delete;
     cache(cache&&) = delete;
     cache& operator=(cache&&) = delete;
+
+    ~cache() noexcept = default;
 
     [[nodiscard]] bool enabled() const noexcept {
         return enabled_.load(std::memory_order_acquire);
@@ -591,7 +593,6 @@ inline void apply_member_update(discusy::guild::guild_member& dst, const recieve
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class cache_manager {
 public:
     explicit cache_manager(gateway_callbacks& callbacks) noexcept : callbacks_{callbacks} {}
@@ -600,6 +601,8 @@ public:
     cache_manager& operator=(const cache_manager&) = delete;
     cache_manager(cache_manager&&) = delete;
     cache_manager& operator=(cache_manager&&) = delete;
+
+    ~cache_manager() noexcept = default;
 
     // guild id -> guild
     cache<snowflake, cached_guild> guilds;
