@@ -186,7 +186,7 @@ class Callback {
             if (node->completed.load(std::memory_order_acquire)) return true;
             when_waiters_count.fetch_add(1, std::memory_order_release);
             try {
-                incoming_waiters.push_back(std::move(node));
+                incoming_waiters.emplace_back(std::move(node));
             } catch (...) {
                 when_waiters_count.fetch_sub(1, std::memory_order_release);
                 return false;
@@ -204,7 +204,7 @@ class Callback {
             incoming_waiters.clear();
             }
             for (auto& node : incoming) {
-                active_waiters.push_back(std::move(node));
+                active_waiters.emplace_back(std::move(node));
                 active_waiters.back()->vector_idx = active_waiters.size() - 1;
             }
         }
@@ -931,6 +931,7 @@ public:
                 if (!core->push_when_waiter(node)) {
                     if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
 
+                    // TODO: not 100% sure here
                     auto ex_imm = boost::asio::get_associated_immediate_executor(node->handler, executor);
                     boost::asio::dispatch(ex_imm, 
                         boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
