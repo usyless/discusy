@@ -3,7 +3,24 @@
 
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+
+struct mock_headers {
+    std::unordered_map<std::string, std::string> entries;
+
+    mock_headers() = default;
+    mock_headers(std::initializer_list<std::pair<const std::string, std::string>> init)
+        : entries(init) {}
+
+    std::string_view operator[](std::string_view key) const {
+        const auto it = entries.find(std::string(key));
+        if (it != entries.end()) {
+            return it->second;
+        }
+        return {};
+    }
+};
 
 TEST_CASE("RateLimiter: Route-to-bucket binding and delay calculation", "[rate_limiter]") {
     discusy::rate_limiter rl;
@@ -14,7 +31,7 @@ TEST_CASE("RateLimiter: Route-to-bucket binding and delay calculation", "[rate_l
     CHECK(rl.get_delay(route_a).count() == 0);
 
     // 2. Update with remaining = 0 and reset_after = 0.5s
-    std::unordered_map<std::string, std::string> headers_a{
+    mock_headers headers_a{
         {"x-ratelimit-bucket", "bucket_channel_123"},
         {"x-ratelimit-remaining", "0"},
         {"x-ratelimit-reset-after", "0.5"},
@@ -30,7 +47,7 @@ TEST_CASE("RateLimiter: Route-to-bucket binding and delay calculation", "[rate_l
     CHECK(rl.get_delay(route_b).count() == 0);
 
     // 5. Associating Route B with the same bucket causes it to share the delay
-    std::unordered_map<std::string, std::string> headers_b{
+    mock_headers headers_b{
         {"x-ratelimit-bucket", "bucket_channel_123"},
         {"x-ratelimit-remaining", "0"},
         {"x-ratelimit-reset-after", "0.4"},
@@ -39,7 +56,7 @@ TEST_CASE("RateLimiter: Route-to-bucket binding and delay calculation", "[rate_l
     CHECK(rl.get_delay(route_b).count() > 0);
 
     // 6. When quota is replenished (remaining > 0), delay is cleared
-    std::unordered_map<std::string, std::string> headers_replenished{
+    mock_headers headers_replenished{
         {"x-ratelimit-bucket", "bucket_channel_123"},
         {"x-ratelimit-remaining", "5"},
         {"x-ratelimit-reset-after", "0.3"},
