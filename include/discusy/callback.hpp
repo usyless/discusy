@@ -931,13 +931,10 @@ public:
                 if (!core->push_when_waiter(node)) {
                     if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
 
-                    boost::asio::post(executor, 
-                        boost::asio::bind_allocator(alloc, [node, alloc, ex]() mutable {
-                            boost::asio::dispatch(ex, 
-                                boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
-                                    node->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
-                                })
-                            );
+                    auto ex_imm = boost::asio::get_associated_immediate_executor(node->handler, executor);
+                    boost::asio::dispatch(ex_imm, 
+                        boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
+                            node->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
                         })
                     );
                 }
