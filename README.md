@@ -58,6 +58,9 @@ However there are some basic concepts to know:
 - Use `discusy::make_vector` and the equivalent set methods instead of initialiser lists when creating vectors - initialiser lists cause an unnecessary copy of all arguments
     - Try to use `discusy::make_array` when you need a non-dynamically sized array, such as for creating global commands
 - Coroutines are `discusy::coro::awaitable<T>`, which is an alias for `boost::asio::awaitable<T>`, make sure you know how to use coroutines before writing your own ones, including how they handle their arguments
+- The callbacks run in this order: system listeners, when predicates (no guaranteed order, then handlers at any point after), user listeners (cancellable)
+    - Listeners are meant to be registered once and then left alone (it is more expensive to register and unregister), whereas the when predicates are intended to be registered and unregistered with high concurrency
+    - Predicates can run concurrently, be sure to not make them mutable or add protections!
 ### **Make sure to check out the examples to have some code to work from!**
 
 ## Getting help

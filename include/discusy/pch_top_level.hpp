@@ -33,6 +33,7 @@
 #include <initializer_list> // IWYU pragma: keep
 #include <charconv> // IWYU pragma: keep
 #include <bit> // IWYU pragma: keep
+#include <limits> // IWYU pragma: keep
 
 #include <format> // IWYU pragma: keep
 #ifdef DISCUSY_LOGGING

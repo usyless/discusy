@@ -103,3 +103,184 @@ TEST_CASE("CounterCallback: Thread-safe rendezvous trigger", "[callback]") {
     barrier.arrive();
     CHECK(completions.load() == 1);
 }
+
+TEST_CASE("Callback: when() basic match and completion", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    bool matched = false;
+    int received_value = 0;
+
+    cb.when(
+        [](int val) { return val == 42; },
+        [&](boost::system::error_code ec, int val) {
+            CHECK(!ec);
+            matched = true;
+            received_value = val;
+        }
+    );
+
+    // Fire non-matching event first
+    cb.fire(10);
+    ctx->run();
+    CHECK(!matched);
+
+    ctx->restart();
+    // Fire matching event
+    cb.fire(42);
+    ctx->run();
+    CHECK(matched);
+    CHECK(received_value == 42);
+}
+
+TEST_CASE("Callback: Execution order system -> when -> user", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    std::vector<std::string> order;
+
+    // Register user listener
+    cb.listen(discusy::callback_priority::user, [&](int) {
+        order.emplace_back("user");
+    });
+
+    // Register system listener
+    cb.listen(discusy::callback_priority::system, [&](int) {
+        order.emplace_back("system");
+    });
+
+    // Register when waiter
+    cb.when(
+        [&](int val) {
+            CHECK(!order.empty());
+            CHECK(order.front() == "system");
+            return val == 100;
+        },
+        [&](boost::system::error_code ec, int) {
+            CHECK(!ec);
+            order.emplace_back("when");
+        }
+    );
+
+    cb.fire(100);
+    ctx->run();
+
+    REQUIRE(order.size() == 3);
+    CHECK(order[0] == "system");
+    CHECK(order[1] == "when");
+    CHECK(order[2] == "user");
+}
+
+TEST_CASE("Callback: when() aborted on Callback destruction", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    bool aborted = false;
+
+    {
+        discusy::Callback<int> cb{ctx};
+        cb.when(
+            [](int) { return true; },
+            [&](boost::system::error_code ec, int) {
+                if (ec == boost::asio::error::operation_aborted) {
+                    aborted = true;
+                }
+            }
+        );
+        // cb destroyed here without firing
+    }
+
+    ctx->run();
+    CHECK(aborted);
+}
+
+TEST_CASE("Callback: when() cancellation slot support", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    boost::asio::cancellation_signal sig;
+    bool cancelled = false;
+
+    cb.when(
+        [](int) { return true; },
+        boost::asio::bind_cancellation_slot(
+            sig.slot(),
+            [&](boost::system::error_code ec, int) {
+                if (ec == boost::asio::error::operation_aborted) {
+                    cancelled = true;
+                }
+            }
+        )
+    );
+
+    // Cancel before any fire
+    sig.emit(boost::asio::cancellation_type::terminal);
+
+    ctx->run();
+    CHECK(cancelled);
+}
+
+TEST_CASE("Callback: when() coroutine awaitable support", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    bool coroutine_completed = false;
+    int result = 0;
+
+    ctx.co_launch_detached([&]() -> discusy::coro::awaitable<void> {
+        result = co_await cb.when([](int x) { return x == 777; }, boost::asio::use_awaitable);
+        coroutine_completed = true;
+    });
+
+    cb.fire(1);
+    cb.fire(777);
+
+    ctx->run();
+    CHECK(coroutine_completed);
+    CHECK(result == 777);
+}
+
+TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
+    discusy::ctx::io_context ctx{2};
+    discusy::Callback<int> cb{ctx};
+
+    constexpr int NUM_WAITERS = 100;
+    std::atomic<int> completed_count{0};
+
+    // Register waiters across multiple threads
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&, t]() {
+            for (int i = 0; i < NUM_WAITERS / 4; ++i) {
+                cb.when(
+                    [val = t * 100 + i](int x) { return x == val; },
+                    [&](boost::system::error_code ec, int) {
+                        if (!ec) {
+                            completed_count.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                );
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    threads.clear();
+
+    // Fire matching events concurrently
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&, t]() {
+            for (int i = 0; i < NUM_WAITERS / 4; ++i) {
+                cb.fire(t * 100 + i);
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    ctx->run();
+    CHECK(completed_count.load() == NUM_WAITERS);
+}
+
