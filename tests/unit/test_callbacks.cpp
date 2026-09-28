@@ -122,7 +122,7 @@ TEST_CASE("Callback: when() basic match and completion", "[callback]") {
 
     // Fire non-matching event first
     cb.fire(10);
-    ctx->run();
+    ctx->poll();
     CHECK(!matched);
 
     ctx->restart();
@@ -230,8 +230,10 @@ TEST_CASE("Callback: when() coroutine awaitable support", "[callback]") {
         coroutine_completed = true;
     });
 
-    cb.fire(1);
-    cb.fire(777);
+    ctx.post([&]() {
+        cb.fire(1);
+        cb.fire(777);
+    });
 
     ctx->run();
     CHECK(coroutine_completed);
@@ -240,19 +242,21 @@ TEST_CASE("Callback: when() coroutine awaitable support", "[callback]") {
 
 TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
     discusy::ctx::io_context ctx{2};
-    discusy::Callback<int> cb{ctx};
+    discusy::Callback<std::size_t> cb{ctx};
 
-    constexpr int NUM_WAITERS = 100;
-    std::atomic<int> completed_count{0};
+    constexpr std::size_t NUM_WAITERS = 100;
+    std::atomic<std::size_t> completed_count{0};
 
     // Register waiters across multiple threads
     std::vector<std::thread> threads;
-    for (int t = 0; t < 4; ++t) {
+    static constexpr std::size_t num_threads = 4;
+    threads.reserve(num_threads);
+    for (std::size_t t = 0; t < num_threads; ++t) {
         threads.emplace_back([&, t]() {
-            for (int i = 0; i < NUM_WAITERS / 4; ++i) {
+            for (std::size_t i = 0; i < NUM_WAITERS / num_threads; ++i) {
                 cb.when(
-                    [val = t * 100 + i](int x) { return x == val; },
-                    [&](boost::system::error_code ec, int) {
+                    [val = (t * 100) + i](std::size_t x) { return x == val; },
+                    [&](boost::system::error_code ec, std::size_t) {
                         if (!ec) {
                             completed_count.fetch_add(1, std::memory_order_relaxed);
                         }
@@ -268,10 +272,10 @@ TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
     threads.clear();
 
     // Fire matching events concurrently
-    for (int t = 0; t < 4; ++t) {
+    for (std::size_t t = 0; t < num_threads; ++t) {
         threads.emplace_back([&, t]() {
-            for (int i = 0; i < NUM_WAITERS / 4; ++i) {
-                cb.fire(t * 100 + i);
+            for (std::size_t i = 0; i < NUM_WAITERS / num_threads; ++i) {
+                cb.fire((t * 100) + i);
             }
         });
     }

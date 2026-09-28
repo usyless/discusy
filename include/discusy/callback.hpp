@@ -816,27 +816,19 @@ public:
             if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
 
             try {
-                boost::asio::post(io_exec,
-                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = data, ex = this->ex, alloc = this->alloc]() mutable {
-                        boost::asio::dispatch(ex,
-                            boost::asio::bind_allocator(alloc, [self = std::move(self), d = std::move(d)]() mutable {
-                                static_cast<when_node*>(self.get())->complete(boost::system::error_code{}, std::move(d));
-                            })
-                        );
+                boost::asio::dispatch(ex,
+                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = data]() mutable {
+                        static_cast<when_node*>(self.get())->complete(boost::system::error_code{}, std::move(d));
                     })
                 );
             } catch (...) {
                 #ifdef DISCUSY_LOGGING
-                log::Logger{}("When handler post exception");
+                log::Logger{}("When handler dispatch exception");
                 #endif
                 try {
-                    boost::asio::post(io_exec,
-                        boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc = this->alloc]() mutable {
-                            boost::asio::dispatch(ex,
-                                boost::asio::bind_allocator(alloc, [self = std::move(self)]() mutable {
-                                    static_cast<when_node*>(self.get())->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
-                                })
-                            );
+                    boost::asio::dispatch(ex,
+                        boost::asio::bind_allocator(alloc, [self = this->shared_from_this()]() mutable {
+                            static_cast<when_node*>(self.get())->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
                         })
                     );
                 } catch (...) {} // NOLINT(bugprone-empty-catch)
