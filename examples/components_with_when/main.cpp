@@ -69,7 +69,10 @@ int main() {
     // Handle all interactions using .when on the callback instead of a centralized component branch!
     // This allows keeping the component response logic co-located with the slash command that created it.
     bot.gateway_callbacks.on_interaction_create([&bot](const recieve_event::interaction_create& e) -> coro::awaitable<void> {
-        // Executor timer here is fine as the bot is running single threaded, otherwise use strand timer
+        // Executor timer here is fine as the bot is running single threaded (.threads = 1).
+        // If running multi-threaded (.threads > 1), you MUST use a strand_timer_t, bind the token
+        // to that strand, and dispatch the coroutine onto the strand prior to .when()!
+        // See examples/multithreading for the full walkthrough.
         ctx::io_context::executor_timer_t timer{bot.io_ctx.executor_};
 
         // Slash Commands

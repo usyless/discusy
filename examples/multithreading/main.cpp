@@ -220,6 +220,10 @@ int main() {
             //      and bind the completion token to that same strand using token::bind_executor.
             //    - A strand guarantees sequential, non-concurrent execution of all tasks associated
             //      with it, guaranteeing that timer expiry and operation completion never race.
+            // 3. INITIATION ON THE STRAND: 
+            //    - Because async_initiate runs synchronously at the call site, you must dispatch
+            //      your coroutine onto the strand BEFORE calling .when(...) so that cancellation 
+            //      slot assignment is protected by the strand.
             // =========================================================================
 
             // Create a strand from the bot's IO context
@@ -238,6 +242,11 @@ int main() {
                     h::button(components::button_style::Primary, "Click me within 10s!", btn_id)
                 )
             ))(token::detached);
+
+            // We must dispatch onto the strand to assign the operation, otherwise our handler may run alongside
+            // the when initiation, causing a data race on the assignment of the cancellation slot
+            // By calling .when on the strand, this cannot happen
+            co_await boost::asio::dispatch(strand, boost::asio::deferred);
 
             // Await the button click using .when combined with token::cancel_after.
             // NOTICE: We MUST wrap our token in token::bind_executor(strand, ...) so that the completion
