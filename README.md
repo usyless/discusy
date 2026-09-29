@@ -52,6 +52,7 @@ However there are some basic concepts to know:
     - Connecting to a voice channel gives you a shared pointer to a connection, on which you can send audio asynchronously and synchronously, pause/play, and handle events.
     - This shared pointer is safe to hold even past the bot being in a voice channel, although it will not perform any operations at that point and should be dropped to free memory
     - Once you recieve the voice connection object, it is ready to send audio!
+    - The bitrate of the opus encoder is automatically adjusted based on the channel the bot is in, channel moves and channel updates are also handled.
 - The http client is under `discusy::bot::client` and can perform HTTP/1.1 requests with a few configuration options
     - The `api` methods are rate limited for Discords API - don't use these yourself unless if youre manually making Discord API requests
 - The http api is under `discusy::bot::api` and has a method for every single path within the Discord API, however these may only be called after the `discusy::bot::on_shards_ready` event fires at least once to populate internal state
