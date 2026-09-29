@@ -38,6 +38,7 @@
 #include "log.hpp" // IWYU pragma: keep
 #include "ssl.hpp"
 #include "config.hpp"
+#include "atomic_shared_ptr.hpp"
 #include "state.hpp"
 #include "http_api.hpp"
 #include "shard.hpp"
@@ -1081,7 +1082,7 @@ private:
             }
 
             state_.shards_ready_counter.emplace(total_shards, [this]() {
-                io_ctx.post([this, me = state_.me]() mutable {
+                io_ctx.post([this]() {
                     std::vector<
                     #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
                         std::move_only_function<void()>
@@ -1097,7 +1098,7 @@ private:
                     for (auto& task : to_execute) {
                         std::invoke(std::move(task));
                     }
-                    // this should be safe??? idk
+                    auto me = get_me();
                     #ifdef DISCUSY_VOICE
                     voice.set_id(me.id);
                     #endif

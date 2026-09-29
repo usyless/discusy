@@ -18,6 +18,7 @@
 #include "log.hpp" // IWYU pragma: keep
 #include "json.hpp"
 #include "asio_helpers.hpp"
+#include "atomic_shared_ptr.hpp"
 
 namespace discusy {
 
@@ -158,7 +159,7 @@ class Callback {
         boost::container::small_vector<entry, 4> user_callbacks;
         std::atomic<callback_id> cb_idx{0};
         std::size_t stale_count{0};
-        std::atomic<std::shared_ptr<const Snapshot>> snapshot{nullptr};
+        atomic_shared_ptr<const Snapshot> snapshot{nullptr};
         std::atomic<std::size_t> active_count{0};
         std::size_t async_count{0};
         std::mutex mtx;

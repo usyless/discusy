@@ -14,6 +14,7 @@
 #include "timers.hpp"
 #include "gateway_events.hpp"
 #include "callback.hpp"
+#include "atomic_shared_ptr.hpp"
 #include "types.hpp"
 
 namespace discusy {
@@ -58,7 +59,7 @@ struct state {
     opt<std::once_flag> ready_flag{std::nullopt};
     std::shared_mutex details_mtx{};
 
-    std::atomic<std::shared_ptr<const discusy::send_event::update_presence>> presence{nullptr};
+    atomic_shared_ptr<const discusy::send_event::update_presence> presence{nullptr};
 
     opt<std::stop_source> sharding_required{std::nullopt};
     opt<std::stop_callback<
