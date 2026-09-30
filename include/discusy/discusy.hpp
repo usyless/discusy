@@ -1306,8 +1306,6 @@ private:
     #else
     log::Logger json_logger{};
     #endif
-
-    std::vector<std::jthread> worker_threads;
 public:
     ctx::io_context io_ctx;
 private:
@@ -1350,6 +1348,8 @@ private:
 
     callback_id on_user_update_id_{0};
     bool http_only_{false};
+
+    std::vector<std::jthread> worker_threads;
 
 #ifdef DISCUSY_VOICE
 public:
