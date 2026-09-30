@@ -6,10 +6,22 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 
 #include <opus.h>
 
 namespace discusy::voice {
+
+namespace detail {
+    template <typename T>
+    struct is_span_helper : std::false_type {};
+
+    template <typename ElementType, std::size_t Extent>
+    struct is_span_helper<std::span<ElementType, Extent>> : std::true_type {};
+
+    template <typename T>
+    inline constexpr bool is_span_v = is_span_helper<std::remove_cvref_t<T>>::value;
+}
 
 enum class escalation_action : std::uint8_t {
     requires_gateway_reconnect,

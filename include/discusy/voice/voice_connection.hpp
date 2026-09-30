@@ -24,19 +24,9 @@
 #include "../udp_client.hpp"
 #include "dave.hpp"
 #include "internal.hpp"
+#include "opus_encoder.hpp"
 
 namespace discusy::voice {
-
-namespace detail {
-    template <typename T>
-    struct is_span_helper : std::false_type {};
-
-    template <typename ElementType, std::size_t Extent>
-    struct is_span_helper<std::span<ElementType, Extent>> : std::true_type {};
-
-    template <typename T>
-    inline constexpr bool is_span_v = is_span_helper<std::remove_cvref_t<T>>::value;
-}
 
 // recieve structs
 struct recieve_payload_base {
@@ -214,6 +204,8 @@ struct channel_moved {
 
 class connection : public std::enable_shared_from_this<connection> {
 public:
+    using opus_encoder = discusy::voice::opus_encoder;
+
     connection(connection&&) = delete;
     connection& operator=(connection&&) = delete;
     connection(const connection&) = delete;
@@ -241,23 +233,6 @@ public:
     {
         setup_gateway_callbacks();
         ws_.pause();
-
-        int opus_err = OPUS_OK;
-        opus_encoder_ = opus_encoder_create(DISCORD_SAMPLING_RATE, DISCORD_CHANNELS, OPUS_APPLICATION_AUDIO, &opus_err);
-
-        if (opus_err != OPUS_OK) {
-            #ifdef DISCUSY_LOGGING
-            log("Failed to create opus encoder: {}", opus_strerror(opus_err));
-            #endif
-            throw std::runtime_error("Failed to create opus encoder!");
-        }
-
-        opus_err = opus_encoder_ctl(opus_encoder_, OPUS_SET_BITRATE(DEFAULT_OPUS_BITRATE));
-        if (opus_err != OPUS_OK) {
-            #ifdef DISCUSY_LOGGING
-            log("Failed to set opus bitrate: {}", opus_strerror(opus_err));
-            #endif
-        }
     }
 
     void start() {
@@ -449,21 +424,37 @@ public:
     }
 
     bool set_inband_fec(const bool enabled) {
-        return opus_ctl("inband fec", OPUS_SET_INBAND_FEC(enabled ? 1 : 0));
+        if (closed_.load(std::memory_order_acquire)) return false;
+        return encoder_.set_inband_fec(enabled);
     }
 
     bool set_expected_packet_loss(const int percentage) {
-        return opus_ctl("packet loss percentage", OPUS_SET_PACKET_LOSS_PERC(std::clamp(percentage, 0, 100)));
+        if (closed_.load(std::memory_order_acquire)) return false;
+        return encoder_.set_expected_packet_loss(percentage);
     }
 
     bool set_opus_complexity(const int complexity) {
-        return opus_ctl("complexity", OPUS_SET_COMPLEXITY(std::clamp(complexity, 0, 10)));
+        if (closed_.load(std::memory_order_acquire)) return false;
+        return encoder_.set_complexity(complexity);
     }
 
     // OPUS_SIGNAL_MUSIC / OPUS_SIGNAL_VOICE / OPUS_AUTO
     bool set_opus_signal(const int signal) {
-        return opus_ctl("signal", OPUS_SET_SIGNAL(signal));
+        if (closed_.load(std::memory_order_acquire)) return false;
+        return encoder_.set_signal(signal);
     }
+
+    bool reset_opus_state() noexcept {
+        if (closed_.load(std::memory_order_acquire)) return false;
+        return encoder_.reset_state();
+    }
+
+    bool reset_encoder_state() noexcept {
+        return reset_opus_state();
+    }
+
+    [[nodiscard]] opus_encoder& encoder() noexcept { return encoder_; }
+    [[nodiscard]] const opus_encoder& encoder() const noexcept { return encoder_; }
 
     [[nodiscard]] snowflake get_guild_id() const noexcept { return server_id_; }
     [[nodiscard]] snowflake get_server_id() const noexcept { return server_id_; }
@@ -476,39 +467,24 @@ public:
     bool opus_ctl([[maybe_unused]] const std::string_view what, Request&&... request) {
         if (closed_.load(std::memory_order_acquire)) return false;
 
-        int opus_err = 0;
-        {
-        std::scoped_lock lock{opus_mutex_};
-        if (!opus_encoder_) return false;
-        opus_err = opus_encoder_ctl(opus_encoder_, std::forward<Request>(request)...);
+        const bool ok = encoder_.ctl(std::forward<Request>(request)...);
+        #ifdef DISCUSY_LOGGING
+        if (!ok) {
+            log("Failed to set opus {}", what);
         }
+        #endif
+        return ok;
+    }
 
-        if (opus_err != OPUS_OK) {
-            #ifdef DISCUSY_LOGGING
-            log("Failed to set opus {}: {}", what, opus_strerror(opus_err));
-            #endif
-            return false;
-        }
+    // May be called concurrently while encoding is happening
+    bool set_bitrate(const std::uint32_t bitrate) noexcept {
+        if (closed_.load(std::memory_order_acquire)) return false;
+        target_bitrate_.store(bitrate, std::memory_order_relaxed);
         return true;
     }
 
-    bool set_bitrate(const std::uint32_t bitrate) {
-        if (closed_.load(std::memory_order_acquire)) return false;
-
-        int opus_err = 0;
-        {
-        std::scoped_lock lock{opus_mutex_};
-        if (opus_encoder_ == nullptr) return false;
-        opus_err = opus_encoder_ctl(opus_encoder_, OPUS_SET_BITRATE(bitrate));
-        }
-
-        if (opus_err != OPUS_OK) {
-            #ifdef DISCUSY_LOGGING
-            log("Failed to set opus bitrate: {}", opus_strerror(opus_err));
-            #endif
-            return false;
-        }
-        return true;
+    [[nodiscard]] std::uint32_t get_bitrate() const noexcept {
+        return target_bitrate_.load(std::memory_order_relaxed);
     }
 
     // make sure the frame isnt bigger than voice::MAX_OPUS_FRAME_BYTES bytes
@@ -535,8 +511,8 @@ public:
         if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
 
         try {
-            std::unique_lock lock{opus_mutex_};
-            if (opus_encoder_ == nullptr) return;
+            if (!encoder_) return;
+            check_and_apply_bitrate();
 
             static constexpr int SAMPLES_PER_FRAME = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
             static constexpr int TOTAL_FRAME_SAMPLES = SAMPLES_PER_FRAME * DISCORD_CHANNELS;
@@ -555,7 +531,7 @@ public:
             std::array<std::int16_t, TOTAL_FRAME_SAMPLES> padded_pcm{};
 
             for (size_t pos = 0; pos < total; pos += TOTAL_FRAME_SAMPLES) {
-                if (closed_.load(std::memory_order_acquire) || (opus_encoder_ == nullptr)) return;
+                if (closed_.load(std::memory_order_acquire) || !encoder_) return;
 
                 const size_t remaining_samples = total - pos;
                 const std::int16_t* current_pcm_ptr = pcm_data.data() + pos;
@@ -568,8 +544,7 @@ public:
                 }
 
                 discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>& opus_out = batch.emplace_back();
-                const int bytes_encoded = opus_encode(
-                    opus_encoder_, 
+                const int bytes_encoded = encoder_.encode_frame(
                     current_pcm_ptr, 
                     SAMPLES_PER_FRAME, 
                     opus_out.raw_buf.data(), 
@@ -583,20 +558,18 @@ public:
                 }
 
                 if (batch.size() >= batch_frames_limit) {
-                    lock.unlock();
                     send_opus_frames(std::move(batch));
                     batch = {};
                     batch.reserve(batch_frames_limit);
 
                     std::this_thread::yield();
 
-                    lock.lock();
-                    if (closed_.load(std::memory_order_acquire) || (opus_encoder_ == nullptr)) return;
+                    if (closed_.load(std::memory_order_acquire) || !encoder_) return;
+                    check_and_apply_bitrate();
                 }
             }
 
             if (!batch.empty()) {
-                lock.unlock();
                 send_opus_frames(std::move(batch));
             }
         }
@@ -810,13 +783,7 @@ private:
         ws_.close();
         ws_.clear();
 
-        {
-        std::scoped_lock lock{opus_mutex_};
-        if (opus_encoder_ != nullptr) {
-            opus_encoder_destroy(opus_encoder_);
-            opus_encoder_ = nullptr;
-        }
-        }
+        encoder_.destroy();
 
         on_closed.fire(voice_closed{.guild_id = server_id_});
     }
@@ -1846,8 +1813,18 @@ private:
     dave dave_;
     std::mutex encryptor_mutex_;
 
-    std::mutex opus_mutex_;
-    OpusEncoder* opus_encoder_{nullptr};
+    opus_encoder encoder_{};
+    std::atomic<std::uint32_t> target_bitrate_{DEFAULT_OPUS_BITRATE};
+    std::uint32_t applied_bitrate_{DEFAULT_OPUS_BITRATE};
+
+    void check_and_apply_bitrate() noexcept {
+        const auto target = target_bitrate_.load(std::memory_order_relaxed);
+        if (target != applied_bitrate_) {
+            if (encoder_.set_bitrate(target)) {
+                applied_bitrate_ = target;
+            }
+        }
+    }
     
     std::uint32_t ssrc_{0};
 

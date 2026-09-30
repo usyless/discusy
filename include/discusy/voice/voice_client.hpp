@@ -76,6 +76,7 @@ public:
     static constexpr auto required_intents = intent::guilds | intent::guild_voice_states;
     using connection = discusy::voice::connection;
     using connection_ref = std::shared_ptr<connection>;
+    using opus_encoder = discusy::voice::opus_encoder;
     using data = voice_connection_data;
 
     // this does not mean the connection will be valid, just that it was created
