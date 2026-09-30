@@ -40,7 +40,6 @@ public:
 
         timer->async_wait([i = this, interval, func = std::forward<F>(f), id, timer](this auto&& self, asio::ec_t ec) -> void {
             if (ec) return;
-            i->timers_.erase(id);
 
             i->io_ctx_.handle_callback_coro_normal(func, id);
 
