@@ -13,8 +13,6 @@
 
 namespace discusy {
 
-// unsure of whether to use boost::asio::post or boost::asio::dispatch here
-// validate use of this captures, since it lives with the bot object, the io context will be stopped if anything clearing this?
 class Timers {
 public:
     explicit Timers(ctx::io_context& ctx) noexcept : io_ctx_{ctx} {}
@@ -33,19 +31,60 @@ public:
         const auto id = next_id();
 
         t tmr{io_ctx_.make_strand()};
-        std::shared_ptr<ctx::io_context::strand_timer_t> timer{tmr.timer_};
-        timer->expires_after(interval);
+        auto timer = tmr.timer_;
+        auto strand = tmr.strand_;
 
         timers_.emplace(id, std::move(tmr));
 
-        timer->async_wait([i = this, interval, func = std::forward<F>(f), id, timer](this auto&& self, asio::ec_t ec) -> void {
-            if (ec) return;
+        if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, discusy::timer>>) {
+            ctx::io_context::co_launch_detached<ctx::launch::fresh>(
+                [id, timer, interval, f = std::forward<F>(f)]() -> coro::awaitable<void> {
+                    timer->expires_after(interval);
+                    while (true) {
+                        auto [ec] = co_await timer->async_wait(boost::asio::as_tuple(boost::asio::deferred));
+                        if (ec) co_return;
 
-            i->io_ctx_.handle_callback_coro_normal(func, id);
+                        timer->expires_at(timer->expiry() + interval);
 
-            timer->expires_at(timer->expiry() + interval);
-            timer->async_wait(std::forward<decltype(self)>(self));
-        });
+                        try {
+                            co_await std::invoke(f, id);
+                        }
+                        #ifdef DISCUSY_LOGGING
+                        catch (const std::exception& e) {
+                            log::Logger{}("start_interval coroutine exception: {}", e.what());
+                        }
+                        catch (...) {
+                            log::Logger{}("start_interval coroutine unknown exception");
+                        }
+                        #endif
+                    }
+                },
+                strand
+            );
+        } else {
+            timer->expires_after(interval);
+
+            timer->async_wait([interval, f = std::forward<F>(f), id, timer](this auto& self, asio::ec_t ec) -> void {
+                if (ec) return;
+
+                try {
+                    std::invoke(f, id);
+                }
+                #ifdef DISCUSY_LOGGING
+                catch (const std::exception& e) {
+                    log::Logger{}("start_interval callback exception: {}", e.what());
+                }
+                catch (...) {
+                    log::Logger{}("start_interval callback unknown exception");
+                }
+                #endif
+
+                auto t = timer;
+                t->expires_at(t->expiry() + interval);
+                t->async_wait(std::move(self));
+            });
+        }
+
         return id;
     }
 
