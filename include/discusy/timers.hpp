@@ -110,9 +110,7 @@ public:
             try {
                 if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, discusy::timer>>) {
                     io_ctx_.co_launch_detached<ctx::launch::inline_if_on_executor>(
-                        [f = std::move(f), id]() mutable {
-                            return std::invoke(std::move(f), id);
-                        },
+                        std::invoke(std::move(f), id),
                         timer->get_executor()
                     );
                 } else {
