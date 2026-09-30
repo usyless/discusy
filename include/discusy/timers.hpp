@@ -68,9 +68,29 @@ public:
         timers_.emplace(id, std::move(tmr));
         
         timer->async_wait([this, f = std::forward<F>(f), id, timer](asio::ec_t ec) mutable -> void {
-            if (!ec) io_ctx_.handle_callback_coro_normal(std::move(f), id);
-
             timers_.erase(id);
+            if (ec) return;
+
+            try {
+                if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, discusy::timer>>) {
+                    io_ctx_.co_launch_detached<ctx::launch::inline_if_on_executor>(
+                        [f = std::move(f), id]() mutable {
+                            return std::invoke(std::move(f), id);
+                        },
+                        timer->get_executor()
+                    );
+                } else {
+                    std::invoke(std::move(f), id);
+                }
+            }
+            #ifdef DISCUSY_LOGGING
+            catch (const std::exception& e) {
+                log::Logger{}("start_timer callback exception: {}", e.what());
+            }
+            catch (...) {
+                log::Logger{}("start_timer callback unknown exception");
+            }
+            #endif
         });
         return id;
     }
