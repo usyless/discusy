@@ -198,6 +198,18 @@ public:
         return co_launch_detached<L>(std::forward<F>(f), executor_);
     }
 
+    template <launch L = launch::fresh, typename A, boost::asio::execution::executor Executor>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    static auto co_launch_detached(A&& a, Executor&& executor) {
+        return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<A>(a), detached_log_t{});
+    }
+
+    template <launch L = launch::fresh, typename A>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    auto co_launch_detached(A&& a) {
+        return co_launch_detached<L>(std::forward<A>(a), executor_);
+    }
+
     template <launch L = launch::fresh, typename F, boost::asio::execution::executor Executor, typename Token>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     static auto co_launch(F&& f, Executor&& executor, Token&& token) {
@@ -206,24 +218,44 @@ public:
 
     template <launch L = launch::fresh, typename F, typename Token>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
-    auto co_launch(F&& f, Token token) {
-        return co_launch<L>(std::forward<F>(f), executor_, std::move(token));
+    auto co_launch(F&& f, Token&& token) {
+        return co_launch<L>(std::forward<F>(f), executor_, std::forward<Token>(token));
+    }
+
+    template <launch L = launch::fresh, typename A, boost::asio::execution::executor Executor, typename Token>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    static auto co_launch(A&& a, Executor&& executor, Token&& token) {
+        return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<A>(a), std::forward<Token>(token));
+    }
+
+    template <launch L = launch::fresh, typename A, typename Token>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    auto co_launch(A&& a, Token&& token) {
+        return co_launch<L>(std::forward<A>(a), executor_, std::forward<Token>(token));
     }
 
     template <launch L = launch::inline_if_on_executor, typename F, boost::asio::execution::executor Executor>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     [[nodiscard]] static auto co_launch_promise(F&& f, Executor&& executor) {
-        return boost::asio::co_spawn(
-            detail::with_launch<L>(std::forward<Executor>(executor)),
-            std::forward<F>(f),
-            boost::asio::experimental::use_promise
-        );
+        return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<F>(f), boost::asio::experimental::use_promise);
     }
 
     template <launch L = launch::inline_if_on_executor, typename F>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     [[nodiscard]] auto co_launch_promise(F&& f) {
         return co_launch_promise<L>(std::forward<F>(f), executor_);
+    }
+
+    template <launch L = launch::inline_if_on_executor, typename A, boost::asio::execution::executor Executor>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    [[nodiscard]] static auto co_launch_promise(A&& a, Executor&& executor) {
+        return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<A>(a), boost::asio::experimental::use_promise);
+    }
+
+    template <launch L = launch::inline_if_on_executor, typename A>
+    requires (coro::is_asio_awaitable_v<std::remove_cvref_t<A>>)
+    [[nodiscard]] auto co_launch_promise(A&& a) {
+        return co_launch_promise<L>(std::forward<A>(a), executor_);
     }
 
     template <launch L = launch::fresh, typename F, boost::asio::execution::executor Executor>
