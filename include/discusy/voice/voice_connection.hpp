@@ -635,7 +635,11 @@ public:
     }
 
     // Needs to be an ownable container, not a view or span over data
-    template <typename Container>
+    // Does not block for too long by batching the audio it queues
+    template <
+        typename Container,
+        discusy::asio::ctf<> CompletionToken = ctx::io_context::dct_t
+    >
     requires (
         !std::is_lvalue_reference_v<Container> &&
         !std::ranges::view<std::remove_cvref_t<Container>> &&
@@ -644,118 +648,211 @@ public:
         (std::convertible_to<std::ranges::range_value_t<std::remove_cvref_t<Container>>, std::int16_t> ||
          sizeof(std::ranges::range_value_t<std::remove_cvref_t<Container>>) == 1)
     )
-    void send_pcm_async(
+    auto send_pcm_async(
         Container&& pcm_data,
-        const std::chrono::milliseconds batch_duration = std::chrono::seconds{10}
+        const std::chrono::milliseconds batch_duration,
+        CompletionToken&& token = ctx::io_context::dct_t{}
     ) {
-        if (closed_.load(std::memory_order_acquire) || !udp_client_) return;
-
-        using RawContainer = std::remove_cvref_t<Container>;
-
-        auto launch_task = [self = this->shared_from_this(), batch_duration]<typename ContiguousContainer>(ContiguousContainer&& owned_buffer) {
-            struct task_state {
-                std::shared_ptr<connection> self;
-                std::remove_cvref_t<ContiguousContainer> data;
-                std::size_t offset{0};
-                std::chrono::milliseconds batch_duration{};
-
-                void operator()() {
-                    if (self->closed_.load(std::memory_order_acquire) || !self->udp_client_) return;
-
-                    try {
-                        using ElemType = std::remove_cvref_t<std::ranges::range_value_t<std::remove_cvref_t<ContiguousContainer>>>;
-                        static constexpr size_t SAMPLES_PER_FRAME = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
-                        static constexpr size_t TOTAL_FRAME_SAMPLES = SAMPLES_PER_FRAME * DISCORD_CHANNELS;
-                        static constexpr size_t ELEMENTS_PER_FRAME = (sizeof(ElemType) == 1) 
-                            ? (TOTAL_FRAME_SAMPLES * sizeof(std::int16_t)) 
-                            : TOTAL_FRAME_SAMPLES;
-
-                        const auto total_elements = std::ranges::size(data);
-                        const size_t batch_frames_limit = std::max<size_t>(
-                            1, 
-                            static_cast<size_t>(batch_duration.count() / DISCORD_FRAME_SIZE_MS)
-                        );
-                        const size_t batch_elements_limit = batch_frames_limit * ELEMENTS_PER_FRAME;
-
-                        const size_t remaining = total_elements - offset;
-                        const size_t chunk_elements = std::min(remaining, batch_elements_limit);
-
-                        if (chunk_elements == 0) return;
-
-                        if constexpr (sizeof(ElemType) == 1) {
-                            const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(data)) + offset;
-                            self->send_pcm(std::span<const char>{raw_ptr, chunk_elements}, batch_duration);
-                        } else {
-                            const auto* raw_ptr = std::ranges::data(data) + offset;
-                            self->send_pcm(std::span<const std::int16_t>{raw_ptr, chunk_elements}, batch_duration);
-                        }
-
-                        offset += chunk_elements;
-
-                        if (offset < total_elements && !self->closed_.load(std::memory_order_acquire)) {
-                            auto ex = self->io_ctx_.executor_;
-                            boost::asio::post(ex, std::move(*this));
-                        }
-                    }
-                    #ifdef DISCUSY_LOGGING
-                    catch (const std::exception& e) {
-                        self->log("send_pcm_async exception: {}", e.what());
-                    }
-                    #endif
-                    catch (...) {
-                        #ifdef DISCUSY_LOGGING
-                        self->log("send_pcm_async unknown exception");
-                        #endif
-                    }
+        return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code)>(
+            [](discusy::asio::chf<> auto&& handler, connection* self, const std::chrono::milliseconds batch_duration, auto&& owned_buffer) mutable {
+                if (self->closed_.load(std::memory_order_acquire) || !self->udp_client_) {
+                    auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
+                    auto allocator = boost::asio::get_associated_allocator(
+                        handler,
+                        boost::asio::recycling_allocator<void>{}
+                    );
+                    boost::asio::dispatch(ex_imm,
+                        boost::asio::bind_allocator(allocator, [handler = std::forward<decltype(handler)>(handler)]() mutable {
+                            std::move(handler)(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                        })
+                    );
+                    return;
                 }
-            };
 
-            auto ex = self->io_ctx_.executor_;
-            boost::asio::post(ex, task_state{
-                .self{std::move(self)},
-                .data{std::forward<ContiguousContainer>(owned_buffer)},
-                .offset = 0,
-                .batch_duration = batch_duration,
-            });
-        };
+                using OwnedContainer = decltype(owned_buffer);
+                using RawContainer = std::remove_cvref_t<OwnedContainer>;
 
-        if constexpr (std::ranges::contiguous_range<RawContainer> && 
-                      std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<RawContainer>>, std::int16_t>) {
-            launch_task(std::forward<Container>(pcm_data));
-        } else if constexpr (std::ranges::contiguous_range<RawContainer> && 
-                             sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
-            const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(pcm_data));
-            if (reinterpret_cast<std::uintptr_t>(raw_ptr) % alignof(std::int16_t) == 0) {
-                launch_task(std::forward<Container>(pcm_data));
-            } else {
-                #ifdef DISCUSY_LOGGING
-                log::Logger{}("Misaligned data passed into send_pcm_async! Copying into an aligned vector upfront - this is inefficient");
-                #endif
-                const auto byte_count = std::ranges::size(pcm_data);
-                const auto sample_count = byte_count / sizeof(std::int16_t);
-                std::vector<std::int16_t> aligned(sample_count);
-                std::memcpy(aligned.data(), raw_ptr, sample_count * sizeof(std::int16_t));
-                launch_task(std::move(aligned));
-            }
-        } else if constexpr (sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
-            std::string bytes_vec;
-            if constexpr (std::ranges::sized_range<RawContainer>) {
-                bytes_vec.reserve(std::ranges::size(pcm_data));
-            }
-            for (auto&& b : pcm_data) {
-                bytes_vec.push_back(static_cast<char>(b));
-            }
-            launch_task(std::move(bytes_vec));
-        } else {
-            std::vector<std::int16_t> vec;
-            if constexpr (std::ranges::sized_range<RawContainer>) {
-                vec.reserve(std::ranges::size(pcm_data));
-            }
-            for (auto&& sample : pcm_data) {
-                vec.push_back(static_cast<std::int16_t>(sample));
-            }
-            launch_task(std::move(vec));
-        }
+                using handler_t = decltype(handler);
+
+                auto launch_task = [self = self->shared_from_this(), batch_duration, handler = std::forward<handler_t>(handler)]<typename ContiguousContainer>(ContiguousContainer&& owned_buffer) mutable {
+                    struct task_state {
+                        std::remove_cvref_t<handler_t> handler;
+                        std::shared_ptr<connection> self;
+                        std::remove_cvref_t<ContiguousContainer> data;
+                        ctx::io_context::strand_t executor;
+                        std::size_t offset{0};
+                        std::chrono::milliseconds batch_duration{};
+                        decltype(
+                            boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, std::declval<ctx::io_context::executor_t>()))
+                        ) work_guard_;
+                        boost::asio::cancellation_type cancelled_type{boost::asio::cancellation_type::none};
+
+                        void operator()(std::shared_ptr<task_state> ptr) {
+                            boost::system::error_code ec{};
+                            if (self->closed_.load(std::memory_order_acquire) || !self->udp_client_ || (cancelled_type != boost::asio::cancellation_type::none)) {
+                                ec = boost::asio::error::operation_aborted;
+                            }
+
+                            if (!ec) {
+                                try {
+                                    using ElemType = std::remove_cvref_t<std::ranges::range_value_t<std::remove_cvref_t<ContiguousContainer>>>;
+                                    static constexpr size_t SAMPLES_PER_FRAME = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
+                                    static constexpr size_t TOTAL_FRAME_SAMPLES = SAMPLES_PER_FRAME * DISCORD_CHANNELS;
+                                    static constexpr size_t ELEMENTS_PER_FRAME = (sizeof(ElemType) == 1) 
+                                        ? (TOTAL_FRAME_SAMPLES * sizeof(std::int16_t)) 
+                                        : TOTAL_FRAME_SAMPLES;
+
+                                    const auto total_elements = std::ranges::size(data);
+                                    const size_t batch_frames_limit = std::max<size_t>(
+                                        1, 
+                                        static_cast<size_t>(batch_duration.count() / DISCORD_FRAME_SIZE_MS)
+                                    );
+                                    const size_t batch_elements_limit = batch_frames_limit * ELEMENTS_PER_FRAME;
+
+                                    const size_t remaining = total_elements - offset;
+                                    const size_t chunk_elements = std::min(remaining, batch_elements_limit);
+
+                                    if (chunk_elements > 0) {
+                                        if constexpr (sizeof(ElemType) == 1) {
+                                            const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(data)) + offset;
+                                            self->send_pcm(std::span<const char>{raw_ptr, chunk_elements}, batch_duration);
+                                        } else {
+                                            const auto* raw_ptr = std::ranges::data(data) + offset;
+                                            self->send_pcm(std::span<const std::int16_t>{raw_ptr, chunk_elements}, batch_duration);
+                                        }
+
+                                        offset += chunk_elements;
+                                    }
+
+                                    if (offset < total_elements && !self->closed_.load(std::memory_order_acquire) && (cancelled_type == boost::asio::cancellation_type::none)) {
+                                        auto ex = executor;
+                                        auto alloc = boost::asio::get_associated_allocator(
+                                            handler,
+                                            boost::asio::recycling_allocator<void>{}
+                                        );
+                                        // ptr is not moved in case post fails
+                                        boost::asio::post(std::move(ex), boost::asio::bind_allocator(std::move(alloc), [ptr]() mutable {
+                                            auto* c = ptr.get();
+                                            c->operator()(std::move(ptr));
+                                        }));
+                                        return;
+                                    }
+
+                                    if (offset < total_elements) {
+                                        ec = boost::asio::error::operation_aborted;
+                                    }
+                                }
+                                #ifdef DISCUSY_LOGGING
+                                catch (const std::exception& e) {
+                                    self->log("send_pcm_async exception: {}", e.what());
+                                    ec = boost::asio::error::fault;
+                                }
+                                #endif
+                                catch (...) {
+                                    #ifdef DISCUSY_LOGGING
+                                    self->log("send_pcm_async unknown exception");
+                                    #endif
+                                    ec = boost::asio::error::fault;
+                                }
+                            }
+
+                            auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
+                            auto alloc = boost::asio::get_associated_allocator(
+                                handler,
+                                boost::asio::recycling_allocator<void>{}
+                            );
+
+                            boost::asio::dispatch(ex, boost::asio::bind_allocator(alloc, [handler = std::move(this->handler), work_guard = std::move(this->work_guard_), ec]() mutable {
+                                auto slot = boost::asio::get_associated_cancellation_slot(handler);
+                                if (slot.is_connected()) slot.clear();
+                                work_guard.reset();
+                                std::move(handler)(ec);
+                            }));
+                        }
+                    };
+
+                    auto alloc = boost::asio::get_associated_allocator(
+                        handler,
+                        boost::asio::recycling_allocator<void>{}
+                    );
+
+                    auto ex = self->io_ctx_.make_strand();
+                    auto ex_user = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
+
+                    auto state = std::allocate_shared<task_state>(alloc, 
+                        std::move(handler), 
+                        std::move(self), 
+                        std::forward<ContiguousContainer>(owned_buffer),
+                        ex,
+                        0,
+                        batch_duration,
+                        boost::asio::make_work_guard(std::move(ex_user))
+                    );
+
+                    auto slot = boost::asio::get_associated_cancellation_slot(state->handler);
+                    if (slot.is_connected()) {
+                        slot.assign([weak_state = std::weak_ptr<task_state>{state}, raw = state.get(), alloc](boost::asio::cancellation_type type) {
+                            if (type == boost::asio::cancellation_type::none) return;
+
+                            if (std::shared_ptr<task_state> st = weak_state.lock()) {
+                                boost::asio::post(raw->executor, boost::asio::bind_allocator(alloc, [state = std::move(st), type]() {
+                                    state->cancelled_type = type;
+                                }));
+                            }
+                        });
+                    }
+
+                    boost::asio::post(ex, boost::asio::bind_allocator(alloc, [state = std::move(state)]() mutable {
+                        auto* c = state.get();
+                        c->operator()(std::move(state));
+                    }));
+                };
+
+                if constexpr (std::ranges::contiguous_range<RawContainer> && 
+                            std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<RawContainer>>, std::int16_t>) {
+                    std::move(launch_task)(std::forward<OwnedContainer>(owned_buffer));
+                } else if constexpr (std::ranges::contiguous_range<RawContainer> && 
+                                    sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
+                    const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(owned_buffer));
+                    if (reinterpret_cast<std::uintptr_t>(raw_ptr) % alignof(std::int16_t) == 0) {
+                        std::move(launch_task)(std::forward<OwnedContainer>(owned_buffer));
+                    } else {
+                        #ifdef DISCUSY_LOGGING
+                        log::Logger{}("Misaligned data passed into send_pcm_async! Copying into an aligned vector upfront - this is inefficient");
+                        #endif
+                        const auto byte_count = std::ranges::size(owned_buffer);
+                        const auto sample_count = byte_count / sizeof(std::int16_t);
+                        std::vector<std::int16_t> aligned(sample_count);
+                        std::memcpy(aligned.data(), raw_ptr, sample_count * sizeof(std::int16_t));
+                        std::move(launch_task)(std::move(aligned));
+                    }
+                } else if constexpr (sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
+                    std::string bytes_vec;
+                    if constexpr (std::ranges::sized_range<RawContainer>) {
+                        bytes_vec.reserve(std::ranges::size(owned_buffer));
+                    }
+                    for (auto&& b : owned_buffer) {
+                        bytes_vec.push_back(static_cast<char>(b));
+                    }
+                    std::move(launch_task)(std::move(bytes_vec));
+                } else {
+                    std::vector<std::int16_t> vec;
+                    if constexpr (std::ranges::sized_range<RawContainer>) {
+                        vec.reserve(std::ranges::size(owned_buffer));
+                    }
+                    for (auto&& sample : owned_buffer) {
+                        vec.push_back(static_cast<std::int16_t>(sample));
+                    }
+                    std::move(launch_task)(std::move(vec));
+                }
+            }, 
+            token, this, std::move(batch_duration), std::forward<Container>(pcm_data)
+        );
+    }
+
+    template <typename Container, discusy::asio::ctf<> CompletionToken = ctx::io_context::dct_t>
+    auto send_pcm_async(Container&& pcm_data, CompletionToken&& token = ctx::io_context::dct_t{}) {
+        return send_pcm_async(std::forward<Container>(pcm_data), std::chrono::seconds{10}, std::forward<CompletionToken>(token));
     }
 
 private:
