@@ -39,10 +39,8 @@ public:
         timers_.emplace(id, std::move(tmr));
 
         timer->async_wait([i = this, interval, func = std::forward<F>(f), id, timer](this auto&& self, asio::ec_t ec) -> void {
-            if (ec) {
-                i->timers_.erase(id);
-                return;
-            }
+            if (ec) return;
+            i->timers_.erase(id);
 
             i->io_ctx_.handle_callback_coro_normal(func, id);
 
@@ -68,8 +66,8 @@ public:
         timers_.emplace(id, std::move(tmr));
         
         timer->async_wait([this, f = std::forward<F>(f), id, timer](asio::ec_t ec) mutable -> void {
-            timers_.erase(id);
             if (ec) return;
+            timers_.erase(id);
 
             try {
                 if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, discusy::timer>>) {
