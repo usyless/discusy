@@ -38,16 +38,16 @@ public:
 
         timers_.emplace(id, std::move(tmr));
 
-        timer->async_wait([i = this, interval, func = std::make_shared<std::decay_t<F>>(std::forward<F>(f)), id, timer](this auto&& self, asio::ec_t ec) -> void {
+        timer->async_wait([i = this, interval, func = std::forward<F>(f), id, timer](this auto&& self, asio::ec_t ec) -> void {
             if (ec) {
                 i->timers_.erase(id);
                 return;
             }
 
-            i->io_ctx_.handle_callback_coro_normal(*func, id);
+            i->io_ctx_.handle_callback_coro_normal(func, id);
 
             timer->expires_at(timer->expiry() + interval);
-            timer->async_wait(self);
+            timer->async_wait(std::forward<decltype(self)>(self));
         });
         return id;
     }
