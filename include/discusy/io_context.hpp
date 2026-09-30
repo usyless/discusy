@@ -363,16 +363,16 @@ public:
         );
     }
 
-    template <typename F, typename... Args>
+    template <launch L = launch::fresh, typename F, typename... Args>
     requires ( std::invocable<F&, Args...> )
     void handle_callback_coro_normal(F&& cb, Args&&... args) noexcept {
         try {
             if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, Args...>>) {
-                co_launch_detached([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable {
+                co_launch_detached<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable {
                     return std::invoke(std::move(cb), std::move(args)...);
                 });
             } else {
-                submit<launch::continuation>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> void {
+                submit<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> void {
                     try {
                         std::invoke(std::move(cb), std::move(args)...);
                     }
