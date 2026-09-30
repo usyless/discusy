@@ -21,7 +21,7 @@
 #include "../opcode.hpp"
 #include "../state.hpp"
 #include "../random.hpp"
-#include "../udp_client.hpp"
+#include "udp_client.hpp"
 #include "dave.hpp"
 #include "internal.hpp"
 #include "opus_encoder.hpp"

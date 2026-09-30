@@ -16,10 +16,10 @@
 #include <sodium.h>
 #include <boost/container/deque.hpp>
 
-#include "audio_runtime.hpp"
-#include "io_context.hpp"
-#include "log.hpp" // IWYU pragma: keep
-#include "voice/internal.hpp"
+#include "../audio_runtime.hpp"
+#include "../io_context.hpp"
+#include "../log.hpp" // IWYU pragma: keep
+#include "internal.hpp"
 
 namespace discusy::udp {
 
