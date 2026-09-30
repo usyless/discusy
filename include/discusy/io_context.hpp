@@ -186,25 +186,25 @@ public:
         );
     }
 
-    template <launch L = launch::continuation, typename F, boost::asio::execution::executor Executor>
+    template <launch L = launch::fresh, typename F, boost::asio::execution::executor Executor>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     static auto co_launch_detached(F&& f, Executor&& executor) {
         return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<F>(f), detached_log_t{});
     }
 
-    template <launch L = launch::continuation, typename F>
+    template <launch L = launch::fresh, typename F>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     auto co_launch_detached(F&& f) {
         return co_launch_detached<L>(std::forward<F>(f), executor_);
     }
 
-    template <launch L = launch::continuation, typename F, boost::asio::execution::executor Executor, typename Token>
+    template <launch L = launch::fresh, typename F, boost::asio::execution::executor Executor, typename Token>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     static auto co_launch(F&& f, Executor&& executor, Token&& token) {
         return boost::asio::co_spawn(detail::with_launch<L>(std::forward<Executor>(executor)), std::forward<F>(f), std::forward<Token>(token));
     }
 
-    template <launch L = launch::continuation, typename F, typename Token>
+    template <launch L = launch::fresh, typename F, typename Token>
     requires (std::invocable<F&> && coro::IsAwaitable<std::invoke_result_t<F&>>)
     auto co_launch(F&& f, Token token) {
         return co_launch<L>(std::forward<F>(f), executor_, std::move(token));
@@ -226,7 +226,7 @@ public:
         return co_launch_promise<L>(std::forward<F>(f), executor_);
     }
 
-    template <launch L = launch::continuation, typename F, boost::asio::execution::executor Executor>
+    template <launch L = launch::fresh, typename F, boost::asio::execution::executor Executor>
     requires (std::invocable<F&> && !coro::IsAwaitable<std::invoke_result_t<F&>>)
     static auto submit(F&& f, Executor&& executor) {
         if constexpr (L == launch::inline_if_on_executor) {
@@ -238,7 +238,7 @@ public:
         }
     }
 
-    template <launch L = launch::continuation, typename F>
+    template <launch L = launch::fresh, typename F>
     requires (std::invocable<F&> && !coro::IsAwaitable<std::invoke_result_t<F&>>)
     auto submit(F&& f) {
         return submit<L>(std::forward<F>(f), executor_);
