@@ -125,7 +125,7 @@ class Callback {
         when_interface& operator=(when_interface&&) = delete;
 
         virtual void try_match(const T& data) noexcept(noexcept(std::atomic_bool().load()) && noexcept(std::atomic_bool().exchange(true, std::memory_order_acq_rel))) = 0;
-        virtual void on_callback_destroyed() noexcept(noexcept(std::atomic_bool().load())) = 0;
+        virtual void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept(noexcept(std::atomic_bool().load())) = 0;
 
         constexpr void set_invalid_idx() noexcept {
             vector_idx = INVALID_IDX;
@@ -292,7 +292,7 @@ class Callback {
             }
 
             for (auto& node : pending) {
-                node->on_callback_destroyed();
+                node->on_callback_destroyed(exec);
             }
         }
 
@@ -768,22 +768,18 @@ public:
         }
     }
 
-    template <typename Predicate, typename Handler, typename Executor, typename Allocator>
+    template <typename Predicate, typename Handler, typename Executor>
     struct when_node final : when_interface {
         Predicate pred;
         Handler handler;
         boost::asio::executor_work_guard<Executor> work;
         Executor ex;
-        ctx::io_context::executor_t io_exec;
-        Allocator alloc;
 
-        when_node(auto&& p, auto&& h, auto&& e, auto&& io_e, auto&& a)
+        when_node(auto&& p, auto&& h, auto&& e)
             : pred(std::forward<decltype(p)>(p)),
               handler(std::forward<decltype(h)>(h)),
               work(boost::asio::make_work_guard(e)),
-              ex(std::forward<decltype(e)>(e)),
-              io_exec(std::forward<decltype(io_e)>(io_e)),
-              alloc(std::forward<decltype(a)>(a)) {}
+              ex(std::forward<decltype(e)>(e)) {}
 
         void complete(boost::system::error_code ec, T data = T{}) {
             auto slot = boost::asio::get_associated_cancellation_slot(handler);
@@ -814,6 +810,11 @@ public:
 
             if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
 
+            auto alloc = boost::asio::get_associated_allocator(
+                handler, 
+                boost::asio::recycling_allocator<void>{}
+            );
+
             try {
                 boost::asio::dispatch(ex,
                     boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = data]() mutable {
@@ -834,12 +835,17 @@ public:
             }
         }
 
-        void on_callback_destroyed() noexcept(noexcept(std::atomic_bool().load())) override final {
+        void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept(noexcept(std::atomic_bool().load())) override final {
             if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
+
+            auto alloc = boost::asio::get_associated_allocator(
+                handler, 
+                boost::asio::recycling_allocator<void>{}
+            );
 
             try {
                 boost::asio::post(io_exec,
-                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc = this->alloc]() mutable {
+                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc]() mutable {
                         boost::asio::dispatch(ex,
                             boost::asio::bind_allocator(alloc, [self = std::move(self)]() mutable {
                                 static_cast<when_node*>(self.get())->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
@@ -871,7 +877,6 @@ public:
 
                 auto ex = boost::asio::get_associated_executor(handler, executor);
                 using executor_type = decltype(ex);
-                using allocator_type = decltype(alloc);
                 using pred_t = std::decay_t<decltype(p)>;
 
                 auto core = weak_core.lock();
@@ -885,15 +890,13 @@ public:
                     return;
                 }
 
-                using node_t = when_node<pred_t, handler_t, executor_type, allocator_type>;
+                using node_t = when_node<pred_t, handler_t, executor_type>;
 
                 auto node = std::allocate_shared<node_t>(
                     alloc,
                     std::forward<decltype(p)>(p),
                     std::forward<decltype(handler)>(handler),
-                    ex,
-                    executor,
-                    alloc
+                    ex
                 );
 
                 auto slot = boost::asio::get_associated_cancellation_slot(node->handler);
