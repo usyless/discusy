@@ -44,8 +44,12 @@ inline void attach_bot(Obj& obj, bot* b) noexcept {
 template <typename T>
 class Callback {
     struct callback_interface {
+        boost::asio::any_io_executor ex;
         std::atomic<bool> unregistered{false};
+        bool is_async_{false};
 
+        callback_interface(auto&& exec) : ex{std::forward<decltype(exec)>(exec)} {}
+        callback_interface(auto&& exec, bool is_async) : ex{std::forward<decltype(exec)>(exec)}, is_async_(is_async) {}
         callback_interface() noexcept = default;
         callback_interface(const callback_interface&) = delete;
         callback_interface& operator=(const callback_interface&) = delete;
@@ -54,8 +58,8 @@ class Callback {
 
         virtual ~callback_interface() noexcept = default;
 
-        [[nodiscard]] virtual bool is_async() const noexcept = 0;
-        [[nodiscard]] virtual const boost::asio::any_io_executor& get_executor() const noexcept = 0;
+        [[nodiscard]] constexpr bool is_async() const noexcept { return is_async_; }
+        [[nodiscard]] const boost::asio::any_io_executor& get_executor() const noexcept { return ex; }
         virtual bool invoke_sync(const T&) { return true; }
         virtual coro::awaitable<bool> invoke_async(const T&) { co_return true; }
     };
@@ -63,14 +67,11 @@ class Callback {
     template <typename F>
     struct sync_callback final : callback_interface {
         F func;
-        boost::asio::any_io_executor ex;
 
         template <typename FF>
-        explicit sync_callback(FF&& f, boost::asio::any_io_executor executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
-            : func(std::forward<FF>(f)), ex(std::move(executor)) {}
+        explicit sync_callback(FF&& f, auto&& executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
+            : callback_interface{std::forward<decltype(executor)>(executor)}, func(std::forward<FF>(f)) {}
         
-        [[nodiscard]] bool is_async() const noexcept override final { return false; }
-        [[nodiscard]] const boost::asio::any_io_executor& get_executor() const noexcept override final { return ex; }
         bool invoke_sync(const T& data) override final {
             using Result = std::invoke_result_t<F&, const T&>;
             if constexpr (std::is_same_v<Result, bool>) {
@@ -85,14 +86,11 @@ class Callback {
     template <typename F>
     struct async_callback final : callback_interface {
         F func;
-        boost::asio::any_io_executor ex;
 
         template <typename FF>
-        explicit async_callback(FF&& f, boost::asio::any_io_executor executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
-            : func(std::forward<FF>(f)), ex(std::move(executor)) {}
+        explicit async_callback(FF&& f, auto&& executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
+            : callback_interface{std::forward<decltype(executor)>(executor), true}, func(std::forward<FF>(f)) {}
         
-        [[nodiscard]] bool is_async() const noexcept override final { return true; }
-        [[nodiscard]] const boost::asio::any_io_executor& get_executor() const noexcept override final { return ex; }
         coro::awaitable<bool> invoke_async(const T& data) override final {
             using Result = std::invoke_result_t<F&, const T&>;
             if constexpr (std::is_same_v<Result, coro::awaitable<bool>>) {
