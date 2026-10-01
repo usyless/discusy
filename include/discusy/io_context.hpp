@@ -28,7 +28,7 @@ enum class launch : std::uint8_t {
 namespace detail {
 
 template <launch L, boost::asio::execution::executor Executor>
-[[nodiscard]] inline auto with_launch(const Executor& ex) {
+[[nodiscard]] constexpr auto with_launch(const Executor& ex) {
     if constexpr (L == launch::inline_if_on_executor) {
         return ex;
     } else if constexpr (L == launch::continuation) {
