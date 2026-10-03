@@ -53,10 +53,12 @@ public:
                         catch (const std::exception& e) {
                             log::Logger{}("start_interval coroutine exception: {}", e.what());
                         }
-                        catch (...) {
-                            log::Logger{}("start_interval coroutine unknown exception");
-                        }
                         #endif
+                        catch (...) {
+                            #ifdef DISCUSY_LOGGING
+                            log::Logger{}("start_interval coroutine unknown exception");
+                            #endif
+                        }
                     }
                 },
                 strand
@@ -74,10 +76,12 @@ public:
                 catch (const std::exception& e) {
                     log::Logger{}("start_interval callback exception: {}", e.what());
                 }
-                catch (...) {
-                    log::Logger{}("start_interval callback unknown exception");
-                }
                 #endif
+                catch (...) {
+                    #ifdef DISCUSY_LOGGING
+                    log::Logger{}("start_interval callback unknown exception");
+                    #endif
+                }
 
                 auto t = timer;
                 t->expires_at(t->expiry() + interval);
@@ -121,10 +125,12 @@ public:
             catch (const std::exception& e) {
                 log::Logger{}("start_timer callback exception: {}", e.what());
             }
-            catch (...) {
-                log::Logger{}("start_timer callback unknown exception");
-            }
             #endif
+            catch (...) {
+                #ifdef DISCUSY_LOGGING
+                log::Logger{}("start_timer callback unknown exception");
+                #endif
+            }
         });
         return id;
     }
