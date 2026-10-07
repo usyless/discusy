@@ -25,6 +25,7 @@ A compiler supporting C++23 and at least meeting [Glaze's](https://github.com/st
 
 - Clang, MSVC and GCC are supported, other compilers may be supported, try compile and find out!
     - **You will likely need to use libc++ instead of libstdc++**
+    - Using the mold linker is recommended
     - An example of this can be founds under [tests.yml](/.github/workflows/tests.yml)
 
 ### Platform Support
