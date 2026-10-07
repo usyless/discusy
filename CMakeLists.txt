@@ -564,7 +564,7 @@ if(DISCUSY_ENABLE_VOICE)
         EXCLUDE_FROM_ALL
         SYSTEM
         GIT_SUBMODULES ""
-        PATCH_COMMAND ${GIT_EXECUTABLE} apply --reverse --check "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch" || ${GIT_EXECUTABLE} apply "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch"
+        PATCH_COMMAND ${GIT_EXECUTABLE} apply --reverse --check --unidiff-zero "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch" || ${GIT_EXECUTABLE} apply --unidiff-zero "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch"
     )
     FetchContent_MakeAvailable(mlspp)
 
