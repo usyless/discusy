@@ -88,11 +88,16 @@ jobs:
             -DDISCUSY_ENABLE_PCH="${{ inputs.enable_pch && 'ON' || 'OFF' }}"
           )
 
+          # Install mold
+          MOLD_VERSION="3.0.0"
+          MOLD_ARCH=$(uname -m)
+          wget -qO - "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${MOLD_ARCH}-linux.tar.gz" | sudo tar -C /usr/local --strip-components=1 -xzf -
+
           if [[ -n "$LLVM_VERSION" ]]; then
             LIBCXX_STATIC=$(find /usr/lib/llvm-${LLVM_VERSION} -name "libc++.a" 2>/dev/null | head -n 1)
             LIBCXXABI_STATIC=$(find /usr/lib/llvm-${LLVM_VERSION} -name "libc++abi.a" 2>/dev/null | head -n 1)
 
-            DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
+            DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=/usr/local/bin/mold"
             if [[ -n "$LIBCXX_STATIC" && -n "$LIBCXXABI_STATIC" ]]; then
               DCMAKE_EXE_LINKER_FLAGS="${DCMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -nostdlib++ -Wl,--start-group ${LIBCXX_STATIC} ${LIBCXXABI_STATIC} -Wl,--end-group -ldl -lpthread -lm -lc -lgcc_s -lgcc"
             else
@@ -108,10 +113,10 @@ jobs:
               -DCMAKE_CXX_COMPILER_AR="/usr/bin/llvm-ar-${LLVM_VERSION}"
               -DCMAKE_C_COMPILER_RANLIB="/usr/bin/llvm-ranlib-${LLVM_VERSION}"
               -DCMAKE_CXX_COMPILER_RANLIB="/usr/bin/llvm-ranlib-${LLVM_VERSION}"
-              -DCMAKE_LINKER="/usr/bin/ld.lld-${LLVM_VERSION}"
+              -DCMAKE_LINKER="/usr/local/bin/mold"
               -DCMAKE_EXE_LINKER_FLAGS="${DCMAKE_EXE_LINKER_FLAGS}"
-              -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
-              -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=/usr/bin/ld.lld-${LLVM_VERSION}"
+              -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=/usr/local/bin/mold"
+              -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=/usr/local/bin/mold"
               -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE
             )
           fi
