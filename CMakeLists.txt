@@ -219,7 +219,7 @@ else()
         "${DISCUSY_CXX_STD}"
     )
 
-    file(GLOB_RECURSE DISCUSY_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/*.hpp")
+    file(GLOB_RECURSE DISCUSY_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/include/*.hpp")
     list(FILTER DISCUSY_HEADERS EXCLUDE REGEX "pch_top_level\\.hpp$")
 
     target_sources(${LIBRARY_NAME}
@@ -564,6 +564,7 @@ if(DISCUSY_ENABLE_VOICE)
         EXCLUDE_FROM_ALL
         SYSTEM
         GIT_SUBMODULES ""
+        PATCH_COMMAND ${GIT_EXECUTABLE} apply --reverse --check "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch" || ${GIT_EXECUTABLE} apply "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch"
     )
     FetchContent_MakeAvailable(mlspp)
 
