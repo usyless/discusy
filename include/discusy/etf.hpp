@@ -158,6 +158,13 @@ requires ( log::IsLogger<F> )
     const auto* it = etf_data.data() + 6;
     const auto* const end = etf_data.data() + etf_data.size();
 
+    if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+        #ifdef DISCUSY_LOGGING
+        logger("ETF parsing failed: map arity exceeds payload buffer bounds");
+        #endif
+        return true;
+    }
+
     glz::context ctx{};
     bool has_op = false;
     bool has_s = false;

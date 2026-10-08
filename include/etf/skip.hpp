@@ -139,11 +139,11 @@ namespace glz
             }
             const uint32_t n = read_be<uint32_t>(it);
             it += 4;
-            if (static_cast<size_t>(end - it) < 1 + n) [[unlikely]] {
+            if (static_cast<size_t>(end - it) <= n) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
-            it += 1 + n; // sign + digits
+            it += static_cast<size_t>(n) + 1; // sign + digits
             break;
          }
          case etf::tag::NIL_EXT: {
@@ -169,6 +169,10 @@ namespace glz
             }
             const uint32_t arity = read_be<uint32_t>(it);
             it += 4;
+            if (arity > static_cast<size_t>(end - it)) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
             for (uint32_t i = 0; i < arity; ++i) {
                op<Opts>(ctx, it, end);
                if (static_cast<bool>(ctx.error)) [[unlikely]] return;
@@ -182,6 +186,10 @@ namespace glz
             }
             const uint32_t len = read_be<uint32_t>(it);
             it += 4;
+            if (static_cast<size_t>(end - it) <= len) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
             for (uint32_t i = 0; i < len; ++i) {
                op<Opts>(ctx, it, end);
                if (static_cast<bool>(ctx.error)) [[unlikely]] return;
@@ -197,6 +205,10 @@ namespace glz
             }
             const uint32_t arity = read_be<uint32_t>(it);
             it += 4;
+            if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
             for (uint32_t i = 0; i < arity; ++i) {
                op<Opts>(ctx, it, end); // key
                if (static_cast<bool>(ctx.error)) [[unlikely]] return;

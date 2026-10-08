@@ -287,6 +287,11 @@ namespace glz
             const uint32_t len = etf::detail::read_be<uint32_t>(it);
             it += 4;
 
+            if (static_cast<size_t>(end - it) <= len) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+
             if constexpr (resizable<T>) {
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
@@ -409,6 +414,11 @@ namespace glz
                it += 4;
             }
 
+            if (len > static_cast<size_t>(end - it)) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+
             if constexpr (resizable<T>) {
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
@@ -510,6 +520,11 @@ namespace glz
          const uint32_t arity = etf::detail::read_be<uint32_t>(it);
          it += 4;
 
+         if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+            ctx.error = error_code::unexpected_end;
+            return;
+         }
+
          value.clear();
          using Key = T::key_type;
          for (uint32_t i = 0; i < arity; ++i) {
@@ -552,6 +567,11 @@ namespace glz
          }
          const uint32_t arity = etf::detail::read_be<uint32_t>(it);
          it += 4;
+
+         if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+            ctx.error = error_code::unexpected_end;
+            return;
+         }
 
          static constexpr auto N = reflect<T>::size;
          [[maybe_unused]] size_t read_count{};

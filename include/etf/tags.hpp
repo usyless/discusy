@@ -490,7 +490,7 @@ namespace glz::etf
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint32_t n = read_be<uint32_t>(it);
             it += 4;
-            if (static_cast<size_t>(end - it) < 1 + n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+            if (static_cast<size_t>(end - it) <= n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto sign = static_cast<uint8_t>(*it++);
             uint64_t raw = 0;
             for (uint32_t i = 0; i < n; ++i) {
