@@ -882,12 +882,12 @@ namespace glz
                      else if (pc > 1) {
                         // Ambiguous: prefer the alternative with the fewest declared fields (JSON parity)
                         size_t best = variant_size;
-                        size_t best_fields = (std::numeric_limits<size_t>::max)();
+                        size_t best_fields = std::numeric_limits<size_t>::max();
                         for_each<variant_size>([&]<size_t I>() {
                            if (possible[I]) {
                               using V = std::variant_alternative_t<I, T>;
                               using X = std::conditional_t<is_memory_object<V>, memory_type<V>, V>;
-                              size_t f = (std::numeric_limits<size_t>::max)();
+                              size_t f = std::numeric_limits<size_t>::max();
                               if constexpr (glaze_object_t<X> || reflectable<X>) {
                                  f = reflect<X>::size;
                               }
