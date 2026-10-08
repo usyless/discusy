@@ -1,4 +1,0 @@
---- a/src/common.cpp
-+++ b/src/common.cpp
-@@ -0,0 +1 @@
-+#include <ctime>
