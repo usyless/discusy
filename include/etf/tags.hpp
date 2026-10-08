@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <limits>
 
 #include <bit>
 #include <charconv>
@@ -447,6 +448,14 @@ namespace glz::etf
          case tag::SMALL_INTEGER_EXT: {
             if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto val = static_cast<uint8_t>(*it++);
+            if constexpr (std::integral<T>) {
+               if constexpr (std::is_signed_v<T>) {
+                  if (val > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
+            }
             num = static_cast<T>(val);
             return true;
          }
@@ -454,15 +463,35 @@ namespace glz::etf
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const int32_t val = read_be<int32_t>(it);
             it += 4;
+            if constexpr (std::integral<T>) {
+               if constexpr (std::is_unsigned_v<T>) {
+                  if (val < 0) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+                  if (static_cast<uint64_t>(val) > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
+               else {
+                  if (val < static_cast<int64_t>((std::numeric_limits<T>::min)()) ||
+                      val > static_cast<int64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
+            }
             num = static_cast<T>(val);
             return true;
          }
          case tag::SMALL_BIG_EXT: {
             if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto n = static_cast<uint8_t>(*it++);
-            if (end - it < 1 + n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint8_t sign = static_cast<uint8_t>(*it++);
             uint64_t raw = 0;
+            bool overflow = false;
             if (n == 8) [[likely]] {
                std::memcpy(&raw, it, 8);
                if constexpr (std::endian::native == std::endian::big) {
@@ -470,19 +499,58 @@ namespace glz::etf
                }
             }
             else {
-               for (uint8_t i = 0; i < n && i < 8; ++i) {
-                  raw |= (static_cast<uint64_t>(static_cast<uint8_t>(it[i])) << (i * 8));
+               for (uint8_t i = 0; i < n; ++i) {
+                  const uint8_t byte_val = static_cast<uint8_t>(it[i]);
+                  if (i < 8) {
+                     raw |= (static_cast<uint64_t>(byte_val) << (i * 8));
+                  }
+                  else if (byte_val != 0) {
+                     overflow = true;
+                  }
                }
             }
             it += n;
-            if constexpr (std::is_signed_v<T>) {
-               if (sign) {
-                  num = static_cast<T>(-static_cast<int64_t>(raw));
-               } else {
+            if constexpr (std::integral<T>) {
+               if (overflow) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return false;
+               }
+               if constexpr (std::is_unsigned_v<T>) {
+                  if (sign) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+                  if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
                   num = static_cast<T>(raw);
                }
-            } else {
-               num = static_cast<T>(raw);
+               else {
+                  if (sign == 0) {
+                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
+                     num = static_cast<T>(raw);
+                  }
+                  else {
+                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
+                     if (raw == static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) {
+                        num = (std::numeric_limits<T>::min)();
+                     }
+                     else {
+                        num = static_cast<T>(-static_cast<int64_t>(raw));
+                     }
+                  }
+               }
+            }
+            else {
+               double d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               num = static_cast<T>(d);
             }
             return true;
          }
@@ -490,23 +558,61 @@ namespace glz::etf
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint32_t n = read_be<uint32_t>(it);
             it += 4;
-            if (static_cast<size_t>(end - it) <= n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto sign = static_cast<uint8_t>(*it++);
+            bool overflow = false;
             uint64_t raw = 0;
             for (uint32_t i = 0; i < n; ++i) {
+               const auto byte_val = static_cast<uint8_t>(it[i]);
                if (i < 8) {
-                  raw |= (static_cast<uint64_t>(static_cast<uint8_t>(it[i])) << (i * 8));
+                  raw |= (static_cast<uint64_t>(byte_val) << (i * 8));
+               }
+               else if (byte_val != 0) {
+                  overflow = true;
                }
             }
             it += n;
-            if constexpr (std::is_signed_v<T>) {
-               if (sign) {
-                  num = static_cast<T>(-static_cast<int64_t>(raw));
-               } else {
+            if constexpr (std::integral<T>) {
+               if (overflow) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return false;
+               }
+               if constexpr (std::is_unsigned_v<T>) {
+                  if (sign) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+                  if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
                   num = static_cast<T>(raw);
                }
-            } else {
-               num = static_cast<T>(raw);
+               else {
+                  if (sign == 0) {
+                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
+                     num = static_cast<T>(raw);
+                  }
+                  else {
+                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
+                     if (raw == static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) {
+                        num = (std::numeric_limits<T>::min)();
+                     }
+                     else {
+                        num = static_cast<T>(-static_cast<int64_t>(raw));
+                     }
+                  }
+               }
+            }
+            else {
+               double d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               num = static_cast<T>(d);
             }
             return true;
          }

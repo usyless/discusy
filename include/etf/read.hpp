@@ -369,7 +369,7 @@ namespace glz
          }
 
          if (tag == etf::tag::BINARY_EXT) {
-            if constexpr (std::is_arithmetic_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) {
+            if constexpr (sizeof(V) == 1 && (std::is_integral_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>)) {
                if (end - it < 4) [[unlikely]] {
                   ctx.error = error_code::unexpected_end;
                   return;
@@ -469,20 +469,31 @@ namespace glz
 
          using V = std::decay_t<T>;
          static constexpr auto N = glz::tuple_size_v<V>;
+
+         if constexpr (not check_partial_read(Opts)) {
+            if (arity != N) [[unlikely]] {
+               ctx.error = error_code::syntax_error;
+               return;
+            }
+         }
+         else {
+            if (arity < N) [[unlikely]] {
+               ctx.error = error_code::syntax_error;
+               return;
+            }
+         }
+
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
-               if (I < arity) {
-                  parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
-               }
+               parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
-               if (I < arity) {
-                  parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
-               }
+               parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
             });
          }
+         if (static_cast<bool>(ctx.error)) return;
          for (uint32_t i = N; i < arity; ++i) {
             skip_value<EETF>::op<Opts>(ctx, it, end);
             if (static_cast<bool>(ctx.error)) return;
