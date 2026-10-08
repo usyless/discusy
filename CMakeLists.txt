@@ -34,6 +34,7 @@ cmake_dependent_option(DISCUSY_USE_STATIC_MSVCRT
     "MSVC" OFF
 )
 option(DISCUSY_NO_CACHES "Disable the caches of channels/users/guilds/etc from existing at all" ON)
+option(DISCUSY_USE_ETF "Use Erlang External Term Format (ETF) for Discord gateway communication instead of JSON (EXPERIMENTAL)" OFF)
 
 # Voice & Audio Features
 if(PROJECT_IS_TOP_LEVEL)
@@ -255,6 +256,7 @@ target_include_directories(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
 target_compile_definitions(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
     $<$<OR:$<BOOL:${DISCUSY_LOGGING_ENABLED}>,$<CONFIG:Debug>>:DISCUSY_LOGGING>
     $<$<BOOL:${DISCUSY_USE_CORO_HTTP_CLIENT}>:DISCUSY_USE_CORO_HTTP_CLIENT>
+    $<$<BOOL:${DISCUSY_USE_ETF}>:DISCUSY_USE_ETF>
 )
 
 # OpenSSL Configuration
@@ -749,6 +751,16 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy_exe_options
     )
 
+    set(BENCHMARK_JSON_ETF_LIBRARY_NAME "${PROJECT_NAME}_benchmark_json_etf")
+    add_executable(${BENCHMARK_JSON_ETF_LIBRARY_NAME}
+        "${PROJECT_SOURCE_DIR}/src/benchmark_json_etf.cpp"
+    )
+
+    target_link_libraries(${BENCHMARK_JSON_ETF_LIBRARY_NAME} PRIVATE
+        discusy::discusy
+        discusy_exe_options
+    )
+
     if(WIN32)
         file(GLOB DISCUSY_MAIN_OPENSSL_DLLS
             "${PROJECT_SOURCE_DIR}/3rdparty/openssl/bin/*.dll"
@@ -766,6 +778,12 @@ if(PROJECT_IS_TOP_LEVEL)
                     ${DISCUSY_MAIN_OPENSSL_DLLS}
                     "$<TARGET_FILE_DIR:${HTTP_CLIENT_TEST_LIBRARY_NAME}>"
                 COMMENT "Copying OpenSSL runtime DLLs to ${HTTP_CLIENT_TEST_LIBRARY_NAME} output dir..."
+            )
+            add_custom_command(TARGET ${BENCHMARK_JSON_ETF_LIBRARY_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${DISCUSY_MAIN_OPENSSL_DLLS}
+                    "$<TARGET_FILE_DIR:${BENCHMARK_JSON_ETF_LIBRARY_NAME}>"
+                COMMENT "Copying OpenSSL runtime DLLs to ${BENCHMARK_JSON_ETF_LIBRARY_NAME} output dir..."
             )
         endif()
     endif()

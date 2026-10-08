@@ -16,11 +16,21 @@
 #include "io_context.hpp"
 #include "types.hpp"
 #include "log.hpp" // IWYU pragma: keep
+#ifdef DISCUSY_USE_ETF
+#include "etf.hpp"
+#else
 #include "json.hpp"
+#endif
 #include "asio_helpers.hpp"
 #include "atomic_shared_ptr.hpp"
 
 namespace discusy {
+
+#ifdef DISCUSY_USE_ETF
+namespace gateway_protocol = etf;
+#else
+namespace gateway_protocol = json;
+#endif
 
 enum class callback_priority : std::uint8_t {
     user = 0,
@@ -735,7 +745,7 @@ public:
     }
 
     template <typename W = T>
-    void fire_json(std::string&& json) {
+    void fire_payload(std::string&& payload) {
         if (!core_) return;
         const auto active_c = core_->active_count.load(std::memory_order_acquire);
         if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
@@ -745,16 +755,16 @@ public:
 
         try {
             if (!snap || snap->async_count == 0) {
-                io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), json = std::move(json)]() mutable {
+                io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable {
                     W p{};
-                    if (json::parse_json(p, json)) return;
+                    if (gateway_protocol::parse(p, payload)) return;
                     attach_bot(p.d, bot_ptr_);
                     fire_sync_internal(std::move(core), std::move(snap), p.d);
                 });
             } else {
-                io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), json = std::move(json)]() mutable -> coro::awaitable<void> {
+                io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable -> coro::awaitable<void> {
                     W p{};
-                    if (json::parse_json(p, json)) co_return;
+                    if (gateway_protocol::parse(p, payload)) co_return;
                     attach_bot(p.d, bot_ptr_);
                     co_await fire_async_internal(std::move(core), std::move(snap), std::move(p.d));
                     co_return;
@@ -763,9 +773,14 @@ public:
         }
         catch (...) {
             #ifdef DISCUSY_LOGGING
-            log::Logger{}("Callback fire_json unknown exception");
+            log::Logger{}("Callback fire_payload unknown exception");
             #endif
         }
+    }
+
+    template <typename W = T>
+    void fire_json(std::string&& json) {
+        fire_payload<W>(std::move(json));
     }
 
     template <typename Predicate, typename Handler, typename Executor>

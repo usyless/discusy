@@ -15,7 +15,11 @@ static_assert(true, "Clangd bug fix");
 
 namespace discusy::urls {
 
+#ifdef DISCUSY_USE_ETF
+inline constexpr auto GATEWAY_QUERY_PARAMS = "?v=" API "&encoding=etf&compress=zstd-stream";
+#else
 inline constexpr auto GATEWAY_QUERY_PARAMS = "?v=" API "&encoding=json&compress=zstd-stream";
+#endif
 
 inline constexpr auto REST_BASE = REST_BASE_;
 inline constexpr auto GET_BOT_PARAMS = REST_BASE_ "/gateway/bot";

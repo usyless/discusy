@@ -24,7 +24,11 @@
 #include "urls.hpp"
 #include "opcode.hpp"
 #include "gateway_events.hpp" // includes events
+#ifdef DISCUSY_USE_ETF
+#include "etf.hpp"
+#else
 #include "json.hpp"
+#endif
 #include "io_context.hpp"
 #include "log.hpp" // IWYU pragma: keep
 #include "random.hpp"
@@ -34,6 +38,14 @@
 #include "asio_helpers.hpp"
 
 namespace discusy {
+
+#ifdef DISCUSY_USE_ETF
+inline constexpr bool is_binary_payload = true;
+namespace gateway_protocol = etf;
+#else
+inline constexpr bool is_binary_payload = false;
+namespace gateway_protocol = json;
+#endif
 
 // Don't construct this class yourself, make a discusy::bot instead
 class shard {
@@ -69,17 +81,17 @@ public:
         log("Queing websocket send: {}", text);
         #endif
         boost::asio::dispatch(strand_, [this, text = std::move(text)]() mutable {
-            ws_.send_ratelimited(std::move(text));
+            ws_.send_ratelimited(std::move(text), is_binary_payload);
         });
     }
 
     template <typename P, typename T>
     [[nodiscard]] bool send_request(T& req) {
         P payload{req};
-        std::string json;
-        if (json::write_json(payload, json, json_logger)) return false; // not using ctx as not thread safe
+        std::string encoded;
+        if (gateway_protocol::write(payload, encoded, json_logger)) return false; // not using ctx as not thread safe
 
-        send_text_ratelimited(std::move(json));
+        send_text_ratelimited(std::move(encoded));
         return true;
     }
 
@@ -264,15 +276,11 @@ private:
         reconnect(should_resume);
     }
 
-    void handle_ws_message(const std::string_view msg, bool binary) {
+    void handle_ws_message(const std::string_view msg, bool) {
         try {
-            if (binary) {
-                handle_gateway_payload(inflater_.push(msg));
-            } else {
-                handle_gateway_payload(std::string{msg});
-            }
+            handle_gateway_payload(inflater_.push(msg));
         }
-        catch (const std::bad_alloc& e) {
+        catch ([[maybe_unused]]  std::bad_alloc& e) {
             inflater_.reset();
             #ifdef DISCUSY_LOGGING
             log("on_message bad_alloc: {}", e.what());
@@ -366,8 +374,8 @@ private:
 
         recieve_event::payload_base e{};
         // try use quick parser first, then move onto glaze if it fails
-        if (json::parse_payload_base(e, json_payload, json_logger)) {
-            if (json::parse_json<json::glz_opts_partial_read>(e, json_payload, shared_json_ctx_, json_logger)) return;
+        if (gateway_protocol::parse_payload_base(e, json_payload, json_logger)) {
+            if (gateway_protocol::parse<gateway_protocol::glz_opts_partial_read>(e, json_payload, shared_json_ctx_, json_logger)) return;
         }
 
         if (e.s) seq_ = *e.s;
@@ -375,7 +383,7 @@ private:
         switch (e.op) {
             case Opcode::Hello: {
                 recieve_event::payload<recieve_event::hello> hello{};
-                if (json::parse_json(hello, json_payload, shared_json_ctx_, json_logger) || hello.d.heartbeat_interval <= 0) {
+                if (gateway_protocol::parse(hello, json_payload, shared_json_ctx_, json_logger) || hello.d.heartbeat_interval <= 0) {
                     stop();
                     reconnect(true, true);
                     return;
@@ -415,7 +423,7 @@ private:
 
             case Opcode::InvalidSession: {
                 recieve_event::payload<recieve_event::invalid_session> invalid_session{};
-                if (json::parse_json(invalid_session, json_payload, shared_json_ctx_, json_logger)) {
+                if (gateway_protocol::parse(invalid_session, json_payload, shared_json_ctx_, json_logger)) {
                     invalid_session.d = false;
                 }
 
@@ -448,11 +456,11 @@ private:
                                 self->handle_##LOWER(p.d); \
                             }) { \
                                 typename recieve_event::payload<recieve_event::LOWER> p{}; \
-                                if (json::parse_json(p, payload, self->shared_json_ctx_, self->json_logger)) return; \
+                                if (gateway_protocol::parse(p, payload, self->shared_json_ctx_, self->json_logger)) return; \
                                 self->handle_##LOWER(p.d); \
                                 self->state_.gateway_callbacks.on_##LOWER.fire(std::move(p.d)); \
                             } else { \
-                                self->state_.gateway_callbacks.on_##LOWER.template fire_json<recieve_event::payload<recieve_event::LOWER>>(std::forward<decltype(payload)>(payload)); \
+                                self->state_.gateway_callbacks.on_##LOWER.template fire_payload<recieve_event::payload<recieve_event::LOWER>>(std::forward<decltype(payload)>(payload)); \
                             } \
                             if constexpr (requires { self->post_handle_##LOWER(); }) { \
                                 self->post_handle_##LOWER(); \
@@ -493,7 +501,7 @@ private:
         }
 
         std::string out;
-        if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+        if (gateway_protocol::write(payload, out, shared_json_ctx_, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
@@ -501,7 +509,7 @@ private:
         #ifdef DISCUSY_LOGGING
         log("Sent IDENTIFY: {}", out);
         #endif
-        ws_.send(std::move(out));
+        ws_.send(std::move(out), is_binary_payload);
     }
 
     void send_resume() {
@@ -512,7 +520,7 @@ private:
         resume.seq = seq_;
 
         std::string out;
-        if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+        if (gateway_protocol::write(payload, out, shared_json_ctx_, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
@@ -520,7 +528,7 @@ private:
         #ifdef DISCUSY_LOGGING
         log("Sent RESUME: {}", out);
         #endif
-        ws_.send(std::move(out));
+        ws_.send(std::move(out), is_binary_payload);
     }
 
     [[nodiscard]] bool send_heartbeat() {
@@ -536,8 +544,12 @@ private:
         if (s >= 0) hb.emplace(s);
 
         std::string out;
-        static constexpr glz::opts opts{.skip_null_members = false};
-        if (json::write_json<opts>(payload, out, shared_json_ctx_, json_logger)) {
+        static constexpr auto hb_opts = [] {
+            auto o = gateway_protocol::glz_opts;
+            o.skip_null_members = false;
+            return o;
+        }();
+        if (gateway_protocol::write<hb_opts>(payload, out, shared_json_ctx_, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme? but this will literally never happen
             return false;
         }
@@ -546,7 +558,7 @@ private:
         log("Sent heartbeat: {}", out);
         #endif
         recieved_heartbeat_ack_ = false;
-        ws_.send(std::move(out));
+        ws_.send(std::move(out), is_binary_payload);
         return true;
     }
 

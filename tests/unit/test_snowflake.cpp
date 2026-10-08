@@ -69,10 +69,10 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
 
     SECTION("Boolean and comparison semantics") {
         discusy::snowflake empty_sf{};
-        CHECK_FALSE(bool(empty_sf));
+        CHECK_FALSE(static_cast<bool>(empty_sf));
         CHECK(!empty_sf);
 
-        CHECK(bool(sf));
+        CHECK(static_cast<bool>(sf));
         CHECK_FALSE(!sf);
 
         constexpr discusy::snowflake sf2{raw_val};

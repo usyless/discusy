@@ -271,8 +271,22 @@ requires ( log::IsLogger<F> )
         #endif
         return true;
     }
-
     return false;
+}
+
+template <auto opts = glz_opts, typename T, typename... Args>
+[[nodiscard]] inline bool parse(T& obj, Args&&... args) noexcept {
+    return parse_json<opts>(obj, std::forward<Args>(args)...);
+}
+
+template <auto opts = glz_opts_not_null_term, typename T, typename... Args>
+[[nodiscard]] inline bool parse_view(T& obj, Args&&... args) noexcept {
+    return parse_json_view<opts>(obj, std::forward<Args>(args)...);
+}
+
+template <auto opts = glz::opts{}, typename T, typename... Args>
+[[nodiscard]] inline bool write(const T& obj, Args&&... args) noexcept {
+    return write_json<opts>(obj, std::forward<Args>(args)...);
 }
 
 }

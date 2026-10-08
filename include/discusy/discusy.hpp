@@ -671,8 +671,8 @@ public:
 
     bool set_presence(send_event::update_presence presence) {
         send_event::update_presence_payload payload{presence};
-        std::string json;
-        if (json::write_json(payload, json, json_logger)) return false;
+        std::string encoded;
+        if (gateway_protocol::write(payload, encoded, json_logger)) return false;
 
         {
         std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
@@ -690,7 +690,7 @@ public:
         }
 
         for (auto& shard : shards_) {
-            shard->send_text_ratelimited(json);
+            shard->send_text_ratelimited(encoded);
         }
         }
 
@@ -1212,7 +1212,7 @@ private:
         }
 
         send_event::rescue_payload obj{};
-        if (json::parse_json(obj, payload, json_logger)) {
+        if (gateway_protocol::parse(obj, payload, json_logger)) {
             return;
         }
 
@@ -1227,18 +1227,29 @@ private:
         auto *const d_end = d.end();
 
         auto *const g_id_it = d.find("guild_id");
-        const snowflake guild_id{(g_id_it != d_end && g_id_it->second.is_string()) ? ulp::str::to_number_or_default<decltype(snowflake::value)>(g_id_it->second.get_string()) : 0};
+        uint64_t g_id_val = 0;
+        if (g_id_it != d_end) {
+            if (g_id_it->second.is_string()) {
+                g_id_val = ulp::str::to_number_or_default<decltype(snowflake::value)>(g_id_it->second.get_string());
+            } else if (g_id_it->second.is_number()) {
+                g_id_val = static_cast<decltype(snowflake::value)>(g_id_it->second.get_number());
+            }
+        }
+        const snowflake guild_id{g_id_val};
 
         auto *g_ids_it = d.find("guild_ids");
         std::vector<snowflake> guild_ids;
         if (g_ids_it != d_end && g_ids_it->second.is_array()) {
             for (const auto& j : g_ids_it->second.get_array()) {
-                if (!j.is_string()) continue;
-
-                const auto num = ulp::str::to_number<decltype(snowflake::value)>(j.get_string());
-                if (num.value_or(0) == 0ULL) continue;
-
-                guild_ids.emplace_back(*num);
+                if (j.is_string()) {
+                    const auto num = ulp::str::to_number<decltype(snowflake::value)>(j.get_string());
+                    if (num.value_or(0) == 0ULL) continue;
+                    guild_ids.emplace_back(*num);
+                } else if (j.is_number()) {
+                    const auto num = static_cast<decltype(snowflake::value)>(j.get_number());
+                    if (num == 0ULL) continue;
+                    guild_ids.emplace_back(num);
+                }
             }
 
             g_ids_it->second.get_array().clear();
@@ -1280,7 +1291,7 @@ private:
                 shard_requests[shard_id].d.at("guild_ids").get_array().emplace_back(id.str());
             }
 
-            std::string json_encoded;
+            std::string encoded;
 
             for (std::decay_t<decltype(total_shards)> i = 0; i < total_shards; ++i) {
                 auto& request = shard_requests[i];
@@ -1288,11 +1299,11 @@ private:
                 auto& g_ids = request.d.at("guild_ids");
                 if (!g_ids.is_array() || g_ids.get_array().empty()) continue;
 
-                json_encoded.clear();
-                if (!json::write_json(request, json_encoded)) continue;
+                encoded.clear();
+                if (!gateway_protocol::write(request, encoded)) continue;
 
                 if (i < shards_.size()) {
-                    shards_[i]->send_text_ratelimited(std::move(json_encoded));
+                    shards_[i]->send_text_ratelimited(std::move(encoded));
                 }
             }
         }

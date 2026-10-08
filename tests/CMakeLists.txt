@@ -19,6 +19,8 @@ set(TEST_SOURCES
     unit/test_multipart.cpp
     unit/test_snowflake.cpp
     unit/test_zstd.cpp
+    unit/test_etf.cpp
+    unit/test_component_parsing.cpp
 )
 
 add_executable(discusy_unit_tests ${TEST_SOURCES})

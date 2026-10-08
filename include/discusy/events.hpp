@@ -11,6 +11,7 @@
 #include <concepts>
 
 #include <glaze/glaze.hpp>
+#include <etf/etf.hpp>
 
 #include "types.hpp"
 #include "io_context.hpp"
@@ -5829,6 +5830,95 @@ struct glz::meta<discusy::components::select_default_value_type> {
     );
 };
 
+namespace discusy::components::detail {
+
+template <auto Opts, typename It0, typename It1>
+[[nodiscard]] inline bool extract_component_type(glz::is_context auto& ctx, It0& it, It1 end, component_type& out_type) noexcept {
+    if (it >= end) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
+    const auto tag = static_cast<uint8_t>(*it++);
+    if (tag != glz::etf::tag::MAP_EXT) [[unlikely]] {
+        ctx.error = glz::error_code::syntax_error;
+        return false;
+    }
+    if (end - it < 4) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
+    const uint32_t arity = glz::etf::detail::read_be<uint32_t>(it);
+    it += 4;
+
+    for (uint32_t i = 0; i < arity; ++i) {
+        std::string_view key;
+        if (!glz::etf::detail::read_key(ctx, it, end, key)) [[unlikely]] {
+            return false;
+        }
+        if (key == "type") {
+            glz::parse<glz::EETF>::template op<glz::no_header_on<Opts>()>(out_type, ctx, it, end);
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return false;
+            return true;
+        }
+        glz::skip_value<glz::EETF>::template op<Opts>(ctx, it, end);
+        if (static_cast<bool>(ctx.error)) [[unlikely]] return false;
+    }
+    return false;
+}
+
+template <auto Opts, typename It0, typename It1>
+[[nodiscard]] inline bool extract_ir_component_type(glz::is_context auto& ctx, It0& it, It1 end, component_type& out_type) noexcept {
+    if (it >= end) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
+    const auto tag = static_cast<uint8_t>(*it++);
+    if (tag != glz::etf::tag::MAP_EXT) [[unlikely]] {
+        ctx.error = glz::error_code::syntax_error;
+        return false;
+    }
+    if (end - it < 4) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
+    const uint32_t arity = glz::etf::detail::read_be<uint32_t>(it);
+    it += 4;
+
+    opt<component_type> t{};
+    opt<component_type> ct{};
+
+    for (uint32_t i = 0; i < arity; ++i) {
+        std::string_view key;
+        if (!glz::etf::detail::read_key(ctx, it, end, key)) [[unlikely]] {
+            return false;
+        }
+        if (key == "type") {
+            glz::parse<glz::EETF>::template op<glz::no_header_on<Opts>()>(t, ctx, it, end);
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return false;
+        } else if (key == "component_type") {
+            glz::parse<glz::EETF>::template op<glz::no_header_on<Opts>()>(ct, ctx, it, end);
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return false;
+        } else {
+            glz::skip_value<glz::EETF>::template op<Opts>(ctx, it, end);
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return false;
+        }
+
+        if (t && std::to_underlying(*t) > 0) {
+            out_type = *t;
+            return true;
+        }
+    }
+
+    const auto val = (t && (std::to_underlying(*t) > 0)) ? *t : (ct) ? *ct : static_cast<component_type>(0);
+    if (std::to_underlying(val) > 0) {
+        out_type = val;
+        return true;
+    }
+    return false;
+}
+
+}
+
 #define DISCUSY_X(name, ...) \
 case discusy::components::component_type::name: { \
     auto& elem = wrapper.template emplace<discusy::components::name>(); \
@@ -5884,6 +5974,72 @@ GEN_COMPONENT_META(component, COMPONENTS)
 GEN_COMPONENT_META(section_accessory, SECTION_ACCESSORY)
 GEN_COMPONENT_META(container_child_component, CONTAINER_CHILD_COMPONENTS)
 GEN_COMPONENT_META(label_child_component, LABEL_CHILD_COMPONENTS)
+
+#pragma push_macro("DISCUSY_X")
+#undef DISCUSY_X
+#define DISCUSY_X(name, ...) \
+case discusy::components::component_type::name: { \
+    auto& elem = wrapper.template emplace<discusy::components::name>(); \
+    auto parse_it = start_it; \
+    glz::parse<glz::EETF>::template op<glz::no_header_on<Opts>()>(elem, ctx, parse_it, end); \
+    if (static_cast<bool>(ctx.error)) [[unlikely]] { \
+        ctx.custom_error_message = "Failed to parse ETF for " #name " component"; \
+        return; \
+    } \
+    it = parse_it; \
+    break; \
+}
+
+#pragma push_macro("GEN_COMPONENT_ETF")
+#undef GEN_COMPONENT_ETF
+
+#define GEN_COMPONENT_ETF(name, macro) \
+template <> \
+struct glz::from<glz::EETF, discusy::components::name> { \
+    template <auto Opts> \
+    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) noexcept { \
+        auto start_it = it; \
+        discusy::components::component_type ext_type{}; \
+        if (!discusy::components::detail::extract_component_type<Opts>(ctx, it, end, ext_type)) { \
+            if (!static_cast<bool>(ctx.error)) { \
+                ctx.error = glz::error_code::parse_error; \
+                ctx.custom_error_message = "Failed to parse ETF for type extraction"; \
+            } \
+            return; \
+        } \
+        \
+        switch (ext_type) { \
+            macro \
+            default: { \
+                ctx.error = glz::error_code::parse_error; \
+                ctx.custom_error_message = "Unknown component type"; \
+                return; \
+            } \
+        } \
+    } \
+}; \
+\
+template <> \
+struct glz::to<glz::EETF, discusy::components::name> { \
+    template <auto Opts> \
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept { \
+        glz::to<glz::EETF, discusy::components::name::variant_base>::template op<Opts>( \
+            static_cast<const discusy::components::name::variant_base&>(wrapper), \
+            ctx, b, ix \
+        ); \
+    } \
+};
+
+GEN_COMPONENT_ETF(action_row_component, ACTION_ROW_COMPONENTS)
+GEN_COMPONENT_ETF(component, COMPONENTS)
+GEN_COMPONENT_ETF(section_accessory, SECTION_ACCESSORY)
+GEN_COMPONENT_ETF(container_child_component, CONTAINER_CHILD_COMPONENTS)
+GEN_COMPONENT_ETF(label_child_component, LABEL_CHILD_COMPONENTS)
+
+#undef GEN_COMPONENT_ETF
+#pragma pop_macro("GEN_COMPONENT_ETF")
+#undef DISCUSY_X
+#pragma pop_macro("DISCUSY_X")
 
 #undef DISCUSY_D
 #pragma pop_macro("DISCUSY_D")
@@ -5955,6 +6111,63 @@ struct glz::meta<discusy::interaction::component_interaction_response> {
     };
     static constexpr auto write_fn = [](const T& wrapper) -> const typename T::variant_base& { return static_cast<const T::variant_base&>(wrapper); };
     static constexpr auto value = glz::custom<read_fn, write_fn>;
+};
+
+template <>
+struct glz::from<glz::EETF, discusy::interaction::component_interaction_response> {
+    template <auto Opts>
+    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) noexcept {
+        auto start_it = it;
+        discusy::components::component_type ext_type{};
+        if (!discusy::components::detail::extract_ir_component_type<Opts>(ctx, it, end, ext_type)) {
+            if (!static_cast<bool>(ctx.error)) {
+                ctx.error = glz::error_code::parse_error;
+                ctx.custom_error_message = "Failed to get type for component interaction response";
+            }
+            return;
+        }
+
+        switch (ext_type) {
+            #pragma push_macro("DISCUSY_D")
+            #undef DISCUSY_D
+            #define DISCUSY_D
+            #pragma push_macro("DISCUSY_X")
+            #undef DISCUSY_X
+            #define DISCUSY_X(name) \
+            case discusy::components::component_type::name: { \
+                auto& elem = wrapper.template emplace<discusy::components::name##InteractionResponse>(); \
+                auto parse_it = start_it; \
+                glz::parse<glz::EETF>::template op<glz::no_header_on<Opts>()>(elem, ctx, parse_it, end); \
+                if (static_cast<bool>(ctx.error)) [[unlikely]] { \
+                    ctx.custom_error_message = "Failed to parse ETF for " #name " component interaction response"; \
+                    return; \
+                } \
+                it = parse_it; \
+                break; \
+            }
+            COMMAND_INTERACTION_RESPONSE
+            #undef DISCUSY_X
+            #pragma pop_macro("DISCUSY_X")
+            #undef DISCUSY_D
+            #pragma pop_macro("DISCUSY_D")
+            default: {
+                ctx.error = glz::error_code::parse_error;
+                ctx.custom_error_message = "Unknown component interaction response type";
+                return;
+            }
+        }
+    }
+};
+
+template <>
+struct glz::to<glz::EETF, discusy::interaction::component_interaction_response> {
+    template <auto Opts>
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept {
+        glz::to<glz::EETF, discusy::interaction::component_interaction_response::variant_base>::template op<Opts>(
+            static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
+            ctx, b, ix
+        );
+    }
 };
 
 #undef COMMAND_INTERACTION_RESPONSE
