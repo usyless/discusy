@@ -6,10 +6,10 @@ on:
       compiler:
         description: "Compiler to use"
         required: true
-        default: "clang-22"
+        default: "clang-23"
         type: choice
         options:
-          - clang-22
+          - clang-23
           - gcc-14
       build_type:
         description: "Build type"
@@ -50,7 +50,7 @@ jobs:
             echo "CC=gcc-14" >> $GITHUB_ENV
             echo "CXX=g++-14" >> $GITHUB_ENV
           else
-            LLVM_VERSION="22"
+            LLVM_VERSION="23"
             sudo apt-get install -y wget lsb-release software-properties-common gnupg
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
@@ -68,6 +68,12 @@ jobs:
             sudo python3 -m pip install --break-system-packages --upgrade "cmake>=3.31"
           fi
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install mold
+        run: |
+          MOLD_VERSION="3.0.0"
+          MOLD_ARCH=$(uname -m)
+          wget -qO - "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${MOLD_ARCH}-linux.tar.gz" | sudo tar -C /usr/local --strip-components=1 -xzf -
 
       - name: Verify Tools
         run: |
@@ -87,11 +93,6 @@ jobs:
             -DDISCUSY_BUILD_TESTS=ON
             -DDISCUSY_ENABLE_PCH="${{ inputs.enable_pch && 'ON' || 'OFF' }}"
           )
-
-          # Install mold
-          MOLD_VERSION="3.0.0"
-          MOLD_ARCH=$(uname -m)
-          wget -qO - "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${MOLD_ARCH}-linux.tar.gz" | sudo tar -C /usr/local --strip-components=1 -xzf -
 
           if [[ -n "$LLVM_VERSION" ]]; then
             LIBCXX_STATIC=$(find /usr/lib/llvm-${LLVM_VERSION} -name "libc++.a" 2>/dev/null | head -n 1)
