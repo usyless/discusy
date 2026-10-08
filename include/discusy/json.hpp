@@ -167,7 +167,7 @@ requires ( log::IsLogger<F> )
 }
 
 // On true return: failure
-template <auto opts = glz::opts{}, typename T, typename F = log::Logger>
+template <auto opts = glz::opts(), typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
 [[nodiscard]] inline bool write_json(const T& object, std::string& json, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
     #ifdef DISCUSY_LOGGING
@@ -182,7 +182,7 @@ requires ( log::IsLogger<F> )
 }
 
 // On true return: failure
-template <auto opts = glz::opts{}, typename T, typename F = log::Logger>
+template <auto opts = glz::opts(), typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
 [[nodiscard]] inline bool write_json(const T& object, std::string& json, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
     detail::reset_ctx(ctx);
@@ -300,7 +300,7 @@ template <auto opts = glz_opts_not_null_term, typename T, typename... Args>
     return parse_json_view<opts>(obj, std::forward<Args>(args)...);
 }
 
-template <auto opts = glz::opts{}, typename T, typename... Args>
+template <auto opts = glz::opts(), typename T, typename... Args>
 [[nodiscard]] inline bool write(const T& obj, Args&&... args) noexcept {
     return write_json<opts>(obj, std::forward<Args>(args)...);
 }
