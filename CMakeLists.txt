@@ -556,6 +556,20 @@ if(DISCUSY_ENABLE_VOICE)
     set(MLS_CXX_NAMESPACE "mlspp" CACHE STRING "" FORCE)
     set(DISABLE_GREASE ON CACHE BOOL "" FORCE)
 
+    set(MLSPP_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch")
+
+    if(WIN32)
+        set(MLSPP_PATCH_RUN_CMD
+            cmd.exe /c
+            "\"${GIT_EXECUTABLE}\" apply --check --reverse --unidiff-zero \"${MLSPP_PATCH_FILE}\" || \"${GIT_EXECUTABLE}\" apply --unidiff-zero \"${MLSPP_PATCH_FILE}\""
+        )
+    else()
+        set(MLSPP_PATCH_RUN_CMD
+            sh -c
+            "\"${GIT_EXECUTABLE}\" apply --check --reverse --unidiff-zero \"${MLSPP_PATCH_FILE}\" || \"${GIT_EXECUTABLE}\" apply --unidiff-zero \"${MLSPP_PATCH_FILE}\""
+        )
+    endif()
+
     FetchContent_Declare(
         mlspp
         GIT_REPOSITORY https://github.com/cisco/mlspp.git
@@ -564,7 +578,7 @@ if(DISCUSY_ENABLE_VOICE)
         EXCLUDE_FROM_ALL
         SYSTEM
         GIT_SUBMODULES ""
-        PATCH_COMMAND ${GIT_EXECUTABLE} apply --reverse --check --unidiff-zero "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch" || ${GIT_EXECUTABLE} apply --unidiff-zero "${CMAKE_CURRENT_SOURCE_DIR}/patches/mlspp-ctime.patch"
+        PATCH_COMMAND ${MLSPP_PATCH_RUN_CMD}
     )
     FetchContent_MakeAvailable(mlspp)
 
