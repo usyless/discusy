@@ -1214,7 +1214,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
             true,
             100,
             false,
-            std::string{"banana"}
+            std::string{"banana"},
         };
 
         std::string enc;
@@ -1362,7 +1362,7 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
     sub_cmd.name = "configure";
     sub_cmd.type = discusy::application_commands::application_command_option_type::SUB_COMMAND;
     sub_cmd.options = std::vector<discusy::interaction::application_command_interaction_data_option>{
-        opt_host, opt_port, opt_ratio, opt_enabled
+        opt_host, opt_port, opt_ratio, opt_enabled,
     };
 
     // Subcommand Group (Level 1):
