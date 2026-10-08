@@ -575,6 +575,347 @@ TEST_CASE("ETF: Error Handling and Malformed Input", "[etf][errors]") {
     }
 }
 
+TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") {
+    auto append_be32 = [](std::string& s, uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24) & 0xFF));
+        s.push_back(static_cast<char>((val >> 16) & 0xFF));
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+    auto append_be16 = [](std::string& s, uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+
+    SECTION("LARGE_BIG_EXT integer overflow protection (n = 0xFFFFFFFF)") {
+        // Attack payload: n = 0xFFFFFFFF (4294967295) with only 8 total bytes
+        std::string buf;
+        buf.push_back(static_cast<char>(glz::etf::magic_version));
+        buf.push_back(static_cast<char>(glz::etf::tag::LARGE_BIG_EXT));
+        append_be32(buf, 0xFFFFFFFFU);
+        buf.push_back(static_cast<char>(0)); // sign
+        buf.push_back(static_cast<char>(1)); // 1 digit byte
+
+        uint64_t num = 0;
+        auto ec_read = glz::read_etf(num, buf);
+        CHECK(static_cast<bool>(ec_read));
+        CHECK(ec_read.ec == glz::error_code::unexpected_end);
+
+        glz::skip s{};
+        auto ec_skip = glz::read_etf(s, buf);
+        CHECK(static_cast<bool>(ec_skip));
+        CHECK(ec_skip.ec == glz::error_code::unexpected_end);
+
+        // Sub-case: n = 0xFFFFFFFE with truncated buffer
+        std::string buf2;
+        buf2.push_back(static_cast<char>(glz::etf::magic_version));
+        buf2.push_back(static_cast<char>(glz::etf::tag::LARGE_BIG_EXT));
+        append_be32(buf2, 0xFFFFFFFEU);
+        auto ec_read2 = glz::read_etf(num, buf2);
+        CHECK(static_cast<bool>(ec_read2));
+        CHECK(ec_read2.ec == glz::error_code::unexpected_end);
+
+        // Sub-case: n = 10, but only 3 digits provided
+        std::string buf3;
+        buf3.push_back(static_cast<char>(glz::etf::magic_version));
+        buf3.push_back(static_cast<char>(glz::etf::tag::LARGE_BIG_EXT));
+        append_be32(buf3, 10);
+        buf3.push_back(static_cast<char>(0)); // sign
+        buf3.push_back(static_cast<char>(1));
+        buf3.push_back(static_cast<char>(2));
+        buf3.push_back(static_cast<char>(3));
+        auto ec_read3 = glz::read_etf(num, buf3);
+        CHECK(static_cast<bool>(ec_read3));
+        CHECK(ec_read3.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("Container size pre-allocation sanity checks (LIST_EXT)") {
+        // Attack payload: claims 2,000,000,000 elements in a 7-byte buffer
+        std::string buf;
+        buf.push_back(static_cast<char>(glz::etf::magic_version));
+        buf.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+        append_be32(buf, 2000000000U);
+        buf.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+
+        std::vector<int> vec;
+        auto ec = glz::read_etf(vec, buf);
+        CHECK(static_cast<bool>(ec));
+        CHECK(ec.ec == glz::error_code::unexpected_end);
+        CHECK(vec.empty());
+
+        // parse_etf wrapper must return failure without throwing std::bad_alloc
+        bool failed = discusy::etf::parse_etf(vec, buf);
+        CHECK(failed);
+        CHECK(vec.empty());
+
+        // skip_value must also reject the bogus length
+        glz::skip s{};
+        auto ec_skip = glz::read_etf(s, buf);
+        CHECK(static_cast<bool>(ec_skip));
+        CHECK(ec_skip.ec == glz::error_code::unexpected_end);
+
+        // Sub-case: LIST_EXT truncated before tail term (len = 1, 1 element, no NIL_EXT)
+        std::string buf_no_tail;
+        buf_no_tail.push_back(static_cast<char>(glz::etf::magic_version));
+        buf_no_tail.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+        append_be32(buf_no_tail, 1);
+        buf_no_tail.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        buf_no_tail.push_back(static_cast<char>(42));
+        auto ec_no_tail = glz::read_etf(vec, buf_no_tail);
+        CHECK(static_cast<bool>(ec_no_tail));
+        CHECK(ec_no_tail.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("Container size pre-allocation sanity checks (LARGE_TUPLE_EXT)") {
+        // Attack payload: claims 1,000,000 elements in a 6-byte buffer
+        std::string buf;
+        buf.push_back(static_cast<char>(glz::etf::magic_version));
+        buf.push_back(static_cast<char>(glz::etf::tag::LARGE_TUPLE_EXT));
+        append_be32(buf, 1000000U);
+
+        std::vector<int> vec;
+        auto ec = glz::read_etf(vec, buf);
+        CHECK(static_cast<bool>(ec));
+        CHECK(ec.ec == glz::error_code::unexpected_end);
+        CHECK(vec.empty());
+
+        glz::skip s{};
+        auto ec_skip = glz::read_etf(s, buf);
+        CHECK(static_cast<bool>(ec_skip));
+        CHECK(ec_skip.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("Map arity bounds check against payload size (MAP_EXT)") {
+        // Attack payload: claims 1,000,000,000 key-value pairs in a 6-byte buffer
+        std::string buf;
+        buf.push_back(static_cast<char>(glz::etf::magic_version));
+        buf.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        append_be32(buf, 1000000000U);
+
+        std::map<std::string, int> m;
+        auto ec_map = glz::read_etf(m, buf);
+        CHECK(static_cast<bool>(ec_map));
+        CHECK(ec_map.ec == glz::error_code::unexpected_end);
+        CHECK(m.empty());
+
+        test_etf_types::SampleStruct sample{};
+        auto ec_struct = glz::read_etf(sample, buf);
+        CHECK(static_cast<bool>(ec_struct));
+        CHECK(ec_struct.ec == glz::error_code::unexpected_end);
+
+        // parse_payload_base must reject map arity exceeding buffer
+        discusy::recieve_event::payload_base base_event{};
+        CHECK(discusy::etf::parse_payload_base(base_event, buf));
+
+        glz::skip s{};
+        auto ec_skip = glz::read_etf(s, buf);
+        CHECK(static_cast<bool>(ec_skip));
+        CHECK(ec_skip.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("Maximum recursive depth enforcement (exceeded_max_recursive_depth)") {
+        // Construct deeply nested LIST_EXT (300 levels > max_recursive_depth_limit 256)
+        constexpr size_t nesting = 300;
+        std::string deep_list;
+        deep_list.push_back(static_cast<char>(glz::etf::magic_version));
+        for (size_t i = 0; i < nesting; ++i) {
+            deep_list.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+            append_be32(deep_list, 1);
+        }
+        deep_list.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        deep_list.push_back(static_cast<char>(1));
+        for (size_t i = 0; i < nesting; ++i) {
+            deep_list.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+        }
+
+        glz::generic json_val{};
+        auto ec_list = glz::read_etf(json_val, deep_list);
+        CHECK(static_cast<bool>(ec_list));
+        CHECK(ec_list.ec == glz::error_code::exceeded_max_recursive_depth);
+
+        glz::skip s{};
+        auto ec_skip = glz::read_etf(s, deep_list);
+        CHECK(static_cast<bool>(ec_skip));
+        CHECK(ec_skip.ec == glz::error_code::exceeded_max_recursive_depth);
+
+        // Construct deeply nested MAP_EXT (300 levels)
+        std::string deep_map;
+        deep_map.push_back(static_cast<char>(glz::etf::magic_version));
+        for (size_t i = 0; i < nesting; ++i) {
+            deep_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            append_be32(deep_map, 1);
+            deep_map.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+            append_be32(deep_map, 1);
+            deep_map.push_back('k');
+        }
+        deep_map.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        deep_map.push_back(static_cast<char>(99));
+
+        auto ec_map = glz::read_etf(json_val, deep_map);
+        CHECK(static_cast<bool>(ec_map));
+        CHECK(ec_map.ec == glz::error_code::exceeded_max_recursive_depth);
+    }
+
+    SECTION("Truncated primitive data types") {
+        // NEW_FLOAT_EXT (< 8 bytes)
+        std::string trunc_nfloat;
+        trunc_nfloat.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_nfloat.push_back(static_cast<char>(glz::etf::tag::NEW_FLOAT_EXT));
+        trunc_nfloat.push_back(static_cast<char>(0));
+        double d = 0.0;
+        CHECK(static_cast<bool>(glz::read_etf(d, trunc_nfloat)));
+
+        // FLOAT_EXT (< 31 bytes)
+        std::string trunc_float;
+        trunc_float.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_float.push_back(static_cast<char>(glz::etf::tag::FLOAT_EXT));
+        trunc_float.append("3.14");
+        CHECK(static_cast<bool>(glz::read_etf(d, trunc_float)));
+
+        // INTEGER_EXT (< 4 bytes)
+        std::string trunc_int;
+        trunc_int.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_int.push_back(static_cast<char>(glz::etf::tag::INTEGER_EXT));
+        trunc_int.push_back(static_cast<char>(1));
+        int val_i = 0;
+        CHECK(static_cast<bool>(glz::read_etf(val_i, trunc_int)));
+
+        // SMALL_BIG_EXT (claims 8 bytes, only 1 provided)
+        std::string trunc_sbig;
+        trunc_sbig.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_sbig.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        trunc_sbig.push_back(static_cast<char>(8)); // len 8
+        trunc_sbig.push_back(static_cast<char>(0)); // sign
+        trunc_sbig.push_back(static_cast<char>(1)); // only 1 digit
+        uint64_t val_u = 0;
+        CHECK(static_cast<bool>(glz::read_etf(val_u, trunc_sbig)));
+
+        // STRING_EXT (claims 20 bytes, only 2 provided)
+        std::string trunc_str;
+        trunc_str.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_str.push_back(static_cast<char>(glz::etf::tag::STRING_EXT));
+        append_be16(trunc_str, 20);
+        trunc_str.append("ab");
+        std::string s;
+        CHECK(static_cast<bool>(glz::read_etf(s, trunc_str)));
+
+        // ATOM_EXT (claims 15 bytes, only 1 provided)
+        std::string trunc_atom;
+        trunc_atom.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_atom.push_back(static_cast<char>(glz::etf::tag::ATOM_EXT));
+        append_be16(trunc_atom, 15);
+        trunc_atom.push_back('x');
+        CHECK(static_cast<bool>(glz::read_etf(s, trunc_atom)));
+
+        // SMALL_ATOM_EXT (claims 25 bytes, only 1 provided)
+        std::string trunc_satom;
+        trunc_satom.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_satom.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_EXT));
+        trunc_satom.push_back(static_cast<char>(25));
+        trunc_satom.push_back('x');
+        CHECK(static_cast<bool>(glz::read_etf(s, trunc_satom)));
+
+        // BIT_BINARY_EXT (< 5 bytes header)
+        std::string trunc_bitbin;
+        trunc_bitbin.push_back(static_cast<char>(glz::etf::magic_version));
+        trunc_bitbin.push_back(static_cast<char>(glz::etf::tag::BIT_BINARY_EXT));
+        append_be32(trunc_bitbin, 10); // missing bits byte
+        glz::skip sk{};
+        CHECK(static_cast<bool>(glz::read_etf(sk, trunc_bitbin)));
+    }
+
+    SECTION("Type mismatch and invalid value handling") {
+        // Non-numeric string into number
+        std::string non_num;
+        non_num.push_back(static_cast<char>(glz::etf::magic_version));
+        non_num.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(non_num, 6);
+        non_num.append("foobar");
+        int num = 0;
+        auto ec_num = glz::read_etf(num, non_num);
+        CHECK(static_cast<bool>(ec_num));
+        CHECK(ec_num.ec == glz::error_code::parse_number_failure);
+
+        // Alphanumeric string into snowflake
+        std::string bad_sf;
+        bad_sf.push_back(static_cast<char>(glz::etf::magic_version));
+        bad_sf.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(bad_sf, 7);
+        bad_sf.append("1234abc");
+        discusy::snowflake sf{};
+        auto ec_sf = glz::read_etf(sf, bad_sf);
+        CHECK(static_cast<bool>(ec_sf));
+        CHECK(ec_sf.ec == glz::error_code::parse_number_failure);
+
+        // Non-boolean atom into bool
+        std::string bad_bool;
+        bad_bool.push_back(static_cast<char>(glz::etf::magic_version));
+        bad_bool.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_EXT));
+        bad_bool.push_back(static_cast<char>(5));
+        bad_bool.append("maybe");
+        bool b = false;
+        auto ec_bool = glz::read_etf(b, bad_bool);
+        CHECK(static_cast<bool>(ec_bool));
+        CHECK(ec_bool.ec == glz::error_code::syntax_error);
+
+        // Unknown tag byte (250)
+        std::string unknown_tag;
+        unknown_tag.push_back(static_cast<char>(glz::etf::magic_version));
+        unknown_tag.push_back(static_cast<char>(250));
+        unknown_tag.push_back(static_cast<char>(0));
+        int val = 0;
+        CHECK(static_cast<bool>(glz::read_etf(val, unknown_tag)));
+        glz::skip sk{};
+        CHECK(static_cast<bool>(glz::read_etf(sk, unknown_tag)));
+    }
+
+    SECTION("Valid minimal and empty edge cases") {
+        // Valid empty LIST_EXT (len = 0 with NIL_EXT tail)
+        std::string empty_list;
+        empty_list.push_back(static_cast<char>(glz::etf::magic_version));
+        empty_list.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+        append_be32(empty_list, 0);
+        empty_list.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+
+        std::vector<int> vec{1, 2, 3};
+        REQUIRE_FALSE(glz::read_etf(vec, empty_list));
+        CHECK(vec.empty());
+
+        // Valid NIL_EXT directly into std::vector
+        std::string nil_list;
+        nil_list.push_back(static_cast<char>(glz::etf::magic_version));
+        nil_list.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+
+        std::vector<int> vec2{1, 2};
+        REQUIRE_FALSE(glz::read_etf(vec2, nil_list));
+        CHECK(vec2.empty());
+
+        // Valid MAP_EXT with arity 0
+        std::string empty_map;
+        empty_map.push_back(static_cast<char>(glz::etf::magic_version));
+        empty_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        append_be32(empty_map, 0);
+
+        std::map<std::string, int> m{{"key", 123}};
+        REQUIRE_FALSE(glz::read_etf(m, empty_map));
+        CHECK(m.empty());
+
+        test_etf_types::SampleStruct s{};
+        s.name = "initial";
+        REQUIRE_FALSE(glz::read_etf(s, empty_map));
+
+        // Valid empty BINARY_EXT string
+        std::string empty_bin;
+        empty_bin.push_back(static_cast<char>(glz::etf::magic_version));
+        empty_bin.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(empty_bin, 0);
+
+        std::string str{"not_empty"};
+        REQUIRE_FALSE(glz::read_etf(str, empty_bin));
+        CHECK(str.empty());
+    }
+}
+
 TEST_CASE("ETF: Gateway payload base quick route and skipping payload data", "[etf][gateway]") {
     SECTION("Payload base extraction skips trailing corrupt or massive d without error") {
         GatewayBaseEvent evt{};
