@@ -1049,7 +1049,7 @@ namespace glz
             return;
          }
 
-         const uint8_t tag = static_cast<uint8_t>(*it);
+         const auto tag = static_cast<uint8_t>(*it);
          switch (tag) {
          case etf::tag::SMALL_INTEGER_EXT:
          case etf::tag::INTEGER_EXT:

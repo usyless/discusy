@@ -27,7 +27,7 @@ namespace glz
             return;
          }
 
-         const uint8_t tag = static_cast<uint8_t>(*it++);
+         const auto tag = static_cast<uint8_t>(*it++);
          switch (tag) {
          case etf::tag::SMALL_INTEGER_EXT: {
             if (it >= end) [[unlikely]] {
@@ -83,7 +83,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint8_t len = static_cast<uint8_t>(*it++);
+            const auto len = static_cast<uint8_t>(*it++);
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -124,7 +124,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint8_t n = static_cast<uint8_t>(*it++);
+            const auto n = static_cast<uint8_t>(*it++);
             if (static_cast<size_t>(end - it) < 1 + n) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -155,7 +155,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint8_t arity = static_cast<uint8_t>(*it++);
+            const auto arity = static_cast<uint8_t>(*it++);
             for (uint8_t i = 0; i < arity; ++i) {
                op<Opts>(ctx, it, end);
                if (static_cast<bool>(ctx.error)) [[unlikely]] return;

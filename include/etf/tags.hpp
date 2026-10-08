@@ -276,7 +276,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE bool is_nil(It0 it, It1 end) noexcept
       {
          if (it >= end) return false;
-         const uint8_t tag = static_cast<uint8_t>(*it);
+         const auto tag = static_cast<uint8_t>(*it);
          if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
             if (end - it >= 2) {
                const auto len = static_cast<uint8_t>(*(it + 1));
@@ -489,7 +489,7 @@ namespace glz::etf
             if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto n = static_cast<uint8_t>(*it++);
             if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint8_t sign = static_cast<uint8_t>(*it++);
+            const auto sign = static_cast<uint8_t>(*it++);
             uint64_t raw = 0;
             bool overflow = false;
             if (n == 8) [[likely]] {

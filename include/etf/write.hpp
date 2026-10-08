@@ -6,6 +6,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <array>
 #include <variant>
 #include <type_traits>
 
@@ -103,12 +104,12 @@ namespace glz
             return;
          }
          if constexpr (check_quoted_num(Opts)) {
-            char buf[64];
-            auto [p, ec] = std::to_chars(buf, buf + sizeof(buf), value);
-            const uint32_t len = static_cast<uint32_t>(p - buf);
+            std::array<char, 64> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
+            auto [p, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+            const auto len = static_cast<uint32_t>(p - buf.data());
             etf::detail::dump_byte(etf::tag::BINARY_EXT, b, ix);
             etf::detail::dump_be<uint32_t>(len, b, ix);
-            etf::detail::dump_bytes(buf, len, b, ix);
+            etf::detail::dump_bytes(buf.data(), len, b, ix);
             return;
          }
          else if constexpr (std::floating_point<std::decay_t<T>>) {
@@ -122,52 +123,52 @@ namespace glz
             using U = std::decay_t<T>;
             if constexpr (std::is_unsigned_v<U>) {
                if (value <= 255) {
-                  const uint8_t buf[2] = {etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value)};
-                  etf::detail::dump_bytes(buf, 2, b, ix);
+                  const std::array<uint8_t, 2> buf{etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value)};
+                  etf::detail::dump_bytes(buf.data(), 2, b, ix);
                }
                else if (value <= 2147483647ULL) {
-                  uint8_t buf[5];
+                  std::array<uint8_t, 5> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
                   buf[0] = etf::tag::INTEGER_EXT;
-                  int32_t be = static_cast<int32_t>(value);
+                  auto be = static_cast<int32_t>(value);
                   if constexpr (std::endian::native == std::endian::little) be = std::byteswap(be);
                   std::memcpy(&buf[1], &be, 4);
-                  etf::detail::dump_bytes(buf, 5, b, ix);
+                  etf::detail::dump_bytes(buf.data(), 5, b, ix);
                }
                else {
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (8 bytes, little-endian digits)
-                  uint8_t buf[11];
+                  std::array<uint8_t, 11> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
                   buf[0] = etf::tag::SMALL_BIG_EXT;
                   buf[1] = 8;
                   buf[2] = 0; // positive sign = 0
-                  uint64_t raw = static_cast<uint64_t>(value);
+                  auto raw = static_cast<uint64_t>(value);
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
                   std::memcpy(&buf[3], &raw, 8);
-                  etf::detail::dump_bytes(buf, 11, b, ix);
+                  etf::detail::dump_bytes(buf.data(), 11, b, ix);
                }
             }
             else { // signed integer
                if (value >= 0 && value <= 255) {
-                  const uint8_t buf[2] = {etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value)};
-                  etf::detail::dump_bytes(buf, 2, b, ix);
+                  const std::array<uint8_t, 2> buf{etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value)};
+                  etf::detail::dump_bytes(buf.data(), 2, b, ix);
                }
                else if (value >= -2147483648LL && value <= 2147483647LL) {
-                  uint8_t buf[5];
+                  std::array<uint8_t, 5> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
                   buf[0] = etf::tag::INTEGER_EXT;
-                  int32_t be = static_cast<int32_t>(value);
+                  auto be = static_cast<int32_t>(value);
                   if constexpr (std::endian::native == std::endian::little) be = std::byteswap(be);
                   std::memcpy(&buf[1], &be, 4);
-                  etf::detail::dump_bytes(buf, 5, b, ix);
+                  etf::detail::dump_bytes(buf.data(), 5, b, ix);
                }
                else {
                   // 64-bit signed integer -> SMALL_BIG_EXT
-                  uint8_t buf[11];
+                  std::array<uint8_t, 11> buf; // NOLINT(cppcoreguidelines-pro-type-member-init)
                   buf[0] = etf::tag::SMALL_BIG_EXT;
                   buf[1] = 8;
                   if (value < 0) {
                      buf[2] = 1; // negative sign = 1
-                     uint64_t raw = static_cast<uint64_t>(-static_cast<int64_t>(value));
+                     auto raw = static_cast<uint64_t>(-static_cast<int64_t>(value));
                      if constexpr (std::endian::native == std::endian::big) {
                         raw = std::byteswap(raw);
                      }
@@ -175,13 +176,13 @@ namespace glz
                   }
                   else {
                      buf[2] = 0; // positive sign = 0
-                     uint64_t raw = static_cast<uint64_t>(value);
+                     auto raw = static_cast<uint64_t>(value);
                      if constexpr (std::endian::native == std::endian::big) {
                         raw = std::byteswap(raw);
                      }
                      std::memcpy(&buf[3], &raw, 8);
                   }
-                  etf::detail::dump_bytes(buf, 11, b, ix);
+                  etf::detail::dump_bytes(buf.data(), 11, b, ix);
                }
             }
          }
@@ -202,7 +203,7 @@ namespace glz
             return;
          }
          const auto sv = str_view<T>(value);
-         const uint32_t len = static_cast<uint32_t>(sv.size());
+         const auto len = static_cast<uint32_t>(sv.size());
          etf::detail::dump_binary(sv.data(), len, b, ix);
       }
    };
