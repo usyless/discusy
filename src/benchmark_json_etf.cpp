@@ -7,11 +7,9 @@
 #include <string>
 #include <vector>
 
-#include <discusy/discusy.hpp>
 #include <discusy/gateway_events.hpp>
 #include <discusy/etf.hpp>
 #include <discusy/json.hpp>
-#include <etf/etf.hpp>
 
 namespace bench_helpers {
 
