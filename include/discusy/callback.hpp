@@ -40,7 +40,7 @@ enum class callback_priority : std::uint8_t {
 class bot;
 
 template <typename Obj>
-inline void attach_bot(Obj& obj, bot* b) noexcept {
+GLZ_ALWAYS_INLINE void attach_bot(Obj& obj, bot* b) noexcept {
     if constexpr (requires { obj.set_bot_void(b); }) {
         obj.set_bot_void(b);
     }

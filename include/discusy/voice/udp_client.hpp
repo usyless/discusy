@@ -28,7 +28,7 @@ using audio_options = boost::container::deque_options<
 >::type;
 
 template <std::integral T>
-[[nodiscard]] constexpr T to_network_order(T value) noexcept {
+[[nodiscard]] GLZ_ALWAYS_INLINE constexpr T to_network_order(T value) noexcept {
     if constexpr (std::endian::native == std::endian::little) {
         return std::byteswap(value);
     } else if constexpr (std::endian::native == std::endian::big) {
