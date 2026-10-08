@@ -19,43 +19,59 @@ namespace detail {
     }
 }
 
-inline constexpr glz::opts glz_opts{
-    .null_terminated = true,
-    .error_on_unknown_keys = false,
-    .minified = true,
+struct no_utf8_validation : glz::opts {
+    bool validate_utf8 = false;
 };
 
-inline constexpr glz::opts glz_opts_partial_read{
-    .null_terminated = true,
-    .error_on_unknown_keys = false,
-    .minified = true,
-    .partial_read = true,
+inline constexpr no_utf8_validation glz_opts{
+    glz::opts{
+        .null_terminated = true,
+        .error_on_unknown_keys = false,
+        .minified = true,
+    },
 };
 
-inline constexpr glz::opts glz_opts_partial_read_not_null_term{
-    .null_terminated = false,
-    .error_on_unknown_keys = false,
-    .minified = true,
-    .partial_read = true,
+inline constexpr no_utf8_validation glz_opts_partial_read{
+    glz::opts{
+        .null_terminated = true,
+        .error_on_unknown_keys = false,
+        .minified = true,
+        .partial_read = true,
+    },
 };
 
-inline constexpr glz::opts glz_opts_not_null_term{
-    .null_terminated = false,
-    .error_on_unknown_keys = false,
-    .minified = true,
+inline constexpr no_utf8_validation glz_opts_partial_read_not_null_term{
+    glz::opts{
+        .null_terminated = false,
+        .error_on_unknown_keys = false,
+        .minified = true,
+        .partial_read = true,
+    },
 };
 
-inline constexpr glz::opts glz_opts_non_minified{
-    .null_terminated = true,
-    .error_on_unknown_keys = false,
-    .minified = false,
+inline constexpr no_utf8_validation glz_opts_not_null_term{
+    glz::opts{
+        .null_terminated = false,
+        .error_on_unknown_keys = false,
+        .minified = true,
+    },
 };
 
-inline constexpr glz::opts glz_opts_non_minified_error_missing{
-    .null_terminated = true,
-    .error_on_unknown_keys = false,
-    .minified = false,
-    .error_on_missing_keys = true,
+inline constexpr no_utf8_validation glz_opts_non_minified{
+    glz::opts{
+        .null_terminated = true,
+        .error_on_unknown_keys = false,
+        .minified = false,
+    },
+};
+
+inline constexpr no_utf8_validation glz_opts_non_minified_error_missing{
+    glz::opts{
+        .null_terminated = true,
+        .error_on_unknown_keys = false,
+        .minified = false,
+        .error_on_missing_keys = true,
+    },
 };
 
 // On true return: failure
