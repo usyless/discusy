@@ -34,6 +34,9 @@
 #include <charconv> // IWYU pragma: keep
 #include <bit> // IWYU pragma: keep
 #include <limits> // IWYU pragma: keep
+#include <algorithm> // IWYU pragma: keep
+#include <cmath> // IWYU pragma: keep
+#include <cstring> // IWYU pragma: keep
 
 #include <format> // IWYU pragma: keep
 #ifdef DISCUSY_LOGGING
@@ -66,6 +69,24 @@
 
 #include <glaze/glaze.hpp> // IWYU pragma: keep
 #include <glaze/base64/base64.hpp> // IWYU pragma: keep
+#include <glaze/core/buffer_traits.hpp> // IWYU pragma: keep
+#include <glaze/core/chrono.hpp> // IWYU pragma: keep
+#include <glaze/core/context.hpp> // IWYU pragma: keep
+#include <glaze/core/custom.hpp> // IWYU pragma: keep
+#include <glaze/core/opts.hpp> // IWYU pragma: keep
+#include <glaze/core/read.hpp> // IWYU pragma: keep
+#include <glaze/core/reflect.hpp> // IWYU pragma: keep
+#include <glaze/core/to.hpp> // IWYU pragma: keep
+#include <glaze/core/wrappers.hpp> // IWYU pragma: keep
+#include <glaze/core/write.hpp> // IWYU pragma: keep
+#include <glaze/json/generic_fwd.hpp> // IWYU pragma: keep
+#include <glaze/util/bit_array.hpp> // IWYU pragma: keep
+#include <glaze/util/for_each.hpp> // IWYU pragma: keep
+#include <glaze/util/inline.hpp> // IWYU pragma: keep
+#include <glaze/util/variant.hpp> // IWYU pragma: keep
+
+// This shouldn't change too often after the initial phase
+// #include <etf/etf.hpp> // IWYU pragma: keep
 
 #include <zstd.h> // IWYU pragma: keep
 
