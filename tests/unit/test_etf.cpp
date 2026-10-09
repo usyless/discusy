@@ -3763,9 +3763,9 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         REQUIRE_FALSE(glz::write_json(s, json_str));
         CHECK(json_str.contains("\"name\":\"item\""));
         CHECK(json_str.contains("\"direct_null\":null"));
-        CHECK(json_str.contains("\"description\""));
-        CHECK(json_str.contains("\"count\""));
-        CHECK(json_str.contains("\"regular_opt\""));
+        CHECK(!json_str.contains("\"description\""));
+        CHECK(!json_str.contains("\"count\""));
+        CHECK(!json_str.contains("\"regular_opt\""));
 
         // ETF: unengaged optional fields must NOT be in the map!
         std::string etf_str;
@@ -3810,7 +3810,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         CHECK(json_str.contains("\"description\":null"));
         CHECK(json_str.contains("\"count\":null"));
         CHECK(json_str.contains("\"direct_null\":null"));
-        CHECK(json_str.contains("\"regular_opt\"")); // omitted!
+        CHECK(!json_str.contains("\"regular_opt\"")); // omitted!
 
         // ETF: map arity should be exactly 4
         std::string etf_str;
@@ -3932,8 +3932,8 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         discusy::api::channels::edit_channel_permissions p_unengaged{};
         std::string json_u;
         REQUIRE_FALSE(glz::write_json(p_unengaged, json_u));
-        CHECK(json_u.contains("\"allow\""));
-        CHECK(json_u.contains("\"deny\""));
+        CHECK(!json_u.contains("\"allow\""));
+        CHECK(!json_u.contains("\"deny\""));
 
         std::string etf_u;
         REQUIRE_FALSE(glz::write_etf(p_unengaged, etf_u));
@@ -3969,7 +3969,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         std::string json_v;
         REQUIRE_FALSE(glz::write_json(p_val, json_v));
         CHECK(json_v.contains("\"allow\":\"2048\""));
-        CHECK(json_v.contains("\"deny\"")); // deny is still omitted!
+        CHECK(!json_v.contains("\"deny\"")); // deny is still omitted!
 
         std::string etf_v;
         REQUIRE_FALSE(glz::write_etf(p_val, etf_v));
@@ -4173,9 +4173,9 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
         REQUIRE_FALSE(glz::write_json(obj, json_str));
         CHECK(json_str.contains("\"name\":\"serialize_null_parity\""));
         CHECK(json_str.contains("\"exp_null\":null"));
-        CHECK(json_str.contains("\"std_opt\""));
-        CHECK(json_str.contains("\"discusy_opt\""));
-        CHECK(json_str.contains("\"opt_exp_null\""));
+        CHECK(!json_str.contains("\"std_opt\""));
+        CHECK(!json_str.contains("\"discusy_opt\""));
+        CHECK(!json_str.contains("\"opt_exp_null\""));
 
         // ETF: arity should be 2 (name, exp_null)
         std::string etf_str;
