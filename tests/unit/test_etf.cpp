@@ -2,6 +2,8 @@
 #include <discusy/etf.hpp>
 #include <discusy/types.hpp>
 #include <discusy/gateway_events.hpp>
+#include <discusy/json.hpp>
+#include <charconv>
 #include <etf/etf.hpp>
 #include <numbers>
 #include <string>
@@ -119,7 +121,81 @@ struct OverfilledStructTest {
     bool operator==(const OverfilledStructTest&) const = default;
 };
 
+struct LocalGlazeValueWrapper {
+    int inner{42};
+    struct glaze {
+        static constexpr auto value = &LocalGlazeValueWrapper::inner;
+    };
+    bool operator==(const LocalGlazeValueWrapper&) const = default;
+};
+
+struct LocalGlazeObjectWrapper {
+    int x{1};
+    int y{2};
+    struct glaze {
+        static constexpr auto value = glz::object("x", &LocalGlazeObjectWrapper::x, "y", &LocalGlazeObjectWrapper::y);
+    };
+    bool operator==(const LocalGlazeObjectWrapper&) const = default;
+};
+
+struct GlobalMetaValueWrapper {
+    std::string text{"hello"};
+    bool operator==(const GlobalMetaValueWrapper&) const = default;
+};
+
+struct HexColorWrapper {
+    uint32_t rgb{0x00FF00};
+    bool operator==(const HexColorWrapper&) const = default;
+};
+
+using number_perms_t = discusy::flags_t<discusy::permissions::permissions, discusy::flags_type::number>;
+
+struct RolePermissionsTest {
+    discusy::snowflake role_id{999};
+    discusy::permissions_t perms{};
+    number_perms_t num_perms{};
+    bool operator==(const RolePermissionsTest&) const = default;
+};
+
+struct TriStateTestStruct {
+    std::string name{"item"};
+    discusy::opt<discusy::explicit_null<std::string>> description{};
+    discusy::opt<discusy::explicit_null<int>> count{};
+    discusy::opt<int> regular_opt{};
+    discusy::explicit_null<std::string> direct_null{nullptr};
+
+    bool operator==(const TriStateTestStruct&) const = default;
+};
+
+struct RegularOptStruct {
+    std::string name{"test"};
+    std::optional<int> opt_val{};
+    bool operator==(const RegularOptStruct&) const = default;
+};
+
 }
+
+template <>
+struct glz::meta<test_etf_types::GlobalMetaValueWrapper> {
+    static constexpr auto value = &test_etf_types::GlobalMetaValueWrapper::text;
+};
+
+template <>
+struct glz::meta<test_etf_types::HexColorWrapper> {
+    static constexpr auto read_hex = [](test_etf_types::HexColorWrapper& obj, std::string_view sv) {
+        if (!sv.empty() && sv[0] == '#') sv.remove_prefix(1);
+        uint32_t val = 0;
+        std::from_chars(sv.data(), sv.data() + sv.size(), val, 16);
+        obj.rgb = val;
+    };
+    static constexpr auto write_hex = [](const test_etf_types::HexColorWrapper& obj) -> std::string {
+        char buf[16];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), obj.rgb, 16);
+        std::string hex(buf, ptr);
+        return "#" + hex;
+    };
+    static constexpr auto value = glz::custom<read_hex, write_hex>;
+};
 
 using namespace test_etf_types;
 
@@ -3260,4 +3336,522 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
         CHECK(dec == orig);
     }
 }
+
+TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permissions", "[etf][json][custom][permissions]") {
+    SECTION("Local struct glaze value wrapper (glaze_value_t)") {
+        LocalGlazeValueWrapper orig{12345};
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        REQUIRE(enc_etf.size() > 1);
+        CHECK(static_cast<uint8_t>(enc_etf[1]) == glz::etf::tag::INTEGER_EXT);
+
+        LocalGlazeValueWrapper dec_etf{0};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf.inner == 12345);
+        CHECK(dec_etf == orig);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(orig, enc_json));
+        CHECK(enc_json == "12345");
+
+        LocalGlazeValueWrapper dec_json{0};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json.inner == 12345);
+        CHECK(dec_json == orig);
+    }
+
+    SECTION("Local struct glaze object wrapper (glz::object)") {
+        LocalGlazeObjectWrapper orig{.x = 10, .y = 20};
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        CHECK(static_cast<uint8_t>(enc_etf[1]) == glz::etf::tag::MAP_EXT);
+
+        LocalGlazeObjectWrapper dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf == orig);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(orig, enc_json));
+        CHECK(enc_json.find("\"x\":10") != std::string::npos);
+        CHECK(enc_json.find("\"y\":20") != std::string::npos);
+
+        LocalGlazeObjectWrapper dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json == orig);
+    }
+
+    SECTION("Global glz::meta value wrapper") {
+        GlobalMetaValueWrapper orig{"hello world"};
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        CHECK(static_cast<uint8_t>(enc_etf[1]) == glz::etf::tag::BINARY_EXT);
+
+        GlobalMetaValueWrapper dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf == orig);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(orig, enc_json));
+        CHECK(enc_json == "\"hello world\"");
+
+        GlobalMetaValueWrapper dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json == orig);
+    }
+
+    SECTION("glz::custom with custom transformation functions") {
+        HexColorWrapper orig{0xFF00AA};
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        CHECK(static_cast<uint8_t>(enc_etf[1]) == glz::etf::tag::BINARY_EXT);
+
+        HexColorWrapper dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf.rgb == 0xFF00AA);
+        CHECK(dec_etf == orig);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(orig, enc_json));
+        CHECK(enc_json == "\"#ff00aa\"");
+
+        HexColorWrapper dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json.rgb == 0xFF00AA);
+        CHECK(dec_json == orig);
+    }
+
+    SECTION("Standalone discusy::permissions_t (string-backed glz::custom)") {
+        // Zero permissions
+        discusy::permissions_t empty_p{};
+        std::string enc_empty_etf;
+        REQUIRE_FALSE(glz::write_etf(empty_p, enc_empty_etf));
+        discusy::permissions_t dec_empty_etf{discusy::permissions::permissions::ADMINISTRATOR};
+        REQUIRE_FALSE(glz::read_etf(dec_empty_etf, enc_empty_etf));
+        CHECK(dec_empty_etf.value == 0);
+
+        std::string enc_empty_json;
+        REQUIRE_FALSE(glz::write_json(empty_p, enc_empty_json));
+        CHECK(enc_empty_json == "\"0\"");
+        discusy::permissions_t dec_empty_json{discusy::permissions::permissions::ADMINISTRATOR};
+        REQUIRE_FALSE(glz::read_json(dec_empty_json, enc_empty_json));
+        CHECK(dec_empty_json.value == 0);
+
+        // Multiple permissions: ADMINISTRATOR (8) | MANAGE_GUILD (32) | VIEW_CHANNEL (1024) | SEND_MESSAGES (2048) = 3112
+        discusy::permissions_t multi_p{};
+        multi_p.add_flag(discusy::permissions::permissions::ADMINISTRATOR);
+        multi_p.add_flag(discusy::permissions::permissions::MANAGE_GUILD);
+        multi_p.add_flag(discusy::permissions::permissions::VIEW_CHANNEL);
+        multi_p.add_flag(discusy::permissions::permissions::SEND_MESSAGES);
+        CHECK(multi_p.value == 3112);
+
+        // ETF roundtrip
+        std::string enc_multi_etf;
+        REQUIRE_FALSE(glz::write_etf(multi_p, enc_multi_etf));
+        CHECK(static_cast<uint8_t>(enc_multi_etf[1]) == glz::etf::tag::BINARY_EXT);
+        discusy::permissions_t dec_multi_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_multi_etf, enc_multi_etf));
+        CHECK(dec_multi_etf.has_flag(discusy::permissions::permissions::ADMINISTRATOR));
+        CHECK(dec_multi_etf.has_flag(discusy::permissions::permissions::MANAGE_GUILD));
+        CHECK(dec_multi_etf.has_flag(discusy::permissions::permissions::VIEW_CHANNEL));
+        CHECK(dec_multi_etf.has_flag(discusy::permissions::permissions::SEND_MESSAGES));
+        CHECK_FALSE(dec_multi_etf.has_flag(discusy::permissions::permissions::BAN_MEMBERS));
+        CHECK_FALSE(dec_multi_etf.has_flag(discusy::permissions::permissions::KICK_MEMBERS));
+        CHECK(dec_multi_etf == multi_p);
+
+        // JSON roundtrip
+        std::string enc_multi_json;
+        REQUIRE_FALSE(glz::write_json(multi_p, enc_multi_json));
+        CHECK(enc_multi_json == "\"3112\"");
+        discusy::permissions_t dec_multi_json{};
+        REQUIRE_FALSE(glz::read_json(dec_multi_json, enc_multi_json));
+        CHECK(dec_multi_json == multi_p);
+    }
+
+    SECTION("Numeric-backed flags (glz::custom<read_num, write_num>)") {
+        number_perms_t num_p{};
+        num_p.add_flag(discusy::permissions::permissions::VIEW_AUDIT_LOG); // 1ULL << 7 = 128
+        num_p.add_flag(discusy::permissions::permissions::PRIORITY_SPEAKER); // 1ULL << 8 = 256
+        CHECK(num_p.value == 384);
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(num_p, enc_etf));
+        number_perms_t dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf.has_flag(discusy::permissions::permissions::VIEW_AUDIT_LOG));
+        CHECK(dec_etf.has_flag(discusy::permissions::permissions::PRIORITY_SPEAKER));
+        CHECK(dec_etf == num_p);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(num_p, enc_json));
+        CHECK(enc_json == "384");
+        number_perms_t dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json == num_p);
+    }
+
+    SECTION("Permissions inside a reflectable struct") {
+        RolePermissionsTest role_orig{
+            .role_id = discusy::snowflake{11223344556677ULL},
+            .perms = {},
+            .num_perms = {},
+        };
+        role_orig.perms.add_flag(discusy::permissions::permissions::ADMINISTRATOR);
+        role_orig.num_perms.add_flag(discusy::permissions::permissions::MANAGE_CHANNELS);
+
+        // ETF roundtrip
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(role_orig, enc_etf));
+        RolePermissionsTest dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf == role_orig);
+        CHECK(dec_etf.perms.has_flag(discusy::permissions::permissions::ADMINISTRATOR));
+        CHECK(dec_etf.num_perms.has_flag(discusy::permissions::permissions::MANAGE_CHANNELS));
+
+        // JSON roundtrip
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(role_orig, enc_json));
+        CHECK(enc_json.find("\"perms\":\"8\"") != std::string::npos);
+        CHECK(enc_json.find("\"num_perms\":16") != std::string::npos);
+        RolePermissionsTest dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json == role_orig);
+    }
+}
+
+TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_null>)", "[etf][json][nulls][explicit_null]") {
+    SECTION("Standalone explicit_null<int> and explicit_null<std::string>") {
+        // Null integer
+        discusy::explicit_null<int> null_int{nullptr};
+        CHECK_FALSE(null_int.has_value());
+
+        std::string enc_null_int_etf;
+        REQUIRE_FALSE(glz::write_etf(null_int, enc_null_int_etf));
+        REQUIRE(enc_null_int_etf.size() >= 5);
+        CHECK(static_cast<uint8_t>(enc_null_int_etf[1]) == glz::etf::tag::SMALL_ATOM_UTF8_EXT);
+        discusy::explicit_null<int> dec_null_int_etf{999};
+        REQUIRE_FALSE(glz::read_etf(dec_null_int_etf, enc_null_int_etf));
+        CHECK_FALSE(dec_null_int_etf.has_value());
+
+        std::string enc_null_int_json;
+        REQUIRE_FALSE(glz::write_json(null_int, enc_null_int_json));
+        CHECK(enc_null_int_json == "null");
+        discusy::explicit_null<int> dec_null_int_json{999};
+        REQUIRE_FALSE(glz::read_json(dec_null_int_json, enc_null_int_json));
+        CHECK_FALSE(dec_null_int_json.has_value());
+
+        // Value integer
+        discusy::explicit_null<int> val_int{42};
+        CHECK(val_int.has_value());
+        CHECK(*val_int == 42);
+
+        std::string enc_val_int_etf;
+        REQUIRE_FALSE(glz::write_etf(val_int, enc_val_int_etf));
+        discusy::explicit_null<int> dec_val_int_etf{nullptr};
+        REQUIRE_FALSE(glz::read_etf(dec_val_int_etf, enc_val_int_etf));
+        CHECK(dec_val_int_etf.has_value());
+        CHECK(*dec_val_int_etf == 42);
+
+        std::string enc_val_int_json;
+        REQUIRE_FALSE(glz::write_json(val_int, enc_val_int_json));
+        CHECK(enc_val_int_json == "42");
+        discusy::explicit_null<int> dec_val_int_json{nullptr};
+        REQUIRE_FALSE(glz::read_json(dec_val_int_json, enc_val_int_json));
+        CHECK(dec_val_int_json.has_value());
+        CHECK(*dec_val_int_json == 42);
+
+        // Null string
+        discusy::explicit_null<std::string> null_str{nullptr};
+        std::string enc_null_str_etf;
+        REQUIRE_FALSE(glz::write_etf(null_str, enc_null_str_etf));
+        discusy::explicit_null<std::string> dec_null_str_etf{"existing"};
+        REQUIRE_FALSE(glz::read_etf(dec_null_str_etf, enc_null_str_etf));
+        CHECK_FALSE(dec_null_str_etf.has_value());
+
+        std::string enc_null_str_json;
+        REQUIRE_FALSE(glz::write_json(null_str, enc_null_str_json));
+        CHECK(enc_null_str_json == "null");
+
+        // Value string
+        discusy::explicit_null<std::string> val_str{"discusy"};
+        std::string enc_val_str_etf;
+        REQUIRE_FALSE(glz::write_etf(val_str, enc_val_str_etf));
+        discusy::explicit_null<std::string> dec_val_str_etf{nullptr};
+        REQUIRE_FALSE(glz::read_etf(dec_val_str_etf, enc_val_str_etf));
+        CHECK(dec_val_str_etf.has_value());
+        CHECK(*dec_val_str_etf == "discusy");
+
+        std::string enc_val_str_json;
+        REQUIRE_FALSE(glz::write_json(val_str, enc_val_str_json));
+        CHECK(enc_val_str_json == "\"discusy\"");
+    }
+
+    SECTION("Tri-State in struct: Unengaged fields are OMITTED (not written)") {
+        TriStateTestStruct s{};
+        REQUIRE_FALSE(s.description.has_value());
+        REQUIRE_FALSE(s.count.has_value());
+        REQUIRE_FALSE(s.regular_opt.has_value());
+        REQUIRE_FALSE(s.direct_null.has_value());
+
+        // JSON: unengaged optional fields must NOT appear in output!
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(s, json_str));
+        CHECK(json_str.find("\"name\":\"item\"") != std::string::npos);
+        CHECK(json_str.find("\"direct_null\":null") != std::string::npos);
+        CHECK(json_str.find("\"description\"") == std::string::npos);
+        CHECK(json_str.find("\"count\"") == std::string::npos);
+        CHECK(json_str.find("\"regular_opt\"") == std::string::npos);
+
+        // ETF: unengaged optional fields must NOT be in the map!
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(s, etf_str));
+        REQUIRE(etf_str.size() > 5);
+        CHECK(static_cast<uint8_t>(etf_str[1]) == glz::etf::tag::MAP_EXT);
+        // Map arity should be exactly 2 (name and direct_null)
+        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        CHECK(arity == 2);
+
+        // Deserialization roundtrip
+        TriStateTestStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_str));
+        CHECK(dec_etf.name == "item");
+        CHECK_FALSE(dec_etf.description.has_value());
+        CHECK_FALSE(dec_etf.count.has_value());
+        CHECK_FALSE(dec_etf.regular_opt.has_value());
+        CHECK_FALSE(dec_etf.direct_null.has_value());
+
+        TriStateTestStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_str));
+        CHECK(dec_json.name == "item");
+        CHECK_FALSE(dec_json.description.has_value());
+        CHECK_FALSE(dec_json.count.has_value());
+        CHECK_FALSE(dec_json.regular_opt.has_value());
+        CHECK_FALSE(dec_json.direct_null.has_value());
+    }
+
+    SECTION("Tri-State in struct: Engaged with nullptr are WRITTEN as null") {
+        TriStateTestStruct s{
+            .name = "item_explicit_null",
+            .description = discusy::explicit_null<std::string>{nullptr},
+            .count = discusy::explicit_null<int>{nullptr},
+            .regular_opt = std::nullopt, // still omitted!
+            .direct_null = discusy::explicit_null<std::string>{nullptr},
+        };
+
+        // JSON: description, count, direct_null MUST be written as null
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(s, json_str));
+        CHECK(json_str.find("\"name\":\"item_explicit_null\"") != std::string::npos);
+        CHECK(json_str.find("\"description\":null") != std::string::npos);
+        CHECK(json_str.find("\"count\":null") != std::string::npos);
+        CHECK(json_str.find("\"direct_null\":null") != std::string::npos);
+        CHECK(json_str.find("\"regular_opt\"") == std::string::npos); // omitted!
+
+        // ETF: map arity should be exactly 4
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(s, etf_str));
+        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        CHECK(arity == 4);
+
+        // Deserialization roundtrip
+        TriStateTestStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_str));
+        CHECK(dec_etf.name == "item_explicit_null");
+        CHECK_FALSE(dec_etf.description.has_value());
+        CHECK_FALSE(dec_etf.count.has_value());
+        CHECK_FALSE(dec_etf.regular_opt.has_value()); // unengaged
+        CHECK_FALSE(dec_etf.direct_null.has_value());
+
+        TriStateTestStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_str));
+        CHECK(dec_json.name == "item_explicit_null");
+        CHECK_FALSE(dec_json.description.has_value());
+        CHECK_FALSE(dec_json.count.has_value());
+        CHECK_FALSE(dec_json.regular_opt.has_value());
+        CHECK_FALSE(dec_json.direct_null.has_value());
+    }
+
+    SECTION("Tri-State in struct: Engaged with values are WRITTEN with values") {
+        TriStateTestStruct s{
+            .name = "item_with_values",
+            .description = discusy::explicit_null<std::string>{"Special item"},
+            .count = discusy::explicit_null<int>{42},
+            .regular_opt = 100,
+            .direct_null = "mandatory_present",
+        };
+
+        // JSON: all 5 fields written with values
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(s, json_str));
+        CHECK(json_str.find("\"name\":\"item_with_values\"") != std::string::npos);
+        CHECK(json_str.find("\"description\":\"Special item\"") != std::string::npos);
+        CHECK(json_str.find("\"count\":42") != std::string::npos);
+        CHECK(json_str.find("\"regular_opt\":100") != std::string::npos);
+        CHECK(json_str.find("\"direct_null\":\"mandatory_present\"") != std::string::npos);
+
+        // ETF: map arity should be exactly 5
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(s, etf_str));
+        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        CHECK(arity == 5);
+
+        // Deserialization roundtrip
+        TriStateTestStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_str));
+        CHECK(dec_etf.name == "item_with_values");
+        REQUIRE(dec_etf.description.has_value());
+        CHECK((*dec_etf.description).has_value());
+        CHECK(*(*dec_etf.description) == "Special item");
+        REQUIRE(dec_etf.count.has_value());
+        CHECK((*dec_etf.count).has_value());
+        CHECK(*(*dec_etf.count) == 42);
+        REQUIRE(dec_etf.regular_opt.has_value());
+        CHECK(*dec_etf.regular_opt == 100);
+        CHECK(dec_etf.direct_null.has_value());
+        CHECK(*dec_etf.direct_null == "mandatory_present");
+
+        TriStateTestStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_str));
+        CHECK(dec_json.name == "item_with_values");
+        REQUIRE(dec_json.description.has_value());
+        CHECK(*(*dec_json.description) == "Special item");
+        REQUIRE(dec_json.count.has_value());
+        CHECK(*(*dec_json.count) == 42);
+        REQUIRE(dec_json.regular_opt.has_value());
+        CHECK(*dec_json.regular_opt == 100);
+        CHECK(dec_json.direct_null.has_value());
+        CHECK(*dec_json.direct_null == "mandatory_present");
+    }
+
+    SECTION("Real-world types: update_voice_state with channel_id explicit null") {
+        // Disconnecting voice (channel_id = null)
+        auto disconnect_state = discusy::send_event::update_voice_state::create(
+            discusy::snowflake{12345},
+            discusy::explicit_null<discusy::snowflake>{nullptr},
+            false, false
+        );
+
+        std::string json_disc;
+        REQUIRE_FALSE(glz::write_json(disconnect_state, json_disc));
+        CHECK(json_disc.find("\"channel_id\":null") != std::string::npos);
+
+        std::string etf_disc;
+        REQUIRE_FALSE(glz::write_etf(disconnect_state, etf_disc));
+        discusy::send_event::update_voice_state dec_disc{};
+        REQUIRE_FALSE(glz::read_etf(dec_disc, etf_disc));
+        CHECK_FALSE(dec_disc.channel_id.has_value());
+        CHECK(dec_disc.guild_id == discusy::snowflake{12345});
+
+        // Connecting voice (channel_id = 67890)
+        auto connect_state = discusy::send_event::update_voice_state::create(
+            discusy::snowflake{12345},
+            discusy::explicit_null<discusy::snowflake>{discusy::snowflake{67890}},
+            false, false
+        );
+
+        std::string json_conn;
+        REQUIRE_FALSE(glz::write_json(connect_state, json_conn));
+        CHECK(json_conn.find("\"channel_id\":\"67890\"") != std::string::npos);
+
+        std::string etf_conn;
+        REQUIRE_FALSE(glz::write_etf(connect_state, etf_conn));
+        discusy::send_event::update_voice_state dec_conn{};
+        REQUIRE_FALSE(glz::read_etf(dec_conn, etf_conn));
+        REQUIRE(dec_conn.channel_id.has_value());
+        CHECK(*dec_conn.channel_id == discusy::snowflake{67890});
+        CHECK(dec_conn.guild_id == discusy::snowflake{12345});
+    }
+
+    SECTION("Real-world types: edit_channel_permissions (opt<explicit_null<permissions_t>>)") {
+        // Case 1: unengaged (omitted)
+        discusy::api::channels::edit_channel_permissions p_unengaged{};
+        std::string json_u;
+        REQUIRE_FALSE(glz::write_json(p_unengaged, json_u));
+        CHECK(json_u.find("\"allow\"") == std::string::npos);
+        CHECK(json_u.find("\"deny\"") == std::string::npos);
+
+        std::string etf_u;
+        REQUIRE_FALSE(glz::write_etf(p_unengaged, etf_u));
+        uint32_t arity_u = glz::etf::detail::read_be<uint32_t>(&etf_u[2]);
+        CHECK(arity_u == 1); // only "type" is written
+
+        // Case 2: reset permissions to null (clear overrides)
+        discusy::api::channels::edit_channel_permissions p_null{};
+        p_null.allow = discusy::explicit_null<discusy::permissions_t>{nullptr};
+        p_null.deny = discusy::explicit_null<discusy::permissions_t>{nullptr};
+
+        std::string json_n;
+        REQUIRE_FALSE(glz::write_json(p_null, json_n));
+        CHECK(json_n.find("\"allow\":null") != std::string::npos);
+        CHECK(json_n.find("\"deny\":null") != std::string::npos);
+
+        std::string etf_n;
+        REQUIRE_FALSE(glz::write_etf(p_null, etf_n));
+        uint32_t arity_n = glz::etf::detail::read_be<uint32_t>(&etf_n[2]);
+        CHECK(arity_n == 3); // type, allow, deny
+
+        discusy::api::channels::edit_channel_permissions dec_n{};
+        REQUIRE_FALSE(glz::read_etf(dec_n, etf_n));
+        CHECK_FALSE(dec_n.allow.has_value());
+        CHECK_FALSE(dec_n.deny.has_value());
+
+        // Case 3: grant SEND_MESSAGES
+        discusy::permissions_t allow_p{};
+        allow_p.add_flag(discusy::permissions::permissions::SEND_MESSAGES); // 2048
+        discusy::api::channels::edit_channel_permissions p_val{};
+        p_val.allow = discusy::explicit_null<discusy::permissions_t>{allow_p};
+
+        std::string json_v;
+        REQUIRE_FALSE(glz::write_json(p_val, json_v));
+        CHECK(json_v.find("\"allow\":\"2048\"") != std::string::npos);
+        CHECK(json_v.find("\"deny\"") == std::string::npos); // deny is still omitted!
+
+        std::string etf_v;
+        REQUIRE_FALSE(glz::write_etf(p_val, etf_v));
+        uint32_t arity_v = glz::etf::detail::read_be<uint32_t>(&etf_v[2]);
+        CHECK(arity_v == 2); // type and allow
+
+        discusy::api::channels::edit_channel_permissions dec_v{};
+        REQUIRE_FALSE(glz::read_etf(dec_v, etf_v));
+        REQUIRE(dec_v.allow.has_value());
+        CHECK((*dec_v.allow).has_value());
+        CHECK((*dec_v.allow)->has_flag(discusy::permissions::permissions::SEND_MESSAGES));
+        CHECK_FALSE(dec_v.deny.has_value()); // deny remains unengaged
+    }
+
+    SECTION("skip_null_members option behavior") {
+        RegularOptStruct orig{.name = "test", .opt_val = std::nullopt};
+
+        // Default: skip_null_members = true -> opt_val omitted
+        std::string etf_skip;
+        REQUIRE_FALSE(glz::write_etf(orig, etf_skip));
+        uint32_t arity_skip = glz::etf::detail::read_be<uint32_t>(&etf_skip[2]);
+        CHECK(arity_skip == 1);
+
+        // With skip_null_members = false -> opt_val written as nil
+        std::string etf_no_skip;
+        REQUIRE_FALSE(glz::write<glz::etf::etf_opts{.skip_null_members = false}>(orig, etf_no_skip));
+        uint32_t arity_no_skip = glz::etf::detail::read_be<uint32_t>(&etf_no_skip[2]);
+        CHECK(arity_no_skip == 2);
+
+        // In JSON with skip_null_members = false -> opt_val: null
+        std::string json_no_skip;
+        REQUIRE_FALSE(glz::write<glz::opts{.skip_null_members = false}>(orig, json_no_skip));
+        CHECK(json_no_skip.find("\"opt_val\":null") != std::string::npos);
+    }
+}
+
 
