@@ -103,6 +103,20 @@ struct StructB {
     int component_type{0};
 };
 
+struct ArrayHolder {
+    std::string name{};
+    std::array<int, 3> coords{};
+
+    bool operator==(const ArrayHolder&) const = default;
+};
+
+struct OverfilledStructTest {
+    std::array<int, 2> coords{};
+    std::string marker{};
+
+    bool operator==(const OverfilledStructTest&) const = default;
+};
+
 }
 
 using namespace test_etf_types;
@@ -2830,3 +2844,393 @@ TEST_CASE("ETF: Single-byte buffers and protocol boundary fuzzing", "[etf][secur
         (void)ec_sk;
     }
 }
+
+TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][generic]") {
+    SECTION("Primitives in glz::generic") {
+        // Small unsigned integer
+        std::string enc_sint;
+        std::uint8_t uval = 42;
+        REQUIRE_FALSE(glz::write_etf(uval, enc_sint));
+        glz::generic gen_sint;
+        REQUIRE_FALSE(glz::read_etf(gen_sint, enc_sint));
+        CHECK(gen_sint.is_number());
+        CHECK(gen_sint.get_number() == 42.0);
+
+        // Signed 32-bit integer
+        std::string enc_int;
+        std::int32_t ival = -12345;
+        REQUIRE_FALSE(glz::write_etf(ival, enc_int));
+        glz::generic gen_int;
+        REQUIRE_FALSE(glz::read_etf(gen_int, enc_int));
+        CHECK(gen_int.is_number());
+        CHECK(gen_int.get_number() == -12345.0);
+
+        // 64-bit integer
+        std::string enc_big;
+        std::uint64_t bval = 175928847299117063ULL;
+        REQUIRE_FALSE(glz::write_etf(bval, enc_big));
+        glz::generic gen_big;
+        REQUIRE_FALSE(glz::read_etf(gen_big, enc_big));
+        CHECK(gen_big.is_number());
+        CHECK(gen_big.get_number() == static_cast<double>(bval));
+
+        // Floating point
+        std::string enc_flt;
+        double dval = 3.141592653589793;
+        REQUIRE_FALSE(glz::write_etf(dval, enc_flt));
+        glz::generic gen_flt;
+        REQUIRE_FALSE(glz::read_etf(gen_flt, enc_flt));
+        CHECK(gen_flt.is_number());
+        CHECK(gen_flt.get_number() == dval);
+
+        // Booleans
+        std::string enc_t, enc_f;
+        REQUIRE_FALSE(glz::write_etf(true, enc_t));
+        REQUIRE_FALSE(glz::write_etf(false, enc_f));
+        glz::generic gen_t, gen_f;
+        REQUIRE_FALSE(glz::read_etf(gen_t, enc_t));
+        REQUIRE_FALSE(glz::read_etf(gen_f, enc_f));
+        CHECK(gen_t.is_boolean());
+        CHECK(gen_t.get_boolean() == true);
+        CHECK(gen_f.is_boolean());
+        CHECK(gen_f.get_boolean() == false);
+
+        // Null / Nil atom
+        std::optional<int> none_val = std::nullopt;
+        std::string enc_nil;
+        REQUIRE_FALSE(glz::write_etf(none_val, enc_nil));
+        glz::generic gen_nil;
+        REQUIRE_FALSE(glz::read_etf(gen_nil, enc_nil));
+        CHECK(gen_nil.is_null());
+
+        // String
+        std::string enc_str;
+        std::string sval = "Hello, glz::generic ETF!";
+        REQUIRE_FALSE(glz::write_etf(sval, enc_str));
+        glz::generic gen_str;
+        REQUIRE_FALSE(glz::read_etf(gen_str, enc_str));
+        CHECK(gen_str.is_string());
+        CHECK(gen_str.get_string() == sval);
+    }
+
+    SECTION("Arrays and Tuples in glz::generic") {
+        // Empty list (NIL_EXT)
+        std::vector<int> empty_vec{};
+        std::string enc_empty;
+        REQUIRE_FALSE(glz::write_etf(empty_vec, enc_empty));
+        glz::generic gen_empty;
+        REQUIRE_FALSE(glz::read_etf(gen_empty, enc_empty));
+        CHECK(gen_empty.is_array());
+        CHECK(gen_empty.get_array().empty());
+
+        // Homogeneous list (LIST_EXT)
+        std::vector<int> numbers = {10, 20, 30};
+        std::string enc_nums;
+        REQUIRE_FALSE(glz::write_etf(numbers, enc_nums));
+        glz::generic gen_nums;
+        REQUIRE_FALSE(glz::read_etf(gen_nums, enc_nums));
+        CHECK(gen_nums.is_array());
+        REQUIRE(gen_nums.get_array().size() == 3);
+        CHECK(gen_nums[0].get_number() == 10.0);
+        CHECK(gen_nums[1].get_number() == 20.0);
+        CHECK(gen_nums[2].get_number() == 30.0);
+
+        // Tuple (SMALL_TUPLE_EXT)
+        std::tuple<int, std::string> tup = {42, "tuple_element"};
+        std::string enc_tup;
+        REQUIRE_FALSE(glz::write_etf(tup, enc_tup));
+        glz::generic gen_tup;
+        REQUIRE_FALSE(glz::read_etf(gen_tup, enc_tup));
+        CHECK(gen_tup.is_array());
+        REQUIRE(gen_tup.get_array().size() == 2);
+        CHECK(gen_tup[0].get_number() == 42.0);
+        CHECK(gen_tup[1].get_string() == "tuple_element");
+    }
+
+    SECTION("Objects and nested structures in glz::generic") {
+        std::map<std::string, int> dict = {
+            {"first", 100},
+            {"second", 200},
+        };
+        std::string enc_map;
+        REQUIRE_FALSE(glz::write_etf(dict, enc_map));
+        glz::generic gen_map;
+        REQUIRE_FALSE(glz::read_etf(gen_map, enc_map));
+        CHECK(gen_map.is_object());
+        CHECK(gen_map["first"].get_number() == 100.0);
+        CHECK(gen_map["second"].get_number() == 200.0);
+
+        // Nested struct
+        SampleStruct original{
+            .id = discusy::snowflake{999888777ULL},
+            .name = "GenericStruct",
+            .description = "testing generic object read",
+            .count = 77,
+            .enabled = true,
+        };
+        std::string enc_struct;
+        REQUIRE_FALSE(glz::write_etf(original, enc_struct));
+        glz::generic gen_struct;
+        REQUIRE_FALSE(glz::read_etf(gen_struct, enc_struct));
+        CHECK(gen_struct.is_object());
+        CHECK(gen_struct["name"].get_string() == "GenericStruct");
+        CHECK(gen_struct["count"].get_number() == 77.0);
+        CHECK(gen_struct["enabled"].get_boolean() == true);
+        REQUIRE(gen_struct["description"].is_string());
+        CHECK(gen_struct["description"].get_string() == "testing generic object read");
+    }
+
+    SECTION("glz::generic roundtrip serialization and deserialization") {
+        glz::generic original;
+        original["title"] = "glz_generic_test";
+        original["score"] = 99.5;
+        original["active"] = true;
+        glz::generic::array_t arr;
+        arr.emplace_back(1.0);
+        arr.emplace_back("two");
+        original["items"] = std::move(arr);
+
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(original, encoded));
+
+        glz::generic decoded;
+        REQUIRE_FALSE(glz::read_etf(decoded, encoded));
+        CHECK(decoded.is_object());
+        CHECK(decoded["title"].get_string() == "glz_generic_test");
+        CHECK(decoded["score"].get_number() == 99.5);
+        CHECK(decoded["active"].get_boolean() == true);
+        CHECK(decoded["items"].is_array());
+        REQUIRE(decoded["items"].get_array().size() == 2);
+        CHECK(decoded["items"][0].get_number() == 1.0);
+        CHECK(decoded["items"][1].get_string() == "two");
+    }
+}
+
+TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][array][bounds]") {
+    auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24) & 0xFF));
+        s.push_back(static_cast<char>((val >> 16) & 0xFF));
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+    auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+
+    SECTION("Exact size std::array roundtrip from LIST_EXT") {
+        std::array<int, 3> original = {10, 20, 30};
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(original, encoded));
+        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::LIST_EXT);
+
+        std::array<int, 3> decoded{};
+        REQUIRE_FALSE(glz::read_etf(decoded, encoded));
+        CHECK(decoded == original);
+    }
+
+    SECTION("Underfilled std::array (ETF list has fewer elements than array size)") {
+        std::vector<int> short_list = {111, 222};
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(short_list, encoded));
+
+        std::array<int, 4> target = {1, 2, 3, 4};
+        REQUIRE_FALSE(glz::read_etf(target, encoded));
+        // First 2 elements should be overwritten with 111, 222; remaining 2 should remain untouched
+        CHECK(target[0] == 111);
+        CHECK(target[1] == 222);
+        CHECK(target[2] == 3);
+        CHECK(target[3] == 4);
+    }
+
+    SECTION("Overfilled list / Out-of-bounds protection (exceeded_static_array_size vs partial_read)") {
+        // Construct a LIST_EXT containing 6 elements: [10, 20, 30, 40, 50, 60]
+        std::vector<int> long_list = {10, 20, 30, 40, 50, 60};
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(long_list, encoded));
+
+        // In default mode: more elements than array capacity MUST be an error
+        std::array<int, 2> small_arr = {0, 0};
+        auto ec = glz::read_etf(small_arr, encoded);
+        CHECK(static_cast<bool>(ec));
+        CHECK(ec.ec == glz::error_code::exceeded_static_array_size);
+
+        // In partial_read mode: gracefully populates up to capacity without error
+        auto ec_partial = glz::read<glz::etf_opts_partial_read>(small_arr, encoded);
+        REQUIRE_FALSE(static_cast<bool>(ec_partial));
+        CHECK(small_arr[0] == 10);
+        CHECK(small_arr[1] == 20);
+    }
+
+    SECTION("Stream synchronization after overfilled array in map / struct") {
+        // Construct an ETF map containing:
+        // "coords" -> [10, 20, 30, 40, 50] (5 elements for a 2-element array)
+        // "marker" -> "passed"
+        std::string buf;
+        buf.push_back(static_cast<char>(glz::etf::magic_version));
+        buf.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        append_be32(buf, 2);
+
+        // Key: "coords"
+        buf.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(buf, 6);
+        buf.append("coords");
+        // Value: LIST_EXT of 5 integers
+        buf.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+        append_be32(buf, 5);
+        for (int i = 1; i <= 5; ++i) {
+            buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+            buf.push_back(static_cast<char>(i * 10));
+        }
+        buf.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+
+        // Key: "marker"
+        buf.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(buf, 6);
+        buf.append("marker");
+        // Value: "passed"
+        buf.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        append_be32(buf, 6);
+        buf.append("passed");
+
+        // In default mode, rejects with exceeded_static_array_size
+        OverfilledStructTest result{};
+        auto ec_def = glz::read_etf(result, buf);
+        CHECK(static_cast<bool>(ec_def));
+        CHECK(ec_def.ec == glz::error_code::exceeded_static_array_size);
+
+        // In partial_read mode, successfully skips excess elements and synchronizes stream
+        auto ec_part = glz::read<glz::etf_opts_partial_read>(result, buf);
+        REQUIRE_FALSE(static_cast<bool>(ec_part));
+        CHECK(result.coords[0] == 10);
+        CHECK(result.coords[1] == 20);
+        CHECK(result.marker == "passed");
+    }
+
+    SECTION("Empty ETF list (NIL_EXT) into std::array") {
+        std::vector<int> empty_vec{};
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(empty_vec, encoded));
+        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::NIL_EXT);
+
+        std::array<int, 3> arr = {5, 6, 7};
+        REQUIRE_FALSE(glz::read_etf(arr, encoded));
+        CHECK(arr[0] == 5);
+        CHECK(arr[1] == 6);
+        CHECK(arr[2] == 7);
+    }
+
+    SECTION("Tuple parsing into std::array (SMALL_TUPLE_EXT and LARGE_TUPLE_EXT)") {
+        // Exact size SMALL_TUPLE_EXT
+        std::tuple<int, int> tup = {42, 84};
+        std::string enc_tup;
+        REQUIRE_FALSE(glz::write_etf(tup, enc_tup));
+        CHECK(static_cast<std::uint8_t>(enc_tup[1]) == glz::etf::tag::SMALL_TUPLE_EXT);
+
+        std::array<int, 2> arr{};
+        REQUIRE_FALSE(glz::read_etf(arr, enc_tup));
+        CHECK(arr[0] == 42);
+        CHECK(arr[1] == 84);
+
+        // Overfilled SMALL_TUPLE_EXT: error in default mode, truncated in partial_read
+        std::tuple<int, int, int, int> big_tup = {1, 2, 3, 4};
+        std::string enc_big_tup;
+        REQUIRE_FALSE(glz::write_etf(big_tup, enc_big_tup));
+
+        std::array<int, 2> arr_small{};
+        auto ec_tup = glz::read_etf(arr_small, enc_big_tup);
+        CHECK(static_cast<bool>(ec_tup));
+        CHECK(ec_tup.ec == glz::error_code::exceeded_static_array_size);
+
+        auto ec_tup_part = glz::read<glz::etf_opts_partial_read>(arr_small, enc_big_tup);
+        REQUIRE_FALSE(static_cast<bool>(ec_tup_part));
+        CHECK(arr_small[0] == 1);
+        CHECK(arr_small[1] == 2);
+
+        // Underfilled SMALL_TUPLE_EXT
+        std::tuple<int> one_tup = {99};
+        std::string enc_one_tup;
+        REQUIRE_FALSE(glz::write_etf(one_tup, enc_one_tup));
+
+        std::array<int, 3> arr_under = {0, 55, 66};
+        REQUIRE_FALSE(glz::read_etf(arr_under, enc_one_tup));
+        CHECK(arr_under[0] == 99);
+        CHECK(arr_under[1] == 55);
+        CHECK(arr_under[2] == 66);
+
+        // LARGE_TUPLE_EXT parsing into std::array
+        std::string large_tup;
+        large_tup.push_back(static_cast<char>(glz::etf::magic_version));
+        large_tup.push_back(static_cast<char>(glz::etf::tag::LARGE_TUPLE_EXT));
+        append_be32(large_tup, 2);
+        large_tup.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        large_tup.push_back(static_cast<char>(7));
+        large_tup.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        large_tup.push_back(static_cast<char>(8));
+
+        std::array<int, 2> arr_lt{};
+        REQUIRE_FALSE(glz::read_etf(arr_lt, large_tup));
+        CHECK(arr_lt[0] == 7);
+        CHECK(arr_lt[1] == 8);
+    }
+
+    SECTION("Byte arrays from BINARY_EXT and STRING_EXT") {
+        std::string raw_bin = "ABCDEF";
+        std::string enc_bin;
+        REQUIRE_FALSE(glz::write_etf(raw_bin, enc_bin));
+
+        // Array of size 6 exact
+        std::array<uint8_t, 6> b6{};
+        REQUIRE_FALSE(glz::read_etf(b6, enc_bin));
+        CHECK(b6[0] == 'A');
+        CHECK(b6[5] == 'F');
+
+        // Array of size 3 (overfilled): error in default mode, truncated in partial_read
+        std::array<uint8_t, 3> b3 = {0, 0, 0};
+        auto ec_b3 = glz::read_etf(b3, enc_bin);
+        CHECK(static_cast<bool>(ec_b3));
+        CHECK(ec_b3.ec == glz::error_code::exceeded_static_array_size);
+
+        auto ec_b3_part = glz::read<glz::etf_opts_partial_read>(b3, enc_bin);
+        REQUIRE_FALSE(static_cast<bool>(ec_b3_part));
+        CHECK(b3[0] == 'A');
+        CHECK(b3[1] == 'B');
+        CHECK(b3[2] == 'C');
+
+        // STRING_EXT exact and overfilled bounds protection
+        std::string str_ext;
+        str_ext.push_back(static_cast<char>(glz::etf::magic_version));
+        str_ext.push_back(static_cast<char>(glz::etf::tag::STRING_EXT));
+        append_be16(str_ext, 4);
+        str_ext.append("WXYZ");
+
+        std::array<char, 4> c4{};
+        REQUIRE_FALSE(glz::read_etf(c4, str_ext));
+        CHECK(c4[0] == 'W');
+        CHECK(c4[3] == 'Z');
+
+        std::array<char, 2> c2 = {'\0', '\0'};
+        auto ec_c2 = glz::read_etf(c2, str_ext);
+        CHECK(static_cast<bool>(ec_c2));
+        CHECK(ec_c2.ec == glz::error_code::exceeded_static_array_size);
+
+        auto ec_c2_part = glz::read<glz::etf_opts_partial_read>(c2, str_ext);
+        REQUIRE_FALSE(static_cast<bool>(ec_c2_part));
+        CHECK(c2[0] == 'W');
+        CHECK(c2[1] == 'X');
+    }
+
+    SECTION("Struct with std::array member roundtrip") {
+        ArrayHolder orig{
+            .name = "points",
+            .coords = {100, 200, 300},
+        };
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(orig, enc));
+
+        ArrayHolder dec{};
+        REQUIRE_FALSE(glz::read_etf(dec, enc));
+        CHECK(dec == orig);
+    }
+}
+

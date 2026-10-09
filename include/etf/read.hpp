@@ -139,6 +139,32 @@ namespace glz
          if constexpr (string_view_t<T>) {
             value = sv;
          }
+         else if constexpr (array_char_t<T>) {
+            if constexpr (not check_partial_read(Opts)) {
+               if (sv.size() > value.size()) [[unlikely]] {
+                  ctx.error = error_code::exceeded_static_array_size;
+                  return;
+               }
+            }
+            const size_t copy_len = (sv.size() < value.size()) ? sv.size() : value.size();
+            std::memcpy(value.data(), sv.data(), copy_len);
+            if (copy_len < value.size()) {
+               std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+            }
+         }
+         else if constexpr (char_array_t<T>) {
+            if constexpr (not check_partial_read(Opts)) {
+               if (sv.size() > sizeof(value)) [[unlikely]] {
+                  ctx.error = error_code::exceeded_static_array_size;
+                  return;
+               }
+            }
+            const size_t copy_len = (sv.size() < sizeof(value)) ? sv.size() : sizeof(value);
+            std::memcpy(value, sv.data(), copy_len);
+            if (copy_len < sizeof(value)) {
+               std::memset(value + copy_len, 0, sizeof(value) - copy_len);
+            }
+         }
          else {
             value.assign(sv.data(), sv.size());
          }
@@ -318,8 +344,19 @@ namespace glz
                }
             }
             else {
-               for (size_t i = 0; i < len && i < value.size(); ++i) {
+               if constexpr (not check_partial_read(Opts)) {
+                  if (len > value.size()) [[unlikely]] {
+                     ctx.error = error_code::exceeded_static_array_size;
+                     return;
+                  }
+               }
+               const size_t parse_len = (len < value.size()) ? len : value.size();
+               for (size_t i = 0; i < parse_len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+               }
+               for (size_t i = parse_len; i < len; ++i) {
+                  skip_value<EETF>::op<Opts>(ctx, it, end);
                   if (static_cast<bool>(ctx.error)) [[unlikely]] return;
                }
             }
@@ -359,6 +396,18 @@ namespace glz
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
+               else {
+                  if constexpr (not check_partial_read(Opts)) {
+                     if (len > value.size()) [[unlikely]] {
+                        ctx.error = error_code::exceeded_static_array_size;
+                        return;
+                     }
+                  }
+                  const size_t copy_len = (len < value.size()) ? len : value.size();
+                  for (size_t i = 0; i < copy_len; ++i) {
+                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                  }
+               }
                it += len;
                return;
             }
@@ -391,6 +440,18 @@ namespace glz
                   value.clear();
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
+                  }
+               }
+               else {
+                  if constexpr (not check_partial_read(Opts)) {
+                     if (len > value.size()) [[unlikely]] {
+                        ctx.error = error_code::exceeded_static_array_size;
+                        return;
+                     }
+                  }
+                  const size_t copy_len = (len < value.size()) ? len : value.size();
+                  for (size_t i = 0; i < copy_len; ++i) {
+                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
                   }
                }
                it += len;
@@ -433,6 +494,32 @@ namespace glz
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
                   if (static_cast<bool>(ctx.error)) [[unlikely]] return;
                   value.emplace_back(std::move(elem));
+               }
+            }
+            else if constexpr (set_like) {
+               value.clear();
+               for (size_t i = 0; i < len; ++i) {
+                  V elem{};
+                  parse<EETF>::op<Opts>(elem, ctx, it, end);
+                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  value.emplace(std::move(elem));
+               }
+            }
+            else {
+               if constexpr (not check_partial_read(Opts)) {
+                  if (len > value.size()) [[unlikely]] {
+                     ctx.error = error_code::exceeded_static_array_size;
+                     return;
+                  }
+               }
+               const size_t parse_len = (len < value.size()) ? len : value.size();
+               for (size_t i = 0; i < parse_len; ++i) {
+                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+               }
+               for (size_t i = parse_len; i < len; ++i) {
+                  skip_value<EETF>::op<Opts>(ctx, it, end);
+                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
                }
             }
             return;
@@ -1112,7 +1199,9 @@ namespace glz
             value.data = typename generic_json<Mode, MapType>::array_t{};
             break;
          }
-         case etf::tag::LIST_EXT: {
+         case etf::tag::LIST_EXT:
+         case etf::tag::SMALL_TUPLE_EXT:
+         case etf::tag::LARGE_TUPLE_EXT: {
             typename generic_json<Mode, MapType>::array_t arr;
             from<EETF, decltype(arr)>::template op<Opts>(arr, ctx, it, end);
             if (static_cast<bool>(ctx.error)) return;
