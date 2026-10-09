@@ -3137,10 +3137,12 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
         CHECK(gen_flt.get_number() == dval);
 
         // Booleans
-        std::string enc_t, enc_f;
+        std::string enc_t;
+        std::string enc_f;
         REQUIRE_FALSE(glz::write_etf(true, enc_t));
         REQUIRE_FALSE(glz::write_etf(false, enc_f));
-        glz::generic gen_t, gen_f;
+        glz::generic gen_t;
+        glz::generic gen_f;
         REQUIRE_FALSE(glz::read_etf(gen_t, enc_t));
         REQUIRE_FALSE(glz::read_etf(gen_f, enc_f));
         CHECK(gen_t.is_boolean());
@@ -3528,8 +3530,8 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         // JSON
         std::string enc_json;
         REQUIRE_FALSE(glz::write_json(orig, enc_json));
-        CHECK(enc_json.find("\"x\":10") != std::string::npos);
-        CHECK(enc_json.find("\"y\":20") != std::string::npos);
+        CHECK(enc_json.contains("\"x\":10"));
+        CHECK(enc_json.contains("\"y\":20"));
 
         LocalGlazeObjectWrapper dec_json{};
         REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
@@ -3674,8 +3676,8 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         // JSON roundtrip
         std::string enc_json;
         REQUIRE_FALSE(glz::write_json(role_orig, enc_json));
-        CHECK(enc_json.find("\"perms\":\"8\"") != std::string::npos);
-        CHECK(enc_json.find("\"num_perms\":16") != std::string::npos);
+        CHECK(enc_json.contains("\"perms\":\"8\""));
+        CHECK(enc_json.contains("\"num_perms\":16"));
         RolePermissionsTest dec_json{};
         REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
         CHECK(dec_json == role_orig);
@@ -3759,11 +3761,11 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // JSON: unengaged optional fields must NOT appear in output!
         std::string json_str;
         REQUIRE_FALSE(glz::write_json(s, json_str));
-        CHECK(json_str.find("\"name\":\"item\"") != std::string::npos);
-        CHECK(json_str.find("\"direct_null\":null") != std::string::npos);
-        CHECK(json_str.find("\"description\"") == std::string::npos);
-        CHECK(json_str.find("\"count\"") == std::string::npos);
-        CHECK(json_str.find("\"regular_opt\"") == std::string::npos);
+        CHECK(json_str.contains("\"name\":\"item\""));
+        CHECK(json_str.contains("\"direct_null\":null"));
+        CHECK(json_str.contains("\"description\""));
+        CHECK(json_str.contains("\"count\""));
+        CHECK(json_str.contains("\"regular_opt\""));
 
         // ETF: unengaged optional fields must NOT be in the map!
         std::string etf_str;
@@ -3804,11 +3806,11 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // JSON: description, count, direct_null MUST be written as null
         std::string json_str;
         REQUIRE_FALSE(glz::write_json(s, json_str));
-        CHECK(json_str.find("\"name\":\"item_explicit_null\"") != std::string::npos);
-        CHECK(json_str.find("\"description\":null") != std::string::npos);
-        CHECK(json_str.find("\"count\":null") != std::string::npos);
-        CHECK(json_str.find("\"direct_null\":null") != std::string::npos);
-        CHECK(json_str.find("\"regular_opt\"") == std::string::npos); // omitted!
+        CHECK(json_str.contains("\"name\":\"item_explicit_null\""));
+        CHECK(json_str.contains("\"description\":null"));
+        CHECK(json_str.contains("\"count\":null"));
+        CHECK(json_str.contains("\"direct_null\":null"));
+        CHECK(json_str.contains("\"regular_opt\"")); // omitted!
 
         // ETF: map arity should be exactly 4
         std::string etf_str;
@@ -3846,16 +3848,16 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // JSON: all 5 fields written with values
         std::string json_str;
         REQUIRE_FALSE(glz::write_json(s, json_str));
-        CHECK(json_str.find("\"name\":\"item_with_values\"") != std::string::npos);
-        CHECK(json_str.find("\"description\":\"Special item\"") != std::string::npos);
-        CHECK(json_str.find("\"count\":42") != std::string::npos);
-        CHECK(json_str.find("\"regular_opt\":100") != std::string::npos);
-        CHECK(json_str.find("\"direct_null\":\"mandatory_present\"") != std::string::npos);
+        CHECK(json_str.contains("\"name\":\"item_with_values\""));
+        CHECK(json_str.contains("\"description\":\"Special item\""));
+        CHECK(json_str.contains("\"count\":42"));
+        CHECK(json_str.contains("\"regular_opt\":100"));
+        CHECK(json_str.contains("\"direct_null\":\"mandatory_present\""));
 
         // ETF: map arity should be exactly 5
         std::string etf_str;
         REQUIRE_FALSE(glz::write_etf(s, etf_str));
-        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
         CHECK(arity == 5);
 
         // Deserialization roundtrip
@@ -3896,7 +3898,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string json_disc;
         REQUIRE_FALSE(glz::write_json(disconnect_state, json_disc));
-        CHECK(json_disc.find("\"channel_id\":null") != std::string::npos);
+        CHECK(json_disc.contains("\"channel_id\":null"));
 
         std::string etf_disc;
         REQUIRE_FALSE(glz::write_etf(disconnect_state, etf_disc));
@@ -3914,7 +3916,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string json_conn;
         REQUIRE_FALSE(glz::write_json(connect_state, json_conn));
-        CHECK(json_conn.find("\"channel_id\":\"67890\"") != std::string::npos);
+        CHECK(json_conn.contains("\"channel_id\":\"67890\""));
 
         std::string etf_conn;
         REQUIRE_FALSE(glz::write_etf(connect_state, etf_conn));
@@ -3930,8 +3932,8 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         discusy::api::channels::edit_channel_permissions p_unengaged{};
         std::string json_u;
         REQUIRE_FALSE(glz::write_json(p_unengaged, json_u));
-        CHECK(json_u.find("\"allow\"") == std::string::npos);
-        CHECK(json_u.find("\"deny\"") == std::string::npos);
+        CHECK(json_u.contains("\"allow\""));
+        CHECK(json_u.contains("\"deny\""));
 
         std::string etf_u;
         REQUIRE_FALSE(glz::write_etf(p_unengaged, etf_u));
@@ -3945,8 +3947,8 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string json_n;
         REQUIRE_FALSE(glz::write_json(p_null, json_n));
-        CHECK(json_n.find("\"allow\":null") != std::string::npos);
-        CHECK(json_n.find("\"deny\":null") != std::string::npos);
+        CHECK(json_n.contains("\"allow\":null"));
+        CHECK(json_n.contains("\"deny\":null"));
 
         std::string etf_n;
         REQUIRE_FALSE(glz::write_etf(p_null, etf_n));
@@ -3966,8 +3968,8 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string json_v;
         REQUIRE_FALSE(glz::write_json(p_val, json_v));
-        CHECK(json_v.find("\"allow\":\"2048\"") != std::string::npos);
-        CHECK(json_v.find("\"deny\"") == std::string::npos); // deny is still omitted!
+        CHECK(json_v.contains("\"allow\":\"2048\""));
+        CHECK(json_v.contains("\"deny\"")); // deny is still omitted!
 
         std::string etf_v;
         REQUIRE_FALSE(glz::write_etf(p_val, etf_v));
@@ -4000,7 +4002,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // In JSON with skip_null_members = false -> opt_val: null
         std::string json_no_skip;
         REQUIRE_FALSE(glz::write<glz::opts{.skip_null_members = false}>(orig, json_no_skip));
-        CHECK(json_no_skip.find("\"opt_val\":null") != std::string::npos);
+        CHECK(json_no_skip.contains("\"opt_val\":null"));
     }
 }
 
@@ -4169,11 +4171,11 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
         // JSON: std_opt, discusy_opt, opt_exp_null are omitted; exp_null is written as null
         std::string json_str;
         REQUIRE_FALSE(glz::write_json(obj, json_str));
-        CHECK(json_str.find("\"name\":\"serialize_null_parity\"") != std::string::npos);
-        CHECK(json_str.find("\"exp_null\":null") != std::string::npos);
-        CHECK(json_str.find("\"std_opt\"") == std::string::npos);
-        CHECK(json_str.find("\"discusy_opt\"") == std::string::npos);
-        CHECK(json_str.find("\"opt_exp_null\"") == std::string::npos);
+        CHECK(json_str.contains("\"name\":\"serialize_null_parity\""));
+        CHECK(json_str.contains("\"exp_null\":null"));
+        CHECK(json_str.contains("\"std_opt\""));
+        CHECK(json_str.contains("\"discusy_opt\""));
+        CHECK(json_str.contains("\"opt_exp_null\""));
 
         // ETF: arity should be 2 (name, exp_null)
         std::string etf_str;
