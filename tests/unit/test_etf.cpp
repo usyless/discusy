@@ -497,22 +497,22 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
             // "id" => raw_id (SMALL_BIG_EXT)
             std::string id_key = "id";
             std::string key_etf;
-            glz::write_etf(id_key, key_etf);
+            REQUIRE_FALSE(glz::write_etf(id_key, key_etf));
             etf_int_payload.append(key_etf.data() + 1, key_etf.size() - 1);
 
             std::string val_etf;
-            glz::write_etf(raw_id, val_etf);
+            REQUIRE_FALSE(glz::write_etf(raw_id, val_etf));
             etf_int_payload.append(val_etf.data() + 1, val_etf.size() - 1);
 
             // "name" => "test"
             std::string name_key = "name";
             std::string name_key_etf;
-            glz::write_etf(name_key, name_key_etf);
+            REQUIRE_FALSE(glz::write_etf(name_key, name_key_etf));
             etf_int_payload.append(name_key_etf.data() + 1, name_key_etf.size() - 1);
 
             std::string name_val = "test";
             std::string name_val_etf;
-            glz::write_etf(name_val, name_val_etf);
+            REQUIRE_FALSE(glz::write_etf(name_val, name_val_etf));
             etf_int_payload.append(name_val_etf.data() + 1, name_val_etf.size() - 1);
         }
 
@@ -4020,11 +4020,11 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
             etf_payload.append(reinterpret_cast<const char*>(&arity), 4);
             std::string k = "name";
             std::string enc_k;
-            glz::write_etf(k, enc_k);
+            REQUIRE_FALSE(glz::write_etf(k, enc_k));
             etf_payload.append(enc_k.data() + 1, enc_k.size() - 1);
             std::string v = "omitted_test";
             std::string enc_v;
-            glz::write_etf(v, enc_v);
+            REQUIRE_FALSE(glz::write_etf(v, enc_v));
             etf_payload.append(enc_v.data() + 1, enc_v.size() - 1);
         }
 
@@ -4067,11 +4067,11 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
             etf_payload.append(reinterpret_cast<const char*>(&arity), 4);
             std::string k = "name";
             std::string enc_k;
-            glz::write_etf(k, enc_k);
+            REQUIRE_FALSE(glz::write_etf(k, enc_k));
             etf_payload.append(enc_k.data() + 1, enc_k.size() - 1);
             std::string v = "new_name";
             std::string enc_v;
-            glz::write_etf(v, enc_v);
+            REQUIRE_FALSE(glz::write_etf(v, enc_v));
             etf_payload.append(enc_v.data() + 1, enc_v.size() - 1);
         }
 
@@ -4109,7 +4109,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
             auto add_pair = [&](std::string_view key, auto val_writer) {
                 std::string k{key};
                 std::string enc_k;
-                glz::write_etf(k, enc_k);
+                REQUIRE_FALSE(glz::write_etf(k, enc_k));
                 etf_null_payload.append(enc_k.data() + 1, enc_k.size() - 1);
                 val_writer();
             };
@@ -4117,27 +4117,27 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
             add_pair("name", [&] {
                 std::string v = "reset_test";
                 std::string enc_v;
-                glz::write_etf(v, enc_v);
+                REQUIRE_FALSE(glz::write_etf(v, enc_v));
                 etf_null_payload.append(enc_v.data() + 1, enc_v.size() - 1);
             });
             add_pair("std_opt", [&] {
                 std::string enc_nil;
-                glz::write_etf(nullptr, enc_nil);
+                REQUIRE_FALSE(glz::write_etf(nullptr, enc_nil));
                 etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
             });
             add_pair("discusy_opt", [&] {
                 std::string enc_nil;
-                glz::write_etf(nullptr, enc_nil);
+                REQUIRE_FALSE(glz::write_etf(nullptr, enc_nil));
                 etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
             });
             add_pair("exp_null", [&] {
                 std::string enc_nil;
-                glz::write_etf(nullptr, enc_nil);
+                REQUIRE_FALSE(glz::write_etf(nullptr, enc_nil));
                 etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
             });
             add_pair("opt_exp_null", [&] {
                 std::string enc_nil;
-                glz::write_etf(nullptr, enc_nil);
+                REQUIRE_FALSE(glz::write_etf(nullptr, enc_nil));
                 etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
             });
         }
