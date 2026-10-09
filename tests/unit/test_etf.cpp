@@ -173,6 +173,52 @@ struct RegularOptStruct {
     bool operator==(const RegularOptStruct&) const = default;
 };
 
+struct NullableParityStruct {
+    std::string name{"default_name"};
+    std::optional<int> std_opt{};
+    discusy::opt<int> discusy_opt{};
+    discusy::explicit_null<int> exp_null{nullptr};
+    discusy::opt<discusy::explicit_null<int>> opt_exp_null{};
+
+    bool operator==(const NullableParityStruct&) const = default;
+};
+
+struct LocalMimicNumber {
+    int val{0};
+    struct glaze {
+        using mimic = int;
+        static constexpr auto value = &LocalMimicNumber::val;
+    };
+    bool operator==(const LocalMimicNumber&) const = default;
+};
+
+struct LocalMimicString {
+    std::string val{};
+    struct glaze {
+        using mimic = std::string;
+        static constexpr auto value = &LocalMimicString::val;
+    };
+    bool operator==(const LocalMimicString&) const = default;
+};
+
+struct GlobalMimicNumber {
+    int val{0};
+    bool operator==(const GlobalMimicNumber&) const = default;
+};
+
+struct GlobalMimicString {
+    std::string val{};
+    bool operator==(const GlobalMimicString&) const = default;
+};
+
+struct MimicHolderStruct {
+    LocalMimicNumber local_num{42};
+    LocalMimicString local_str{"local_mimic"};
+    GlobalMimicNumber global_num{100};
+    GlobalMimicString global_str{"global_mimic"};
+    bool operator==(const MimicHolderStruct&) const = default;
+};
+
 }
 
 template <>
@@ -195,6 +241,18 @@ struct glz::meta<test_etf_types::HexColorWrapper> {
         return "#" + hex;
     };
     static constexpr auto value = glz::custom<read_hex, write_hex>;
+};
+
+template <>
+struct glz::meta<test_etf_types::GlobalMimicNumber> {
+    using mimic = int;
+    static constexpr auto value = &test_etf_types::GlobalMimicNumber::val;
+};
+
+template <>
+struct glz::meta<test_etf_types::GlobalMimicString> {
+    using mimic = std::string;
+    static constexpr auto value = &test_etf_types::GlobalMimicString::val;
 };
 
 using namespace test_etf_types;
@@ -340,12 +398,34 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
     constexpr std::uint64_t raw_id = 175928847299117063ULL;
     const discusy::snowflake sf{raw_id};
 
-    SECTION("Snowflake roundtrip as integer") {
+    SECTION("Snowflake roundtrip as integer (SMALL_BIG_EXT)") {
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(sf.value, encoded));
+        REQUIRE(encoded.size() > 1);
+        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::SMALL_BIG_EXT);
+
+        // Deserializing 64-bit integer directly into discusy::snowflake
+        discusy::snowflake decoded{};
+        REQUIRE_FALSE(glz::read_etf(decoded, encoded));
+        CHECK(decoded == sf);
+        CHECK(decoded.value == raw_id);
+
+        // Also test into decoded.value (raw uint64_t)
+        std::uint64_t raw_decoded = 0;
+        REQUIRE_FALSE(glz::read_etf(raw_decoded, encoded));
+        CHECK(raw_decoded == raw_id);
+    }
+
+    SECTION("Snowflake direct serialization (writes quoted string due to glz::quoted_num)") {
+        std::string encoded;
+        REQUIRE_FALSE(glz::write_etf(sf, encoded));
+
+        // When serialized directly, snowflake uses quoted_num so ETF writes it as BINARY_EXT string
+        REQUIRE(encoded.size() > 1);
+        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::BINARY_EXT);
 
         discusy::snowflake decoded{};
-        REQUIRE_FALSE(glz::read_etf(decoded.value, encoded));
+        REQUIRE_FALSE(glz::read_etf(decoded, encoded));
         CHECK(decoded == sf);
         CHECK(decoded.value == raw_id);
     }
@@ -357,7 +437,8 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
         REQUIRE_FALSE(glz::write_etf(string_id, encoded));
 
         discusy::snowflake decoded{};
-        REQUIRE_FALSE(glz::read_etf(decoded.value, encoded));
+        REQUIRE_FALSE(glz::read_etf(decoded, encoded));
+        CHECK(decoded == sf);
         CHECK(decoded.value == raw_id);
     }
 
@@ -373,11 +454,12 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
         custom_etf.append(raw_str);
 
         discusy::snowflake decoded{};
-        REQUIRE_FALSE(glz::read_etf(decoded.value, custom_etf));
+        REQUIRE_FALSE(glz::read_etf(decoded, custom_etf));
+        CHECK(decoded == sf);
         CHECK(decoded.value == raw_id);
     }
 
-    SECTION("Snowflake deserialization from SMALL_INTEGER_EXT") {
+    SECTION("Snowflake deserialization from SMALL_INTEGER_EXT (8-bit integer)") {
         // Small ID like 100
         std::string custom_etf;
         custom_etf.push_back(static_cast<char>(glz::etf::magic_version));
@@ -385,8 +467,69 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
         custom_etf.push_back(static_cast<char>(100));
 
         discusy::snowflake decoded{};
-        REQUIRE_FALSE(glz::read_etf(decoded.value, custom_etf));
+        REQUIRE_FALSE(glz::read_etf(decoded, custom_etf));
+        CHECK(decoded == discusy::snowflake{100ULL});
         CHECK(decoded.value == 100ULL);
+    }
+
+    SECTION("Snowflake deserialization from INTEGER_EXT (32-bit integer)") {
+        std::int32_t val32 = 1234567;
+        std::string custom_etf;
+        REQUIRE_FALSE(glz::write_etf(val32, custom_etf));
+        REQUIRE(static_cast<std::uint8_t>(custom_etf[1]) == glz::etf::tag::INTEGER_EXT);
+
+        discusy::snowflake decoded{};
+        REQUIRE_FALSE(glz::read_etf(decoded, custom_etf));
+        CHECK(decoded == discusy::snowflake{1234567ULL});
+        CHECK(decoded.value == 1234567ULL);
+    }
+
+    SECTION("Snowflake in struct: deserialization from integer vs string payload") {
+        // Struct with snowflake id
+        // 1. When payload sends id as a 64-bit integer (SMALL_BIG_EXT)
+        std::string etf_int_payload;
+        {
+            etf_int_payload.push_back(static_cast<char>(glz::etf::magic_version));
+            etf_int_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            std::uint32_t arity = glz::etf::detail::to_big_endian(2U);
+            etf_int_payload.append(reinterpret_cast<const char*>(&arity), 4);
+
+            // "id" => raw_id (SMALL_BIG_EXT)
+            std::string id_key = "id";
+            std::string key_etf;
+            glz::write_etf(id_key, key_etf);
+            etf_int_payload.append(key_etf.data() + 1, key_etf.size() - 1);
+
+            std::string val_etf;
+            glz::write_etf(raw_id, val_etf);
+            etf_int_payload.append(val_etf.data() + 1, val_etf.size() - 1);
+
+            // "name" => "test"
+            std::string name_key = "name";
+            std::string name_key_etf;
+            glz::write_etf(name_key, name_key_etf);
+            etf_int_payload.append(name_key_etf.data() + 1, name_key_etf.size() - 1);
+
+            std::string name_val = "test";
+            std::string name_val_etf;
+            glz::write_etf(name_val, name_val_etf);
+            etf_int_payload.append(name_val_etf.data() + 1, name_val_etf.size() - 1);
+        }
+
+        SampleStruct sample_from_int{};
+        REQUIRE_FALSE(glz::read_etf(sample_from_int, etf_int_payload));
+        CHECK(sample_from_int.id == sf);
+        CHECK(sample_from_int.name == "test");
+
+        // 2. When payload sends id as string (BINARY_EXT)
+        SampleStruct original{.id = sf, .name = "test"};
+        std::string etf_str_payload;
+        REQUIRE_FALSE(glz::write_etf(original, etf_str_payload));
+
+        SampleStruct sample_from_str{};
+        REQUIRE_FALSE(glz::read_etf(sample_from_str, etf_str_payload));
+        CHECK(sample_from_str.id == sf);
+        CHECK(sample_from_str.name == "test");
     }
 }
 
@@ -3854,4 +3997,390 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
     }
 }
 
+TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and omitted fields)", "[etf][json][nulls][parity]") {
+    SECTION("Omitted fields: default-initialized struct preserves nulls/unengaged state identically in JSON and ETF") {
+        NullableParityStruct dec_etf{};
+        NullableParityStruct dec_json{};
 
+        // JSON payload with only "name", omitting std_opt, discusy_opt, exp_null, opt_exp_null
+        std::string json_payload = "{\"name\":\"omitted_test\"}";
+        REQUIRE_FALSE(glz::read_json(dec_json, json_payload));
+        CHECK(dec_json.name == "omitted_test");
+        CHECK_FALSE(dec_json.std_opt.has_value());
+        CHECK_FALSE(dec_json.discusy_opt.has_value());
+        CHECK_FALSE(dec_json.exp_null.has_value());
+        CHECK_FALSE(dec_json.opt_exp_null.has_value());
+
+        // ETF map with only "name" => "omitted_test"
+        std::string etf_payload;
+        {
+            etf_payload.push_back(static_cast<char>(glz::etf::magic_version));
+            etf_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            uint32_t arity = glz::etf::detail::to_big_endian(1U);
+            etf_payload.append(reinterpret_cast<const char*>(&arity), 4);
+            std::string k = "name";
+            std::string enc_k;
+            glz::write_etf(k, enc_k);
+            etf_payload.append(enc_k.data() + 1, enc_k.size() - 1);
+            std::string v = "omitted_test";
+            std::string enc_v;
+            glz::write_etf(v, enc_v);
+            etf_payload.append(enc_v.data() + 1, enc_v.size() - 1);
+        }
+
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_payload));
+        CHECK(dec_etf.name == "omitted_test");
+        CHECK_FALSE(dec_etf.std_opt.has_value());
+        CHECK_FALSE(dec_etf.discusy_opt.has_value());
+        CHECK_FALSE(dec_etf.exp_null.has_value());
+        CHECK_FALSE(dec_etf.opt_exp_null.has_value());
+
+        CHECK(dec_etf == dec_json);
+    }
+
+    SECTION("Omitted fields: pre-populated struct fields are NOT overwritten (exact parity)") {
+        NullableParityStruct pre_json{
+            .name = "old_name",
+            .std_opt = 10,
+            .discusy_opt = 20,
+            .exp_null = 30,
+            .opt_exp_null = discusy::explicit_null<int>{40},
+        };
+        NullableParityStruct pre_etf = pre_json;
+
+        std::string json_payload = "{\"name\":\"new_name\"}";
+        REQUIRE_FALSE(glz::read_json(pre_json, json_payload));
+        CHECK(pre_json.name == "new_name");
+        CHECK(pre_json.std_opt == 10);
+        CHECK(pre_json.discusy_opt == 20);
+        CHECK(pre_json.exp_null.has_value());
+        CHECK(*pre_json.exp_null == 30);
+        CHECK(pre_json.opt_exp_null.has_value());
+        CHECK((*pre_json.opt_exp_null).has_value());
+        CHECK(*(*pre_json.opt_exp_null) == 40);
+
+        std::string etf_payload;
+        {
+            etf_payload.push_back(static_cast<char>(glz::etf::magic_version));
+            etf_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            uint32_t arity = glz::etf::detail::to_big_endian(1U);
+            etf_payload.append(reinterpret_cast<const char*>(&arity), 4);
+            std::string k = "name";
+            std::string enc_k;
+            glz::write_etf(k, enc_k);
+            etf_payload.append(enc_k.data() + 1, enc_k.size() - 1);
+            std::string v = "new_name";
+            std::string enc_v;
+            glz::write_etf(v, enc_v);
+            etf_payload.append(enc_v.data() + 1, enc_v.size() - 1);
+        }
+
+        REQUIRE_FALSE(glz::read_etf(pre_etf, etf_payload));
+        CHECK(pre_etf == pre_json);
+    }
+
+    SECTION("Explicit null fields: pre-populated fields are reset to nullopt / nullptr (exact parity)") {
+        NullableParityStruct pre_json{
+            .name = "reset_test",
+            .std_opt = 100,
+            .discusy_opt = 200,
+            .exp_null = 300,
+            .opt_exp_null = discusy::explicit_null<int>{400},
+        };
+        NullableParityStruct pre_etf = pre_json;
+
+        // JSON: all fields explicitly set to null
+        std::string json_null_payload =
+            "{\"name\":\"reset_test\",\"std_opt\":null,\"discusy_opt\":null,\"exp_null\":null,\"opt_exp_null\":null}";
+        REQUIRE_FALSE(glz::read_json(pre_json, json_null_payload));
+        CHECK_FALSE(pre_json.std_opt.has_value());
+        CHECK_FALSE(pre_json.discusy_opt.has_value());
+        CHECK_FALSE(pre_json.exp_null.has_value());
+        CHECK_FALSE(pre_json.opt_exp_null.has_value());
+
+        // ETF: all fields explicitly set to nil atom
+        std::string etf_null_payload;
+        {
+            etf_null_payload.push_back(static_cast<char>(glz::etf::magic_version));
+            etf_null_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            uint32_t arity = glz::etf::detail::to_big_endian(5U);
+            etf_null_payload.append(reinterpret_cast<const char*>(&arity), 4);
+
+            auto add_pair = [&](std::string_view key, auto val_writer) {
+                std::string k{key};
+                std::string enc_k;
+                glz::write_etf(k, enc_k);
+                etf_null_payload.append(enc_k.data() + 1, enc_k.size() - 1);
+                val_writer();
+            };
+
+            add_pair("name", [&] {
+                std::string v = "reset_test";
+                std::string enc_v;
+                glz::write_etf(v, enc_v);
+                etf_null_payload.append(enc_v.data() + 1, enc_v.size() - 1);
+            });
+            add_pair("std_opt", [&] {
+                std::string enc_nil;
+                glz::write_etf(nullptr, enc_nil);
+                etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
+            });
+            add_pair("discusy_opt", [&] {
+                std::string enc_nil;
+                glz::write_etf(nullptr, enc_nil);
+                etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
+            });
+            add_pair("exp_null", [&] {
+                std::string enc_nil;
+                glz::write_etf(nullptr, enc_nil);
+                etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
+            });
+            add_pair("opt_exp_null", [&] {
+                std::string enc_nil;
+                glz::write_etf(nullptr, enc_nil);
+                etf_null_payload.append(enc_nil.data() + 1, enc_nil.size() - 1);
+            });
+        }
+
+        REQUIRE_FALSE(glz::read_etf(pre_etf, etf_null_payload));
+        CHECK(pre_etf == pre_json);
+        CHECK_FALSE(pre_etf.std_opt.has_value());
+        CHECK_FALSE(pre_etf.discusy_opt.has_value());
+        CHECK_FALSE(pre_etf.exp_null.has_value());
+        CHECK_FALSE(pre_etf.opt_exp_null.has_value());
+    }
+
+    SECTION("Explicit null serialization parity: std::nullopt is omitted, explicit_null(nullptr) is written") {
+        NullableParityStruct obj{
+            .name = "serialize_null_parity",
+            .std_opt = std::nullopt,
+            .discusy_opt = std::nullopt,
+            .exp_null = nullptr,
+            .opt_exp_null = std::nullopt,
+        };
+
+        // JSON: std_opt, discusy_opt, opt_exp_null are omitted; exp_null is written as null
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(obj, json_str));
+        CHECK(json_str.find("\"name\":\"serialize_null_parity\"") != std::string::npos);
+        CHECK(json_str.find("\"exp_null\":null") != std::string::npos);
+        CHECK(json_str.find("\"std_opt\"") == std::string::npos);
+        CHECK(json_str.find("\"discusy_opt\"") == std::string::npos);
+        CHECK(json_str.find("\"opt_exp_null\"") == std::string::npos);
+
+        // ETF: arity should be 2 (name, exp_null)
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(obj, etf_str));
+        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        CHECK(arity == 2);
+
+        // Roundtrip parity
+        NullableParityStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_str));
+        NullableParityStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_str));
+        CHECK(dec_etf == dec_json);
+        CHECK(dec_etf == obj);
+    }
+
+    SECTION("Concrete values roundtrip and match between JSON and ETF") {
+        NullableParityStruct orig{
+            .name = "full_values",
+            .std_opt = 111,
+            .discusy_opt = 222,
+            .exp_null = 333,
+            .opt_exp_null = discusy::explicit_null<int>{444},
+        };
+
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(orig, json_str));
+        NullableParityStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_str));
+        CHECK(dec_json == orig);
+
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(orig, etf_str));
+        NullableParityStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_str));
+        CHECK(dec_etf == orig);
+
+        CHECK(dec_json == dec_etf);
+    }
+
+    SECTION("Standalone std::nullopt and explicit_null(nullptr) serialization and deserialization") {
+        std::optional<int> opt_null = std::nullopt;
+        std::string opt_json;
+        REQUIRE_FALSE(glz::write_json(opt_null, opt_json));
+        CHECK(opt_json == "null");
+        std::string opt_etf;
+        REQUIRE_FALSE(glz::write_etf(opt_null, opt_etf));
+        CHECK(static_cast<uint8_t>(opt_etf[1]) == glz::etf::tag::SMALL_ATOM_UTF8_EXT);
+
+        std::optional<int> dec_opt_json = 123;
+        REQUIRE_FALSE(glz::read_json(dec_opt_json, opt_json));
+        CHECK_FALSE(dec_opt_json.has_value());
+
+        std::optional<int> dec_opt_etf = 123;
+        REQUIRE_FALSE(glz::read_etf(dec_opt_etf, opt_etf));
+        CHECK_FALSE(dec_opt_etf.has_value());
+
+        discusy::explicit_null<int> exp_null = nullptr;
+        std::string exp_json;
+        REQUIRE_FALSE(glz::write_json(exp_null, exp_json));
+        CHECK(exp_json == "null");
+        std::string exp_etf;
+        REQUIRE_FALSE(glz::write_etf(exp_null, exp_etf));
+        CHECK(static_cast<uint8_t>(exp_etf[1]) == glz::etf::tag::SMALL_ATOM_UTF8_EXT);
+
+        discusy::explicit_null<int> dec_exp_json = 123;
+        REQUIRE_FALSE(glz::read_json(dec_exp_json, exp_json));
+        CHECK_FALSE(dec_exp_json.has_value());
+
+        discusy::explicit_null<int> dec_exp_etf = 123;
+        REQUIRE_FALSE(glz::read_etf(dec_exp_etf, exp_etf));
+        CHECK_FALSE(dec_exp_etf.has_value());
+    }
+}
+
+TEST_CASE("ETF & JSON: struct glaze and glz::meta with mimic support", "[etf][json][mimic]") {
+    SECTION("Concept checks for mimic types") {
+        static_assert(glz::has_mimic<LocalMimicNumber>);
+        static_assert(glz::mimics_num_t<LocalMimicNumber>);
+        static_assert(!glz::mimics_str_t<LocalMimicNumber>);
+
+        static_assert(glz::has_mimic<LocalMimicString>);
+        static_assert(glz::mimics_str_t<LocalMimicString>);
+        static_assert(!glz::mimics_num_t<LocalMimicString>);
+
+        static_assert(glz::has_mimic<GlobalMimicNumber>);
+        static_assert(glz::mimics_num_t<GlobalMimicNumber>);
+        static_assert(!glz::mimics_str_t<GlobalMimicNumber>);
+
+        static_assert(glz::has_mimic<GlobalMimicString>);
+        static_assert(glz::mimics_str_t<GlobalMimicString>);
+        static_assert(!glz::mimics_num_t<GlobalMimicString>);
+    }
+
+    SECTION("Local struct glaze with mimic: numeric and string") {
+        LocalMimicNumber num{42};
+        std::string etf_num;
+        REQUIRE_FALSE(glz::write_etf(num, etf_num));
+        CHECK(static_cast<uint8_t>(etf_num[1]) == glz::etf::tag::SMALL_INTEGER_EXT);
+        LocalMimicNumber dec_num_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_num_etf, etf_num));
+        CHECK(dec_num_etf == num);
+
+        std::string json_num;
+        REQUIRE_FALSE(glz::write_json(num, json_num));
+        CHECK(json_num == "42");
+        LocalMimicNumber dec_num_json{};
+        REQUIRE_FALSE(glz::read_json(dec_num_json, json_num));
+        CHECK(dec_num_json == num);
+
+        LocalMimicString str{"hello_mimic"};
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(str, etf_str));
+        CHECK(static_cast<uint8_t>(etf_str[1]) == glz::etf::tag::BINARY_EXT);
+        LocalMimicString dec_str_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_str_etf, etf_str));
+        CHECK(dec_str_etf == str);
+
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(str, json_str));
+        CHECK(json_str == "\"hello_mimic\"");
+        LocalMimicString dec_str_json{};
+        REQUIRE_FALSE(glz::read_json(dec_str_json, json_str));
+        CHECK(dec_str_json == str);
+    }
+
+    SECTION("Global glz::meta with mimic: numeric and string") {
+        GlobalMimicNumber num{9999};
+        std::string etf_num;
+        REQUIRE_FALSE(glz::write_etf(num, etf_num));
+        CHECK(static_cast<uint8_t>(etf_num[1]) == glz::etf::tag::INTEGER_EXT);
+        GlobalMimicNumber dec_num_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_num_etf, etf_num));
+        CHECK(dec_num_etf == num);
+
+        std::string json_num;
+        REQUIRE_FALSE(glz::write_json(num, json_num));
+        CHECK(json_num == "9999");
+        GlobalMimicNumber dec_num_json{};
+        REQUIRE_FALSE(glz::read_json(dec_num_json, json_num));
+        CHECK(dec_num_json == num);
+
+        GlobalMimicString str{"global_mimic_text"};
+        std::string etf_str;
+        REQUIRE_FALSE(glz::write_etf(str, etf_str));
+        CHECK(static_cast<uint8_t>(etf_str[1]) == glz::etf::tag::BINARY_EXT);
+        GlobalMimicString dec_str_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_str_etf, etf_str));
+        CHECK(dec_str_etf == str);
+
+        std::string json_str;
+        REQUIRE_FALSE(glz::write_json(str, json_str));
+        CHECK(json_str == "\"global_mimic_text\"");
+        GlobalMimicString dec_str_json{};
+        REQUIRE_FALSE(glz::read_json(dec_str_json, json_str));
+        CHECK(dec_str_json == str);
+    }
+
+    SECTION("Mimic types inside a reflectable struct") {
+        MimicHolderStruct orig{
+            .local_num = {123},
+            .local_str = {"local_data"},
+            .global_num = {456},
+            .global_str = {"global_data"},
+        };
+
+        std::string etf_s;
+        REQUIRE_FALSE(glz::write_etf(orig, etf_s));
+        MimicHolderStruct dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, etf_s));
+        CHECK(dec_etf == orig);
+
+        std::string json_s;
+        REQUIRE_FALSE(glz::write_json(orig, json_s));
+        MimicHolderStruct dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, json_s));
+        CHECK(dec_json == orig);
+
+        CHECK(dec_etf == dec_json);
+    }
+
+    SECTION("Mimic types in std::variant: deduction and deserialization parity") {
+        using MimicVar = std::variant<LocalMimicNumber, LocalMimicString>;
+
+        // Numeric variant alternative
+        MimicVar var_num{LocalMimicNumber{777}};
+        std::string etf_n;
+        REQUIRE_FALSE(glz::write_etf(var_num, etf_n));
+        MimicVar dec_n_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_n_etf, etf_n));
+        REQUIRE(std::holds_alternative<LocalMimicNumber>(dec_n_etf));
+        CHECK(std::get<LocalMimicNumber>(dec_n_etf).val == 777);
+
+        std::string json_n;
+        REQUIRE_FALSE(glz::write_json(var_num, json_n));
+        MimicVar dec_n_json{};
+        REQUIRE_FALSE(glz::read_json(dec_n_json, json_n));
+        REQUIRE(std::holds_alternative<LocalMimicNumber>(dec_n_json));
+        CHECK(std::get<LocalMimicNumber>(dec_n_json).val == 777);
+
+        // String variant alternative
+        MimicVar var_str{LocalMimicString{"variant_text"}};
+        std::string etf_s;
+        REQUIRE_FALSE(glz::write_etf(var_str, etf_s));
+        MimicVar dec_s_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_s_etf, etf_s));
+        REQUIRE(std::holds_alternative<LocalMimicString>(dec_s_etf));
+        CHECK(std::get<LocalMimicString>(dec_s_etf).val == "variant_text");
+
+        std::string json_s;
+        REQUIRE_FALSE(glz::write_json(var_str, json_s));
+        MimicVar dec_s_json{};
+        REQUIRE_FALSE(glz::read_json(dec_s_json, json_s));
+        REQUIRE(std::holds_alternative<LocalMimicString>(dec_s_json));
+        CHECK(std::get<LocalMimicString>(dec_s_json).val == "variant_text");
+    }
+}
