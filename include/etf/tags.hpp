@@ -94,6 +94,12 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void ensure_space(B& b, size_t needed)
       {
          if (needed > b.size()) [[unlikely]] {
+            if constexpr (requires { b.capacity(); }) {
+               if (b.capacity() >= needed) {
+                  glz::resize_unfilled(b, b.capacity());
+                  return;
+               }
+            }
             glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
          }
       }
@@ -101,9 +107,7 @@ namespace glz::etf
       template <typename B, typename IX>
       GLZ_ALWAYS_INLINE void dump_byte(uint8_t byte, B& b, IX& ix)
       {
-         if (ix >= b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, ix + 64));
-         }
+         ensure_space(b, ix + 1);
          b[ix] = static_cast<std::decay_t<B>::value_type>(byte);
          ++ix;
       }
@@ -112,10 +116,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void dump_bytes(const void* data, size_t count, B& b, IX& ix)
       {
          if (count == 0) return;
-         const auto needed = ix + count;
-         if (needed > b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
-         }
+         ensure_space(b, ix + count);
          std::memcpy(&b[ix], data, count);
          ix += count;
       }
@@ -124,10 +125,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void dump_be(T val, B& b, IX& ix)
       {
          constexpr auto n = sizeof(T);
-         const auto needed = ix + n;
-         if (needed > b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
-         }
+         ensure_space(b, ix + n);
          if constexpr (std::endian::native == std::endian::little && n > 1) {
             val = std::byteswap(val);
          }
@@ -139,10 +137,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void dump_tag_be(uint8_t tag_val, T val, B& b, IX& ix)
       {
          constexpr auto n = 1 + sizeof(T);
-         const auto needed = ix + n;
-         if (needed > b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
-         }
+         ensure_space(b, ix + n);
          b[ix] = static_cast<std::decay_t<B>::value_type>(tag_val);
          if constexpr (std::endian::native == std::endian::little && sizeof(T) > 1) {
             val = std::byteswap(val);
@@ -154,10 +149,7 @@ namespace glz::etf
       template <typename B, typename IX>
       GLZ_ALWAYS_INLINE void dump_binary(const void* data, uint32_t len, B& b, IX& ix)
       {
-         const auto needed = ix + 5 + len;
-         if (needed > b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
-         }
+         ensure_space(b, ix + 5 + len);
          b[ix] = static_cast<std::decay_t<B>::value_type>(tag::BINARY_EXT);
          uint32_t be_len = len;
          if constexpr (std::endian::native == std::endian::little) {
