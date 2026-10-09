@@ -663,7 +663,7 @@ namespace glz
          if constexpr (has_reserve<std::remove_cvref_t<T>>) {
             value.reserve(arity);
          }
-         using Key = typename std::remove_cvref_t<T>::key_type;
+         using Key = std::remove_cvref_t<T>::key_type;
          for (uint32_t i = 0; i < arity; ++i) {
             Key key{};
             parse<EETF>::op<Opts>(key, ctx, it, end);

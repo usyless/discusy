@@ -1,12 +1,10 @@
 #pragma once
 
 #include <bit>
-#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <array>
 #include <variant>
 #include <type_traits>
 
@@ -237,7 +235,7 @@ namespace glz
             ix += 5;
             glz::write_chars::op<write_unchecked_on<opt_false<Opts, quoted_num_opt_tag{}>>()>(value, ctx, b, ix);
             const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
-            b[start_ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
+            b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
             etf::detail::write_be_at<uint32_t>(len, b, start_ix + 1);
             return;
          }
@@ -252,8 +250,8 @@ namespace glz
             if constexpr (std::is_unsigned_v<U>) {
                if (value <= 255) {
                   etf::detail::ensure_space(b, ix + 2);
-                  b[ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
-                  b[ix + 1] = static_cast<typename std::decay_t<decltype(b)>::value_type>(value);
+                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(value);
                   ix += 2;
                }
                else if (value <= 2147483647ULL) {
@@ -262,9 +260,9 @@ namespace glz
                else {
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (8 bytes, little-endian digits)
                   etf::detail::ensure_space(b, ix + 11);
-                  b[ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
-                  b[ix + 1] = static_cast<typename std::decay_t<decltype(b)>::value_type>(8);
-                  b[ix + 2] = static_cast<typename std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
+                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
+                  b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
                   auto raw = static_cast<uint64_t>(value);
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
@@ -276,8 +274,8 @@ namespace glz
             else { // signed integer
                if (value >= 0 && value <= 255) {
                   etf::detail::ensure_space(b, ix + 2);
-                  b[ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
-                  b[ix + 1] = static_cast<typename std::decay_t<decltype(b)>::value_type>(value);
+                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(value);
                   ix += 2;
                }
                else if (value >= -2147483648LL && value <= 2147483647LL) {
@@ -286,10 +284,10 @@ namespace glz
                else {
                   // 64-bit signed integer -> SMALL_BIG_EXT
                   etf::detail::ensure_space(b, ix + 11);
-                  b[ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
-                  b[ix + 1] = static_cast<typename std::decay_t<decltype(b)>::value_type>(8);
+                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
                   if (value < 0) {
-                     b[ix + 2] = static_cast<typename std::decay_t<decltype(b)>::value_type>(1); // negative sign = 1
+                     b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(1); // negative sign = 1
                      auto raw = static_cast<uint64_t>(-static_cast<int64_t>(value));
                      if constexpr (std::endian::native == std::endian::big) {
                         raw = std::byteswap(raw);
@@ -297,7 +295,7 @@ namespace glz
                      std::memcpy(&b[ix + 3], &raw, 8);
                   }
                   else {
-                     b[ix + 2] = static_cast<typename std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
+                     b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
                      auto raw = static_cast<uint64_t>(value);
                      if constexpr (std::endian::native == std::endian::big) {
                         raw = std::byteswap(raw);
@@ -628,7 +626,7 @@ namespace glz
             op<no_header_on<Opts>()>(value, std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
-         using Period = typename std::remove_cvref_t<decltype(value)>::duration::period;
+         using Period = std::remove_cvref_t<decltype(value)>::duration::period;
          constexpr auto max_ts_len = chrono_detail::iso_time_point_max_size<Period>;
          etf::detail::ensure_space(b, ix + 5 + max_ts_len);
          const auto start_ix = ix;
@@ -637,7 +635,7 @@ namespace glz
          if (static_cast<bool>(ctx.error)) [[unlikely]] return;
 
          const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
-         b[start_ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
+         b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
          etf::detail::write_be_at<uint32_t>(len, b, start_ix + 1);
       }
    };
@@ -667,7 +665,7 @@ namespace glz
          if (static_cast<bool>(ctx.error)) [[unlikely]] return;
 
          const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
-         b[start_ix] = static_cast<typename std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
+         b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
          etf::detail::write_be_at<uint32_t>(len, b, start_ix + 1);
       }
    };
