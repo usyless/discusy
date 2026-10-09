@@ -114,7 +114,21 @@ public:
             try {
                 if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, discusy::timer>>) {
                     io_ctx_.co_launch_detached<ctx::launch::inline_if_on_executor>(
-                        std::invoke(std::move(f), id),
+                        [f = std::move(f), id]() mutable -> coro::awaitable<void> {
+                            try {
+                                co_await std::invoke(f, id);
+                            }
+                            #ifdef DISCUSY_LOGGING
+                            catch (const std::exception& e) {
+                                log::Logger{}("start_timer callback exception: {}", e.what());
+                            }
+                            #endif
+                            catch (...) {
+                                #ifdef DISCUSY_LOGGING
+                                log::Logger{}("start_timer callback unknown exception");
+                                #endif
+                            }
+                        },
                         timer->get_executor()
                     );
                 } else {

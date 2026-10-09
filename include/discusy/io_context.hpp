@@ -400,8 +400,20 @@ public:
     void handle_callback_coro_normal(F&& cb, Args&&... args) noexcept {
         try {
             if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, Args...>>) {
-                co_launch_detached<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable {
-                    return std::invoke(std::move(cb), std::move(args)...);
+                co_launch_detached<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> coro::awaitable<void> {
+                    try {
+                        co_await std::invoke(cb, std::move(args)...);
+                    }
+                    #ifdef DISCUSY_LOGGING
+                    catch (const std::exception& e) {
+                        log::Logger{}("handle_callback_coro_normal coroutine exception: {}", e.what());
+                    }
+                    #endif
+                    catch (...) {
+                        #ifdef DISCUSY_LOGGING
+                        log::Logger{}("handle_callback_coro_normal unknown coroutine exception");
+                        #endif
+                    }
                 });
             } else {
                 submit<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> void {
