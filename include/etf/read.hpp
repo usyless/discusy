@@ -396,6 +396,12 @@ namespace glz
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
+               else if constexpr (set_like) {
+                  value.clear();
+                  for (size_t i = 0; i < len; ++i) {
+                     value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
+                  }
+               }
                else {
                   if constexpr (not check_partial_read(Opts)) {
                      if (len > value.size()) [[unlikely]] {
@@ -440,6 +446,12 @@ namespace glz
                   value.clear();
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
+                  }
+               }
+               else if constexpr (set_like) {
+                  value.clear();
+                  for (size_t i = 0; i < len; ++i) {
+                     value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
                else {

@@ -9,6 +9,8 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <set>
+#include <unordered_set>
 #include <optional>
 #include <variant>
 #include <cstdint>
@@ -353,6 +355,31 @@ TEST_CASE("ETF: Containers, Vectors, Maps, and Tuples", "[etf][containers]") {
         std::map<std::string, int> decoded;
         REQUIRE_FALSE(glz::read_etf(decoded, encoded));
         CHECK(decoded == dict);
+    }
+
+    SECTION("Sets of integers and strings (std::set, std::unordered_set)") {
+        std::set<int> num_set = {10, 20, 30, 40};
+        std::string enc_set;
+        REQUIRE_FALSE(glz::write_etf(num_set, enc_set));
+        CHECK(static_cast<std::uint8_t>(enc_set[1]) == glz::etf::tag::LIST_EXT);
+
+        std::set<int> dec_set;
+        REQUIRE_FALSE(glz::read_etf(dec_set, enc_set));
+        CHECK(dec_set == num_set);
+
+        std::unordered_set<std::string> str_set = {"apple", "banana", "cherry"};
+        std::string enc_uset;
+        REQUIRE_FALSE(glz::write_etf(str_set, enc_uset));
+        std::unordered_set<std::string> dec_uset;
+        REQUIRE_FALSE(glz::read_etf(dec_uset, enc_uset));
+        CHECK(dec_uset == str_set);
+
+        std::set<int> empty_set;
+        std::string enc_empty;
+        REQUIRE_FALSE(glz::write_etf(empty_set, enc_empty));
+        std::set<int> dec_empty = {1, 2, 3};
+        REQUIRE_FALSE(glz::read_etf(dec_empty, enc_empty));
+        CHECK(dec_empty.empty());
     }
 
     SECTION("Tuples and Pairs") {
