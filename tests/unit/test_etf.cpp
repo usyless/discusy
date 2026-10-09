@@ -574,6 +574,13 @@ TEST_CASE("ETF: Containers, Vectors, Maps, and Tuples", "[etf][containers]") {
         std::map<std::string, int> decoded;
         REQUIRE_FALSE(glz::read_etf(decoded, encoded));
         CHECK(decoded == dict);
+
+        std::unordered_map<std::string, int> decoded_umap;
+        REQUIRE_FALSE(glz::read_etf(decoded_umap, encoded));
+        CHECK(decoded_umap.size() == 3);
+        CHECK(decoded_umap["apple"] == 5);
+        CHECK(decoded_umap["banana"] == 12);
+        CHECK(decoded_umap["cherry"] == 30);
     }
 
     SECTION("Sets of integers and strings (std::set, std::unordered_set)") {

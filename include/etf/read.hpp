@@ -327,6 +327,9 @@ namespace glz
             }
             else if constexpr (emplace_backable<T>) {
                value.clear();
+               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                  value.reserve(len);
+               }
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
@@ -336,6 +339,9 @@ namespace glz
             }
             else if constexpr (set_like) {
                value.clear();
+               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                  value.reserve(len);
+               }
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
@@ -392,12 +398,18 @@ namespace glz
                }
                else if constexpr (emplace_backable<T>) {
                   value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(len);
+                  }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
                else if constexpr (set_like) {
                   value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(len);
+                  }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
@@ -444,12 +456,18 @@ namespace glz
                }
                else if constexpr (emplace_backable<T>) {
                   value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(len);
+                  }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
                else if constexpr (set_like) {
                   value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(len);
+                  }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
@@ -501,6 +519,9 @@ namespace glz
             }
             else if constexpr (emplace_backable<T>) {
                value.clear();
+               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                  value.reserve(len);
+               }
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
@@ -510,6 +531,9 @@ namespace glz
             }
             else if constexpr (set_like) {
                value.clear();
+               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                  value.reserve(len);
+               }
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
@@ -636,12 +660,15 @@ namespace glz
          }
 
          value.clear();
-         using Key = T::key_type;
+         if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+            value.reserve(arity);
+         }
+         using Key = typename std::remove_cvref_t<T>::key_type;
          for (uint32_t i = 0; i < arity; ++i) {
             Key key{};
             parse<EETF>::op<Opts>(key, ctx, it, end);
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
-            parse<EETF>::op<Opts>(value[key], ctx, it, end);
+            parse<EETF>::op<Opts>(value[std::move(key)], ctx, it, end);
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
          }
       }
