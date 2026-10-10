@@ -632,11 +632,11 @@ namespace glz::etf
 
          std::string_view atom;
          if (!read_atom_or_str(ctx, it, end, atom)) return false;
-         if (atom.size() == 4 && glz::compare<4>(atom.data(), "true")) {
+         if (atom.size() == 4 && glz::compare<4>(atom.data(), "true")) { // NOLINT(bugprone-suspicious-stringview-data-usage)
             b = true;
             return true;
          }
-         if (atom.size() == 5 && glz::compare<5>(atom.data(), "false")) {
+         if (atom.size() == 5 && glz::compare<5>(atom.data(), "false")) { // NOLINT(bugprone-suspicious-stringview-data-usage)
             b = false;
             return true;
          }

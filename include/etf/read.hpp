@@ -182,7 +182,7 @@ namespace glz
             }
             const size_t copy_len = (sv.size() < value.size()) ? sv.size() : value.size();
             if (copy_len > 0) {
-               std::memcpy(value.data(), sv.data(), copy_len);
+               std::memcpy(value.data(), sv.data(), copy_len); // NOLINT(bugprone-suspicious-stringview-data-usage)
             }
             if (copy_len < value.size()) {
                std::memset(value.data() + copy_len, 0, value.size() - copy_len);
@@ -197,7 +197,7 @@ namespace glz
             }
             const size_t copy_len = (sv.size() < sizeof(value)) ? sv.size() : sizeof(value);
             if (copy_len > 0) {
-               std::memcpy(value, sv.data(), copy_len);
+               std::memcpy(value, sv.data(), copy_len); // NOLINT(bugprone-suspicious-stringview-data-usage)
             }
             if (copy_len < sizeof(value)) {
                std::memset(value + copy_len, 0, sizeof(value) - copy_len);
@@ -1377,19 +1377,15 @@ namespace glz
          case etf::tag::ATOM_EXT: {
             std::string_view atom;
             if (!etf::detail::read_atom_or_str(ctx, it, end, atom)) [[unlikely]] return;
-            if (atom.size() == 4 && compare<4>(atom.data(), "true")) {
+            if (atom.size() == 4 && compare<4>(atom.data(), "true")) { // NOLINT(bugprone-suspicious-stringview-data-usage)
                value.data = true;
             }
-            else if (atom.size() == 5 && compare<5>(atom.data(), "false")) {
+            else if (atom.size() == 5 && compare<5>(atom.data(), "false")) { // NOLINT(bugprone-suspicious-stringview-data-usage)
                value.data = false;
             }
-            else if (atom.size() == 3 && compare<3>(atom.data(), "nil")) {
-               value.data = nullptr;
-            }
-            else if (atom.size() == 4 && compare<4>(atom.data(), "null")) {
-               value.data = nullptr;
-            }
-            else if (atom.size() == 9 && compare<9>(atom.data(), "undefined")) {
+            else if ((atom.size() == 3 && compare<3>(atom.data(), "nil")) || // NOLINT(bugprone-suspicious-stringview-data-usage)
+                     (atom.size() == 4 && compare<4>(atom.data(), "null")) || // NOLINT(bugprone-suspicious-stringview-data-usage)
+                     (atom.size() == 9 && compare<9>(atom.data(), "undefined"))) { // NOLINT(bugprone-suspicious-stringview-data-usage)
                value.data = nullptr;
             }
             else {

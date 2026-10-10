@@ -39,7 +39,7 @@ namespace glz
          }
          else {
             using field_val_t = std::decay_t<field_t<V, I>>;
-            if constexpr (never_written<etf_opts{}, field_val_t>) {
+            if constexpr (never_written<etf_opts{}, field_val_t>) { // NOLINT(readability-trailing-comma)
                return 0;
             }
             else {
