@@ -14,6 +14,10 @@
 #include <glaze/core/context.hpp>
 #include <glaze/core/buffer_traits.hpp>
 #include <glaze/util/inline.hpp>
+#include <glaze/util/glaze_fast_float.hpp>
+#include <glaze/util/compare.hpp>
+#include <glaze/util/dump.hpp>
+#include <glaze/util/bit.hpp>
 
 namespace glz
 {
@@ -104,12 +108,40 @@ namespace glz::etf
          }
       }
 
+      template <typename B>
+      GLZ_ALWAYS_INLINE bool ensure_space(is_context auto& ctx, B& b, size_t needed)
+      {
+         return glz::ensure_space(ctx, b, needed);
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_byte_unchecked(uint8_t byte, B& b, IX& ix) noexcept
+      {
+         b[ix] = static_cast<std::decay_t<B>::value_type>(byte);
+         ++ix;
+      }
+
       template <typename B, typename IX>
       GLZ_ALWAYS_INLINE void dump_byte(uint8_t byte, B& b, IX& ix)
       {
          ensure_space(b, ix + 1);
-         b[ix] = static_cast<std::decay_t<B>::value_type>(byte);
-         ++ix;
+         dump_byte_unchecked(byte, b, ix);
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE bool dump_byte(is_context auto& ctx, uint8_t byte, B& b, IX& ix)
+      {
+         if (!glz::ensure_space(ctx, b, ix + 1 + write_padding_bytes)) [[unlikely]] return false;
+         dump_byte_unchecked(byte, b, ix);
+         return true;
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_bytes_unchecked(const void* data, size_t count, B& b, IX& ix) noexcept
+      {
+         if (count == 0) return;
+         std::memcpy(&b[ix], data, count);
+         ix += count;
       }
 
       template <typename B, typename IX>
@@ -117,15 +149,22 @@ namespace glz::etf
       {
          if (count == 0) return;
          ensure_space(b, ix + count);
-         std::memcpy(&b[ix], data, count);
-         ix += count;
+         dump_bytes_unchecked(data, count, b, ix);
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE bool dump_bytes(is_context auto& ctx, const void* data, size_t count, B& b, IX& ix)
+      {
+         if (count == 0) return true;
+         if (!glz::ensure_space(ctx, b, ix + count + write_padding_bytes)) [[unlikely]] return false;
+         dump_bytes_unchecked(data, count, b, ix);
+         return true;
       }
 
       template <typename T, typename B, typename IX>
-      GLZ_ALWAYS_INLINE void dump_be(T val, B& b, IX& ix)
+      GLZ_ALWAYS_INLINE void dump_be_unchecked(T val, B& b, IX& ix) noexcept
       {
          constexpr auto n = sizeof(T);
-         ensure_space(b, ix + n);
          if constexpr (std::endian::native == std::endian::little && n > 1) {
             val = std::byteswap(val);
          }
@@ -134,10 +173,26 @@ namespace glz::etf
       }
 
       template <typename T, typename B, typename IX>
-      GLZ_ALWAYS_INLINE void dump_tag_be(uint8_t tag_val, T val, B& b, IX& ix)
+      GLZ_ALWAYS_INLINE void dump_be(T val, B& b, IX& ix)
+      {
+         constexpr auto n = sizeof(T);
+         ensure_space(b, ix + n);
+         dump_be_unchecked(val, b, ix);
+      }
+
+      template <typename T, typename B, typename IX>
+      GLZ_ALWAYS_INLINE bool dump_be(is_context auto& ctx, T val, B& b, IX& ix)
+      {
+         constexpr auto n = sizeof(T);
+         if (!glz::ensure_space(ctx, b, ix + n + write_padding_bytes)) [[unlikely]] return false;
+         dump_be_unchecked(val, b, ix);
+         return true;
+      }
+
+      template <typename T, typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_tag_be_unchecked(uint8_t tag_val, T val, B& b, IX& ix) noexcept
       {
          constexpr auto n = 1 + sizeof(T);
-         ensure_space(b, ix + n);
          b[ix] = static_cast<std::decay_t<B>::value_type>(tag_val);
          if constexpr (std::endian::native == std::endian::little && sizeof(T) > 1) {
             val = std::byteswap(val);
@@ -146,10 +201,26 @@ namespace glz::etf
          ix += n;
       }
 
-      template <typename B, typename IX>
-      GLZ_ALWAYS_INLINE void dump_binary(const void* data, uint32_t len, B& b, IX& ix)
+      template <typename T, typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_tag_be(uint8_t tag_val, T val, B& b, IX& ix)
       {
-         ensure_space(b, ix + 5 + len);
+         constexpr auto n = 1 + sizeof(T);
+         ensure_space(b, ix + n);
+         dump_tag_be_unchecked(tag_val, val, b, ix);
+      }
+
+      template <typename T, typename B, typename IX>
+      GLZ_ALWAYS_INLINE bool dump_tag_be(is_context auto& ctx, uint8_t tag_val, T val, B& b, IX& ix)
+      {
+         constexpr auto n = 1 + sizeof(T);
+         if (!glz::ensure_space(ctx, b, ix + n + write_padding_bytes)) [[unlikely]] return false;
+         dump_tag_be_unchecked(tag_val, val, b, ix);
+         return true;
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_binary_unchecked(const void* data, uint32_t len, B& b, IX& ix) noexcept
+      {
          b[ix] = static_cast<std::decay_t<B>::value_type>(tag::BINARY_EXT);
          uint32_t be_len = len;
          if constexpr (std::endian::native == std::endian::little) {
@@ -162,9 +233,24 @@ namespace glz::etf
          ix += 5 + len;
       }
 
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_binary(const void* data, uint32_t len, B& b, IX& ix)
+      {
+         ensure_space(b, ix + 5 + len);
+         dump_binary_unchecked(data, len, b, ix);
+      }
+
+      template <typename B, typename IX>
+      GLZ_ALWAYS_INLINE bool dump_binary(is_context auto& ctx, const void* data, uint32_t len, B& b, IX& ix)
+      {
+         if (!glz::ensure_space(ctx, b, ix + 5 + len + write_padding_bytes)) [[unlikely]] return false;
+         dump_binary_unchecked(data, len, b, ix);
+         return true;
+      }
+
       template <size_t N>
       struct static_etf_key {
-         char buf[5 + N]{};
+         std::array<char, 5 + N> buf{};
          constexpr static_etf_key(std::string_view sv) noexcept {
             buf[0] = static_cast<char>(tag::BINARY_EXT);
             const auto sz = static_cast<uint32_t>(N);
@@ -273,14 +359,13 @@ namespace glz::etf
             if (end - it >= 2) {
                const auto len = static_cast<uint8_t>(*(it + 1));
                if (len == 3 && end - it >= 5) {
-                  return (it[2] == 'n' && it[3] == 'i' && it[4] == 'l');
+                  return glz::compare<3>(reinterpret_cast<const char*>(it + 2), "nil");
                }
                if (len == 4 && end - it >= 6) {
-                  return (it[2] == 'n' && it[3] == 'u' && it[4] == 'l' && it[5] == 'l');
+                  return glz::compare<4>(reinterpret_cast<const char*>(it + 2), "null");
                }
                if (len == 9 && end - it >= 11) {
-                  std::string_view s{reinterpret_cast<const char*>(it + 2), 9};
-                  return s == "undefined";
+                  return glz::compare<9>(reinterpret_cast<const char*>(it + 2), "undefined");
                }
             }
          }
@@ -288,14 +373,13 @@ namespace glz::etf
             if (end - it >= 3) {
                const uint16_t len = read_be<uint16_t>(it + 1);
                if (len == 3 && end - it >= 6) {
-                  return (it[3] == 'n' && it[4] == 'i' && it[5] == 'l');
+                  return glz::compare<3>(reinterpret_cast<const char*>(it + 3), "nil");
                }
                if (len == 4 && end - it >= 7) {
-                  return (it[3] == 'n' && it[4] == 'u' && it[5] == 'l' && it[6] == 'l');
+                  return glz::compare<4>(reinterpret_cast<const char*>(it + 3), "null");
                }
                if (len == 9 && end - it >= 12) {
-                  std::string_view s{reinterpret_cast<const char*>(it + 3), 9};
-                  return s == "undefined";
+                  return glz::compare<9>(reinterpret_cast<const char*>(it + 3), "undefined");
                }
             }
          }
@@ -309,7 +393,7 @@ namespace glz::etf
          const auto tag = static_cast<uint8_t>(*it++);
          if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
             if (it < end) {
-               const uint8_t len = static_cast<uint8_t>(*it++);
+               const auto len = static_cast<uint8_t>(*it++);
                it += (std::min)(static_cast<size_t>(end - it), static_cast<size_t>(len));
             }
          }
@@ -322,6 +406,48 @@ namespace glz::etf
          }
       }
 
+      template <typename It0, typename It1>
+      GLZ_ALWAYS_INLINE bool read_nil(It0& it, It1 end) noexcept
+      {
+         if (it >= end) return false;
+         const auto tag = static_cast<uint8_t>(*it);
+         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
+            if (end - it >= 2) {
+               const auto len = static_cast<uint8_t>(*(it + 1));
+               if (len == 3 && end - it >= 5 && glz::compare<3>(reinterpret_cast<const char*>(it + 2), "nil")) {
+                  it += 5;
+                  return true;
+               }
+               if (len == 4 && end - it >= 6 && glz::compare<4>(reinterpret_cast<const char*>(it + 2), "null")) {
+                  it += 6;
+                  return true;
+               }
+               if (len == 9 && end - it >= 11 && glz::compare<9>(reinterpret_cast<const char*>(it + 2), "undefined")) {
+                  it += 11;
+                  return true;
+               }
+            }
+         }
+         else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
+            if (end - it >= 3) {
+               const uint16_t len = read_be<uint16_t>(it + 1);
+               if (len == 3 && end - it >= 6 && glz::compare<3>(reinterpret_cast<const char*>(it + 3), "nil")) {
+                  it += 6;
+                  return true;
+               }
+               if (len == 4 && end - it >= 7 && glz::compare<4>(reinterpret_cast<const char*>(it + 3), "null")) {
+                  it += 7;
+                  return true;
+               }
+               if (len == 9 && end - it >= 12 && glz::compare<9>(reinterpret_cast<const char*>(it + 3), "undefined")) {
+                  it += 12;
+                  return true;
+               }
+            }
+         }
+         return false;
+      }
+
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
       {
@@ -330,8 +456,7 @@ namespace glz::etf
             return false;
          }
          const auto tag = static_cast<uint8_t>(*it++);
-         switch (tag) {
-         case tag::BINARY_EXT: {
+         if (tag == tag::BINARY_EXT) [[likely]] {
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint32_t len = read_be<uint32_t>(it);
             it += 4;
@@ -340,6 +465,7 @@ namespace glz::etf
             it += len;
             return true;
          }
+         switch (tag) {
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint16_t len = read_be<uint16_t>(it);
@@ -407,6 +533,56 @@ namespace glz::etf
          }
       }
 
+      template <typename T>
+      GLZ_ALWAYS_INLINE bool parse_number_from_string(std::string_view sv, T& num) noexcept
+      {
+         if constexpr (std::is_unsigned_v<T>) {
+            if (sv.empty()) [[unlikely]] return false;
+            size_t start = 0;
+            const size_t sz = sv.size();
+            while (start < sz && sv[start] == '0') {
+               ++start;
+            }
+            if (start == sz) {
+               num = 0;
+               return true;
+            }
+            const size_t sig_digits = sz - start;
+            if (sig_digits <= 18) [[likely]] {
+               uint64_t val = 0;
+               for (size_t i = start; i < sz; ++i) {
+                  const uint8_t c = static_cast<uint8_t>(sv[i]) - static_cast<uint8_t>('0');
+                  if (c > 9) [[unlikely]] return false;
+                  val = (val * 10) + c;
+               }
+               if constexpr (sizeof(T) < 8) {
+                  if (val > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     return false;
+                  }
+               }
+               num = static_cast<T>(val);
+               return true;
+            }
+            if (sig_digits > 20) [[unlikely]] {
+               return false;
+            }
+            auto [p, ec] = std::from_chars(sv.data() + start, sv.data() + sz, num);
+            return (ec == std::errc{}) && (p == sv.data() + sz);
+         }
+         else if constexpr (std::integral<T>) {
+            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), num);
+            return (ec == std::errc{}) && (p == sv.data() + sv.size());
+         }
+         else if constexpr (glz::fast_float::is_supported_float_type<T>::value) {
+            auto [p, ec] = glz::from_chars<false>(sv.data(), sv.data() + sv.size(), num);
+            return (ec == std::errc{}) && (p == sv.data() + sv.size());
+         }
+         else {
+            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), num);
+            return (ec == std::errc{}) && (p == sv.data() + sv.size());
+         }
+      }
+
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_bool(Ctx& ctx, It0& it, It1 end, bool& b) noexcept
       {
@@ -414,13 +590,53 @@ namespace glz::etf
             ctx.error = error_code::unexpected_end;
             return false;
          }
+         const auto tag = static_cast<uint8_t>(*it);
+         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) [[likely]] {
+            if (end - it >= 2) [[likely]] {
+               const auto len = static_cast<uint8_t>(*(it + 1));
+               if (len == 4 && end - it >= 6) {
+                  if (glz::compare<4>(reinterpret_cast<const char*>(it + 2), "true")) {
+                     it += 6;
+                     b = true;
+                     return true;
+                  }
+               }
+               else if (len == 5 && end - it >= 7) {
+                  if (glz::compare<5>(reinterpret_cast<const char*>(it + 2), "false")) {
+                     it += 7;
+                     b = false;
+                     return true;
+                  }
+               }
+            }
+         }
+         else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
+            if (end - it >= 3) {
+               const uint16_t len = read_be<uint16_t>(it + 1);
+               if (len == 4 && end - it >= 7) {
+                  if (glz::compare<4>(reinterpret_cast<const char*>(it + 3), "true")) {
+                     it += 7;
+                     b = true;
+                     return true;
+                  }
+               }
+               else if (len == 5 && end - it >= 8) {
+                  if (glz::compare<5>(reinterpret_cast<const char*>(it + 3), "false")) {
+                     it += 8;
+                     b = false;
+                     return true;
+                  }
+               }
+            }
+         }
+
          std::string_view atom;
          if (!read_atom_or_str(ctx, it, end, atom)) return false;
-         if (atom == "true") {
+         if (atom.size() == 4 && glz::compare<4>(atom.data(), "true")) {
             b = true;
             return true;
          }
-         if (atom == "false") {
+         if (atom.size() == 5 && glz::compare<5>(atom.data(), "false")) {
             b = false;
             return true;
          }
@@ -484,20 +700,25 @@ namespace glz::etf
             const auto sign = static_cast<uint8_t>(*it++);
             uint64_t raw = 0;
             bool overflow = false;
-            if (n == 8) [[likely]] {
+            if (n <= 8) [[likely]] {
+               if constexpr (std::endian::native == std::endian::little) {
+                  std::memcpy(&raw, it, n);
+               }
+               else {
+                  for (uint8_t i = 0; i < n; ++i) {
+                     raw |= (static_cast<uint64_t>(static_cast<uint8_t>(it[i])) << (i * 8));
+                  }
+               }
+            }
+            else {
                std::memcpy(&raw, it, 8);
                if constexpr (std::endian::native == std::endian::big) {
                   raw = std::byteswap(raw);
                }
-            }
-            else {
-               for (uint8_t i = 0; i < n; ++i) {
-                  const uint8_t byte_val = static_cast<uint8_t>(it[i]);
-                  if (i < 8) {
-                     raw |= (static_cast<uint64_t>(byte_val) << (i * 8));
-                  }
-                  else if (byte_val != 0) {
+               for (uint8_t i = 8; i < n; ++i) {
+                  if (static_cast<uint8_t>(it[i]) != 0) {
                      overflow = true;
+                     break;
                   }
                }
             }
@@ -554,13 +775,26 @@ namespace glz::etf
             const auto sign = static_cast<uint8_t>(*it++);
             bool overflow = false;
             uint64_t raw = 0;
-            for (uint32_t i = 0; i < n; ++i) {
-               const auto byte_val = static_cast<uint8_t>(it[i]);
-               if (i < 8) {
-                  raw |= (static_cast<uint64_t>(byte_val) << (i * 8));
+            if (n <= 8) [[likely]] {
+               if constexpr (std::endian::native == std::endian::little) {
+                  std::memcpy(&raw, it, n);
                }
-               else if (byte_val != 0) {
-                  overflow = true;
+               else {
+                  for (uint32_t i = 0; i < n; ++i) {
+                     raw |= (static_cast<uint64_t>(static_cast<uint8_t>(it[i])) << (i * 8));
+                  }
+               }
+            }
+            else {
+               std::memcpy(&raw, it, 8);
+               if constexpr (std::endian::native == std::endian::big) {
+                  raw = std::byteswap(raw);
+               }
+               for (uint32_t i = 8; i < n; ++i) {
+                  if (static_cast<uint8_t>(it[i]) != 0) {
+                     overflow = true;
+                     break;
+                  }
                }
             }
             it += n;
@@ -630,15 +864,22 @@ namespace glz::etf
             }
             else {
                if (end - it < 31) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-               std::string_view sv{reinterpret_cast<const char*>(it), 31};
+               const char* p_it = reinterpret_cast<const char*>(it);
                it += 31;
-               double d = 0.0;
-               auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), d);
-               if (ec != std::errc{}) {
-                  ctx.error = error_code::parse_number_failure;
-                  return false;
+               if constexpr (glz::fast_float::is_supported_float_type<T>::value) {
+                  auto [p, ec] = glz::from_chars<false>(p_it, p_it + 31, num);
+                  if (ec != std::errc{}) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
                }
-               num = static_cast<T>(d);
+               else {
+                  auto [p, ec] = std::from_chars(p_it, p_it + 31, num);
+                  if (ec != std::errc{}) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
                return true;
             }
          }
@@ -649,8 +890,7 @@ namespace glz::etf
             if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             std::string_view sv{reinterpret_cast<const char*>(it), len};
             it += len;
-            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), num);
-            if (ec != std::errc{} || p != sv.data() + sv.size()) {
+            if (!parse_number_from_string(sv, num)) [[unlikely]] {
                ctx.error = error_code::parse_number_failure;
                return false;
             }
@@ -665,8 +905,7 @@ namespace glz::etf
             if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             std::string_view sv{reinterpret_cast<const char*>(it), len};
             it += len;
-            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), num);
-            if (ec != std::errc{} || p != sv.data() + sv.size()) {
+            if (!parse_number_from_string(sv, num)) [[unlikely]] {
                ctx.error = error_code::parse_number_failure;
                return false;
             }
@@ -679,8 +918,7 @@ namespace glz::etf
             if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             std::string_view sv{reinterpret_cast<const char*>(it), len};
             it += len;
-            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), num);
-            if (ec != std::errc{} || p != sv.data() + sv.size()) {
+            if (!parse_number_from_string(sv, num)) [[unlikely]] {
                ctx.error = error_code::parse_number_failure;
                return false;
             }

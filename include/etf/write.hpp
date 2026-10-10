@@ -11,6 +11,7 @@
 #include <glaze/core/context.hpp>
 #include <glaze/core/opts.hpp>
 #include <glaze/core/write.hpp>
+#include <glaze/core/buffer_traits.hpp>
 #include <glaze/core/reflect.hpp>
 #include <glaze/core/to.hpp>
 #include <glaze/core/chrono.hpp>
@@ -107,6 +108,9 @@ namespace glz
          else if constexpr (str_t<V>) {
             return 5; // BINARY_EXT + 4-byte len (empty string)
          }
+         else if constexpr (contiguous_byte_range<V>) {
+            return 5; // BINARY_EXT + 4-byte len (empty binary)
+         }
          else if constexpr (nullable_like<V>) {
             return 5; // \x77\x03nil
          }
@@ -158,7 +162,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             to<EETF, std::remove_cvref_t<T>>::template op<no_header_on<Opts>()>(
                std::forward<T>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
          }
@@ -177,7 +181,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = 1 + 5;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(value, ctx, b, ix);
             return;
          }
@@ -203,7 +209,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(const bool value, is_context auto& ctx, auto& b, auto& ix) noexcept
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = 1 + 7;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(value, ctx, b, ix);
             return;
          }
@@ -225,7 +233,9 @@ namespace glz
       static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = 1 + 11;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
             return;
          }
@@ -249,10 +259,7 @@ namespace glz
             using U = std::decay_t<T>;
             if constexpr (std::is_unsigned_v<U>) {
                if (value <= 255) {
-                  etf::detail::ensure_space(b, ix + 2);
-                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
-                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(value);
-                  ix += 2;
+                  etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                }
                else if (value <= 2147483647ULL) {
                   etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
@@ -273,10 +280,7 @@ namespace glz
             }
             else { // signed integer
                if (value >= 0 && value <= 255) {
-                  etf::detail::ensure_space(b, ix + 2);
-                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_INTEGER_EXT);
-                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(value);
-                  ix += 2;
+                  etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                }
                else if (value >= -2147483648LL && value <= 2147483647LL) {
                   etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
@@ -318,13 +322,35 @@ namespace glz
       static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
             return;
          }
          const auto sv = str_view<T>(value);
          const auto len = static_cast<uint32_t>(sv.size());
          etf::detail::dump_binary(sv.data(), len, b, ix);
+      }
+   };
+
+   // Byte sequences (BINARY_EXT)
+   template <class T>
+      requires(contiguous_byte_range<std::remove_cvref_t<T>> && !str_t<T>)
+   struct to<EETF, T> final
+   {
+      template <auto Opts>
+      static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      {
+         if constexpr (!check_no_header(Opts)) {
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
+            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
+            return;
+         }
+         const auto len = static_cast<uint32_t>(value.size());
+         etf::detail::dump_binary(value.data(), len, b, ix);
       }
    };
 
@@ -337,7 +363,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -361,7 +389,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -376,6 +406,7 @@ namespace glz
 
    // Arrays (std::vector, std::deque, std::span, etc.)
    template <readable_array_t T>
+      requires(!contiguous_byte_range<std::remove_cvref_t<T>>)
    struct to<EETF, T> final
    {
       template <auto Opts>
@@ -384,7 +415,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -398,12 +429,12 @@ namespace glz
          constexpr size_t item_alloc = (std::max)(sizeof(item_t), etf::detail::min_etf_val_size<item_t>());
          etf::detail::ensure_space(b, ix + 6 + (sz * item_alloc));
 
-         etf::detail::dump_tag_be<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
+         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
          for (auto&& item : value) {
             serialize<EETF>::op<Opts>(item, ctx, b, ix);
          }
          // Tail term is NIL_EXT
-         etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
+         etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
       }
    };
 
@@ -418,19 +449,21 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
          using V = std::decay_t<T>;
          static constexpr auto N = glz::tuple_size_v<V>;
          if constexpr (N <= 255) {
-            etf::detail::dump_byte(etf::tag::SMALL_TUPLE_EXT, b, ix);
-            etf::detail::dump_byte(static_cast<uint8_t>(N), b, ix);
+            etf::detail::ensure_space(b, ix + 2);
+            etf::detail::dump_byte_unchecked(etf::tag::SMALL_TUPLE_EXT, b, ix);
+            etf::detail::dump_byte_unchecked(static_cast<uint8_t>(N), b, ix);
          }
          else {
-            etf::detail::dump_byte(etf::tag::LARGE_TUPLE_EXT, b, ix);
-            etf::detail::dump_be<uint32_t>(static_cast<uint32_t>(N), b, ix);
+            etf::detail::ensure_space(b, ix + 5);
+            etf::detail::dump_byte_unchecked(etf::tag::LARGE_TUPLE_EXT, b, ix);
+            etf::detail::dump_be_unchecked<uint32_t>(static_cast<uint32_t>(N), b, ix);
          }
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
@@ -456,7 +489,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -471,7 +504,7 @@ namespace glz
                                        (std::max)(sizeof(mapped_t), etf::detail::min_etf_val_size<mapped_t>());
          etf::detail::ensure_space(b, ix + 5 + (sz * pair_alloc));
 
-         etf::detail::dump_tag_be<uint32_t>(etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix);
+         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix);
          for (auto&& [k, v] : value) {
             serialize<EETF>::op<Opts>(k, ctx, b, ix);
             serialize<EETF>::op<Opts>(v, ctx, b, ix);
@@ -491,7 +524,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -501,34 +534,23 @@ namespace glz
          etf::detail::ensure_space(b, ix + struct_min);
 
          const size_t count_pos = ix + 1;
-         etf::detail::dump_tag_be<uint32_t>(etf::tag::MAP_EXT, 0, b, ix); // placeholder for arity
+         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, 0, b, ix); // placeholder for arity
 
          uint32_t pair_count = 0;
-
-         decltype(auto) t = [&]() -> decltype(auto) {
-            if constexpr (reflectable<T>) {
-               return to_tie(value);
-            }
-            else {
-               return nullptr;
-            }
-         }();
 
          for_each<N>([&]<size_t I>() {
             if constexpr (skipped_by_meta<T, I, operation::serialize>) {
                return;
             }
 
-            decltype(auto) member = [&]() -> decltype(auto) {
+            decltype(auto) member_val = [&]() -> decltype(auto) {
                if constexpr (reflectable<T>) {
-                  return get<I>(t);
+                  return get_member(value, get<I>(to_tie(value)));
                }
                else {
-                  return get<I>(reflect<T>::values);
+                  return get_member(value, get<I>(reflect<T>::values));
                }
             }();
-
-            decltype(auto) member_val = get_member(value, member);
             using val_t = std::decay_t<decltype(member_val)>;
 
             if constexpr (never_written<Opts, val_t>) {
@@ -544,7 +566,7 @@ namespace glz
             // CRITICAL: Discord requires string keys (BINARY_EXT), never atoms!
             static constexpr auto key = reflect<T>::keys[I];
             static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
-            etf::detail::dump_bytes(formatted_key.buf, sizeof(formatted_key.buf), b, ix);
+            etf::detail::dump_bytes_unchecked(formatted_key.buf.data(), formatted_key.buf.size(), b, ix);
 
             serialize<EETF>::op<Opts>(member_val, ctx, b, ix);
             ++pair_count;
@@ -564,7 +586,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(Value&& value, Ctx&& ctx, B&& b, IX&& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<Value>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
             return;
          }
@@ -583,13 +607,17 @@ namespace glz
       static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
-         std::visit([&](auto&& v) {
-            serialize<EETF>::op<Opts>(v, ctx, b, ix);
-         }, value);
+         glz::visit<std::variant_size_v<std::decay_t<T>>>(
+            [&]<size_t I>() {
+               serialize<EETF>::op<Opts>(std::get<I>(value), ctx, b, ix);
+            },
+            value.index());
       }
    };
 
@@ -601,13 +629,17 @@ namespace glz
       static void op(const generic_json<Mode, MapType>& value, is_context auto& ctx, auto& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<generic_json<Mode, MapType>>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(value, ctx, b, ix);
             return;
          }
-         std::visit([&](auto&& v) {
-            serialize<EETF>::op<Opts>(v, ctx, b, ix);
-         }, value.data);
+         glz::visit<std::variant_size_v<decltype(value.data)>>(
+            [&]<size_t I>() {
+               serialize<EETF>::op<Opts>(std::get<I>(value.data), ctx, b, ix);
+            },
+            value.data.index());
       }
    };
 
@@ -622,7 +654,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(value, std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -651,7 +683,7 @@ namespace glz
          if constexpr (!check_no_header(Opts)) {
             constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
             etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(value, std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -678,7 +710,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<basic_raw_json<T>>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }
@@ -693,7 +727,9 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_no_header(Opts)) {
-            etf::detail::dump_byte(etf::magic_version, b, ix);
+            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<basic_text<T>>>;
+            etf::detail::ensure_space(b, ix + prealloc);
+            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
             op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
             return;
          }

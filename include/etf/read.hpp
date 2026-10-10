@@ -1,6 +1,5 @@
 #pragma once
 
-#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -16,6 +15,8 @@
 #include <glaze/core/read.hpp>
 #include <glaze/core/reflect.hpp>
 #include <glaze/core/chrono.hpp>
+#include <glaze/core/buffer_traits.hpp>
+#include <glaze/util/compare.hpp>
 #include <glaze/util/for_each.hpp>
 #include <glaze/util/variant.hpp>
 #include <glaze/util/bit_array.hpp>
@@ -79,8 +80,7 @@ namespace glz
             ++it;
             return;
          }
-         if (etf::detail::is_nil(it, end)) {
-            etf::detail::skip_nil(it, end);
+         if (etf::detail::read_nil(it, end)) {
             return;
          }
          ctx.error = error_code::syntax_error;
@@ -120,6 +120,26 @@ namespace glz
       template <auto Opts>
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto& ctx, auto& it, auto end) noexcept
       {
+         if constexpr (check_quoted_num(Opts)) {
+            if (it >= end) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            if (static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[likely]] {
+               ++it;
+               if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
+               const uint32_t len = etf::detail::read_be<uint32_t>(it);
+               it += 4;
+               if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
+               std::string_view sv{reinterpret_cast<const char*>(it), len};
+               it += len;
+               if (!etf::detail::parse_number_from_string(sv, value)) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+               return;
+            }
+         }
          if (!etf::detail::read_number(ctx, it, end, value)) [[unlikely]] return;
       }
    };
@@ -136,6 +156,20 @@ namespace glz
          if (!etf::detail::read_str(ctx, it, end, sv)) [[unlikely]] {
             return;
          }
+         if constexpr (check_max_string_length(Opts) > 0) {
+            if (sv.size() > check_max_string_length(Opts)) [[unlikely]] {
+               ctx.error = error_code::invalid_length;
+               return;
+            }
+         }
+         if constexpr (has_runtime_max_string_length<std::decay_t<decltype(ctx)>>) {
+            if (ctx.max_string_length > 0) [[unlikely]] {
+               if (sv.size() > ctx.max_string_length) [[unlikely]] {
+                  ctx.error = error_code::invalid_length;
+                  return;
+               }
+            }
+         }
          if constexpr (string_view_t<T>) {
             value = sv;
          }
@@ -147,7 +181,9 @@ namespace glz
                }
             }
             const size_t copy_len = (sv.size() < value.size()) ? sv.size() : value.size();
-            std::memcpy(value.data(), sv.data(), copy_len);
+            if (copy_len > 0) {
+               std::memcpy(value.data(), sv.data(), copy_len);
+            }
             if (copy_len < value.size()) {
                std::memset(value.data() + copy_len, 0, value.size() - copy_len);
             }
@@ -160,7 +196,9 @@ namespace glz
                }
             }
             const size_t copy_len = (sv.size() < sizeof(value)) ? sv.size() : sizeof(value);
-            std::memcpy(value, sv.data(), copy_len);
+            if (copy_len > 0) {
+               std::memcpy(value, sv.data(), copy_len);
+            }
             if (copy_len < sizeof(value)) {
                std::memset(value + copy_len, 0, sizeof(value) - copy_len);
             }
@@ -218,8 +256,7 @@ namespace glz
 
             using underlying = std::underlying_type_t<std::decay_t<T>>;
             underlying u{};
-            auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), u);
-            if (ec == std::errc{} && p == sv.data() + sv.size()) {
+            if (etf::detail::parse_number_from_string(sv, u)) {
                value = static_cast<std::decay_t<T>>(u);
                return;
             }
@@ -242,8 +279,7 @@ namespace glz
             return;
          }
 
-         if (etf::detail::is_nil(it, end)) {
-            etf::detail::skip_nil(it, end);
+         if (etf::detail::read_nil(it, end)) {
             if constexpr (is_specialization_v<T, std::optional>) {
                value = std::nullopt;
             }
@@ -318,7 +354,23 @@ namespace glz
                return;
             }
 
+            if constexpr (check_max_array_size(Opts) > 0) {
+               if (len > check_max_array_size(Opts)) [[unlikely]] {
+                  ctx.error = error_code::invalid_length;
+                  return;
+               }
+            }
+            if constexpr (has_runtime_max_array_size<std::decay_t<decltype(ctx)>>) {
+               if (ctx.max_array_size > 0) [[unlikely]] {
+                  if (len > ctx.max_array_size) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
+               }
+            }
+
             if constexpr (resizable<T>) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
@@ -326,6 +378,7 @@ namespace glz
                }
             }
             else if constexpr (emplace_backable<T>) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.clear();
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                   value.reserve(len);
@@ -338,6 +391,7 @@ namespace glz
                }
             }
             else if constexpr (set_like) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.clear();
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                   value.reserve(len);
@@ -390,40 +444,104 @@ namespace glz
                   return;
                }
 
-               if constexpr (resizable<T>) {
-                  value.resize(len);
-                  for (size_t i = 0; i < len; ++i) {
-                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+               if constexpr (check_max_array_size(Opts) > 0) {
+                  if (len > check_max_array_size(Opts)) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
                   }
                }
-               else if constexpr (emplace_backable<T>) {
-                  value.clear();
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(len);
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
-                  }
-               }
-               else if constexpr (set_like) {
-                  value.clear();
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(len);
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
-                  }
-               }
-               else {
-                  if constexpr (not check_partial_read(Opts)) {
-                     if (len > value.size()) [[unlikely]] {
-                        ctx.error = error_code::exceeded_static_array_size;
+               if constexpr (has_runtime_max_array_size<std::decay_t<decltype(ctx)>>) {
+                  if (ctx.max_array_size > 0) [[unlikely]] {
+                     if (len > ctx.max_array_size) [[unlikely]] {
+                        ctx.error = error_code::invalid_length;
                         return;
                      }
                   }
-                  const size_t copy_len = (len < value.size()) ? len : value.size();
-                  for (size_t i = 0; i < copy_len; ++i) {
-                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+               }
+
+               if constexpr (sizeof(V) == 1) {
+                  if constexpr (resizable<T>) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     resize_unfilled(value, len);
+                     if (len > 0) {
+                        std::memcpy(value.data(), it, len);
+                     }
+                  }
+                  else if constexpr (emplace_backable<T>) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     value.clear();
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        value.reserve(len);
+                     }
+                     for (size_t i = 0; i < len; ++i) {
+                        value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
+                     }
+                  }
+                  else if constexpr (set_like) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     value.clear();
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        value.reserve(len);
+                     }
+                     for (size_t i = 0; i < len; ++i) {
+                        value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
+                     }
+                  }
+                  else {
+                     if constexpr (not check_partial_read(Opts)) {
+                        if (len > value.size()) [[unlikely]] {
+                           ctx.error = error_code::exceeded_static_array_size;
+                           return;
+                        }
+                     }
+                     const size_t copy_len = (len < value.size()) ? len : value.size();
+                     if (copy_len > 0) {
+                        std::memcpy(value.data(), it, copy_len);
+                     }
+                     if (copy_len < value.size()) {
+                        std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+                     }
+                  }
+               }
+               else {
+                  if constexpr (resizable<T>) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     value.resize(len);
+                     for (size_t i = 0; i < len; ++i) {
+                        value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                     }
+                  }
+                  else if constexpr (emplace_backable<T>) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     value.clear();
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        value.reserve(len);
+                     }
+                     for (size_t i = 0; i < len; ++i) {
+                        value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
+                     }
+                  }
+                  else if constexpr (set_like) {
+                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     value.clear();
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        value.reserve(len);
+                     }
+                     for (size_t i = 0; i < len; ++i) {
+                        value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
+                     }
+                  }
+                  else {
+                     if constexpr (not check_partial_read(Opts)) {
+                        if (len > value.size()) [[unlikely]] {
+                           ctx.error = error_code::exceeded_static_array_size;
+                           return;
+                        }
+                     }
+                     const size_t copy_len = (len < value.size()) ? len : value.size();
+                     for (size_t i = 0; i < copy_len; ++i) {
+                        value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                     }
                   }
                }
                it += len;
@@ -448,13 +566,30 @@ namespace glz
                   return;
                }
 
+               if constexpr (check_max_array_size(Opts) > 0) {
+                  if (len > check_max_array_size(Opts)) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
+               }
+               if constexpr (has_runtime_max_array_size<std::decay_t<decltype(ctx)>>) {
+                  if (ctx.max_array_size > 0) [[unlikely]] {
+                     if (len > ctx.max_array_size) [[unlikely]] {
+                        ctx.error = error_code::invalid_length;
+                        return;
+                     }
+                  }
+               }
+
                if constexpr (resizable<T>) {
-                  value.resize(len);
-                  for (size_t i = 0; i < len; ++i) {
-                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  resize_unfilled(value, len);
+                  if (len > 0) {
+                     std::memcpy(value.data(), it, len);
                   }
                }
                else if constexpr (emplace_backable<T>) {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                   value.clear();
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                      value.reserve(len);
@@ -464,6 +599,7 @@ namespace glz
                   }
                }
                else if constexpr (set_like) {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                   value.clear();
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                      value.reserve(len);
@@ -480,8 +616,11 @@ namespace glz
                      }
                   }
                   const size_t copy_len = (len < value.size()) ? len : value.size();
-                  for (size_t i = 0; i < copy_len; ++i) {
-                     value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                  if (copy_len > 0) {
+                     std::memcpy(value.data(), it, copy_len);
+                  }
+                  if (copy_len < value.size()) {
+                     std::memset(value.data() + copy_len, 0, value.size() - copy_len);
                   }
                }
                it += len;
@@ -510,7 +649,21 @@ namespace glz
                return;
             }
 
+            if constexpr (check_max_array_size(Opts) > 0) {
+               if (len > check_max_array_size(Opts)) [[unlikely]] {
+                  ctx.error = error_code::invalid_length;
+                  return;
+               }
+            }
+            if constexpr (has_runtime_max_array_size<std::decay_t<decltype(ctx)>>) {
+               if (ctx.max_array_size > 0 && len > ctx.max_array_size) [[unlikely]] {
+                  ctx.error = error_code::invalid_length;
+                  return;
+               }
+            }
+
             if constexpr (resizable<T>) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
@@ -518,6 +671,7 @@ namespace glz
                }
             }
             else if constexpr (emplace_backable<T>) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.clear();
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                   value.reserve(len);
@@ -530,6 +684,7 @@ namespace glz
                }
             }
             else if constexpr (set_like) {
+               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                value.clear();
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
                   value.reserve(len);
@@ -574,7 +729,7 @@ namespace glz
       static void op(auto& value, is_context auto& ctx, auto& it, auto end)
       {
          if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
-         const uint8_t tag = static_cast<uint8_t>(*it++);
+         const auto tag = static_cast<uint8_t>(*it++);
          uint32_t arity = 0;
          if (tag == etf::tag::SMALL_TUPLE_EXT) {
             if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
@@ -608,11 +763,13 @@ namespace glz
 
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
+               if (static_cast<bool>(ctx.error)) return;
                parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
+               if (static_cast<bool>(ctx.error)) return;
                parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
             });
          }
@@ -658,6 +815,22 @@ namespace glz
             ctx.error = error_code::unexpected_end;
             return;
          }
+
+         if constexpr (check_max_array_size(Opts) > 0) {
+            if (arity > check_max_array_size(Opts)) [[unlikely]] {
+               ctx.error = error_code::invalid_length;
+               return;
+            }
+         }
+         if constexpr (has_runtime_max_map_size<std::decay_t<decltype(ctx)>>) {
+            if (ctx.max_map_size > 0) [[unlikely]] {
+               if (arity > ctx.max_map_size) [[unlikely]] {
+                  ctx.error = error_code::invalid_length;
+                  return;
+               }
+            }
+         }
+         if (exceeds_capacity(value, arity, ctx)) [[unlikely]] return;
 
          value.clear();
          if constexpr (has_reserve<std::remove_cvref_t<T>>) {
@@ -741,24 +914,16 @@ namespace glz
                            if constexpr (skipped_by_meta<T, I, operation::parse>) {
                               skip_value<EETF>::op<Opts>(ctx, it, end);
                            }
-                           else if constexpr (reflectable<T>) {
-                              decltype(auto) member = get_member(value, get<I>(to_tie(value)));
-                              using val_t = std::decay_t<decltype(member)>;
-                              if constexpr (always_skipped<val_t>) {
-                                 skip_value<EETF>::op<Opts>(ctx, it, end);
-                              }
-                              else {
-                                 parse<EETF>::op<Opts>(member, ctx, it, end);
-                              }
-                           }
                            else {
-                              decltype(auto) member = get_member(value, get<I>(reflect<T>::values));
-                              using val_t = std::decay_t<decltype(member)>;
+                              using val_t = refl_t<T, I>;
                               if constexpr (always_skipped<val_t>) {
                                  skip_value<EETF>::op<Opts>(ctx, it, end);
                               }
+                              else if constexpr (reflectable<T>) {
+                                 parse<EETF>::op<Opts>(get_member(value, get<I>(to_tie(value))), ctx, it, end);
+                              }
                               else {
-                                 parse<EETF>::op<Opts>(member, ctx, it, end);
+                                 parse<EETF>::op<Opts>(get_member(value, get<I>(reflect<T>::values)), ctx, it, end);
                               }
                            }
                         }
@@ -957,7 +1122,8 @@ namespace glz
                      }
 
                      if constexpr (tagged) {
-                        if (key == tag_v<T>) {
+                        static constexpr auto Tag = tag_v<T>;
+                        if (key.size() == Tag.size() && compare<Tag.size()>(key.data(), Tag.data())) {
                            using id_type = std::decay_t<decltype(ids_v<T>[0])>;
                            if constexpr (std::integral<id_type>) {
                               id_type id{};
@@ -1201,7 +1367,7 @@ namespace glz
          case etf::tag::NEW_FLOAT_EXT:
          case etf::tag::FLOAT_EXT: {
             double d{};
-            if (!etf::detail::read_number(ctx, it, end, d)) return;
+            if (!etf::detail::read_number(ctx, it, end, d)) [[unlikely]] return;
             value.data = d;
             break;
          }
@@ -1210,14 +1376,20 @@ namespace glz
          case etf::tag::ATOM_UTF8_EXT:
          case etf::tag::ATOM_EXT: {
             std::string_view atom;
-            if (!etf::detail::read_atom_or_str(ctx, it, end, atom)) return;
-            if (atom == "true") {
+            if (!etf::detail::read_atom_or_str(ctx, it, end, atom)) [[unlikely]] return;
+            if (atom.size() == 4 && compare<4>(atom.data(), "true")) {
                value.data = true;
             }
-            else if (atom == "false") {
+            else if (atom.size() == 5 && compare<5>(atom.data(), "false")) {
                value.data = false;
             }
-            else if (atom == "nil" || atom == "null" || atom == "undefined") {
+            else if (atom.size() == 3 && compare<3>(atom.data(), "nil")) {
+               value.data = nullptr;
+            }
+            else if (atom.size() == 4 && compare<4>(atom.data(), "null")) {
+               value.data = nullptr;
+            }
+            else if (atom.size() == 9 && compare<9>(atom.data(), "undefined")) {
                value.data = nullptr;
             }
             else {
