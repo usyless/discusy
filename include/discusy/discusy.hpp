@@ -1300,7 +1300,7 @@ private:
                 if (!g_ids.is_array() || g_ids.get_array().empty()) continue;
 
                 encoded.clear();
-                if (!gateway_protocol::write(request, encoded)) continue;
+                if (gateway_protocol::write(request, encoded)) continue;
 
                 if (i < shards_.size()) {
                     shards_[i]->send_text_ratelimited(std::move(encoded));
