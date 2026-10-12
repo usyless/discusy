@@ -253,4 +253,41 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
         auto ec = glz::read_etf(bad_arc, inv_encoded);
         CHECK(bool(ec));
     }
+
+    SECTION("Thread-local scratch buffer serialization") {
+        auto btn = discusy::components::Button::create(
+            discusy::components::button_style::Secondary,
+            "Scratch Test",
+            "btn_scratch"
+        );
+
+        // Test write_json copies into target string
+        std::string json_out;
+        REQUIRE_FALSE(discusy::json::write_json(btn, json_out));
+        CHECK(json_out.contains("\"label\":\"Scratch Test\""));
+
+        // Verify thread-local scratch buffer contains the written data
+        CHECK(discusy::detail::tls_scratch.buffer == json_out);
+
+        // Test write_scratch_json returns view into scratch buffer
+        auto view = discusy::json::write_scratch(btn);
+        REQUIRE(view.has_value());
+        CHECK(*view == json_out);
+        CHECK(view->data() == discusy::detail::tls_scratch.buffer.data());
+
+        // Test writing directly into scratch.buffer (in-place, no extra copy)
+        auto& scratch = discusy::detail::tls_scratch;
+        REQUIRE_FALSE(discusy::json::write_json(btn, scratch.buffer));
+        CHECK(scratch.buffer.contains("\"label\":\"Scratch Test\""));
+
+        // Test write_etf using thread-local scratch
+        std::string etf_out;
+        REQUIRE_FALSE(discusy::etf::write_etf(btn, etf_out));
+        CHECK_FALSE(etf_out.empty());
+        CHECK(discusy::detail::tls_scratch.buffer == etf_out);
+
+        auto etf_view = discusy::etf::write_scratch(btn);
+        REQUIRE(etf_view.has_value());
+        CHECK(*etf_view == etf_out);
+    }
 }

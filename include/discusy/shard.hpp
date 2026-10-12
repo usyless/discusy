@@ -89,7 +89,7 @@ public:
     [[nodiscard]] bool send_request(T& req) {
         P payload{req};
         std::string encoded;
-        if (gateway_protocol::write(payload, encoded, json_logger)) return false; // not using ctx as not thread safe
+        if (gateway_protocol::write(payload, encoded, json_logger)) return false;
 
         send_text_ratelimited(std::move(encoded));
         return true;
@@ -501,7 +501,7 @@ private:
         }
 
         std::string out;
-        if (gateway_protocol::write(payload, out, shared_json_ctx_, json_logger)) {
+        if (gateway_protocol::write(payload, out, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
@@ -520,7 +520,7 @@ private:
         resume.seq = seq_;
 
         std::string out;
-        if (gateway_protocol::write(payload, out, shared_json_ctx_, json_logger)) {
+        if (gateway_protocol::write(payload, out, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
@@ -549,7 +549,7 @@ private:
             o.skip_null_members = false;
             return o;
         }();
-        if (gateway_protocol::write<hb_opts>(payload, out, shared_json_ctx_, json_logger)) {
+        if (gateway_protocol::write<hb_opts>(payload, out, json_logger)) {
             state_.fatal_error->request_stop(); // maybe too extreme? but this will literally never happen
             return false;
         }

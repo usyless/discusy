@@ -1362,7 +1362,7 @@ private:
                         select_protocol_payload payload{select};
 
                         std::string out;
-                        if (json::write_json(payload, out, self.shared_json_ctx_, self.json_logger)) {
+                        if (json::write_json(payload, out, self.json_logger)) {
                             self.escalate(escalation_action::fatal);
                             return;
                         }
@@ -1605,7 +1605,7 @@ private:
             identify_payload payload{id};
 
             std::string out;
-            if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+            if (json::write_json(payload, out, json_logger)) {
                 escalate(escalation_action::fatal);
                 return;
             }
@@ -1624,7 +1624,7 @@ private:
             resume_payload payload{r};
 
             std::string out;
-            if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+            if (json::write_json(payload, out, json_logger)) {
                 escalate(escalation_action::fatal);
                 return;
             }
@@ -1654,7 +1654,7 @@ private:
         dave_mls_invalid_commit_welcome_payload payload{invalid_cw};
 
         std::string out;
-        if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+        if (json::write_json(payload, out, json_logger)) {
             escalate(escalation_action::fatal);
             return;
         }
@@ -1675,7 +1675,7 @@ private:
         dave_protocol_ready_for_transition_payload payload{r};
 
         std::string out;
-        if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+        if (json::write_json(payload, out, json_logger)) {
             escalate(escalation_action::fatal);
             return;
         }
@@ -1743,7 +1743,7 @@ private:
         speaking_payload payload{s};
 
         std::string out;
-        if (json::write_json(payload, out, shared_json_ctx_, json_logger)) {
+        if (json::write_json(payload, out, json_logger)) {
             escalate(escalation_action::fatal);
             return;
         }
@@ -1772,7 +1772,7 @@ private:
 
         std::string out;
         static constexpr glz::opts opts{.skip_null_members = false};
-        if (json::write_json<opts>(payload, out, shared_json_ctx_, json_logger)) {
+        if (json::write_json<opts>(payload, out, json_logger)) {
             escalate(escalation_action::fatal);
             return false;
         }

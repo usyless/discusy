@@ -179,16 +179,19 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     std::string json_buffer;
     std::string etf_buffer;
 
-    auto err_wj = glz::write_json(value, json_buffer);
-    if (static_cast<bool>(err_wj)) {
-        std::cerr << "\n[ERROR] JSON serialization failed for " << name << ": " << glz::format_error(err_wj, json_buffer) << "\n";
+    auto sv_j = discusy::json::write_scratch(value);
+    if (!sv_j) {
+        std::cerr << "\n[ERROR] JSON serialization failed for " << name << "\n";
         return res;
     }
-    auto err_we = glz::write_etf(value, etf_buffer);
-    if (static_cast<bool>(err_we)) {
-        std::cerr << "\n[ERROR] ETF serialization failed for " << name << ": " << glz::format_error(err_we, etf_buffer) << "\n";
+    json_buffer = *sv_j;
+
+    auto sv_e = discusy::etf::write_scratch(value);
+    if (!sv_e) {
+        std::cerr << "\n[ERROR] ETF serialization failed for " << name << "\n";
         return res;
     }
+    etf_buffer = *sv_e;
 
     res.json_size = json_buffer.size();
     res.etf_size = etf_buffer.size();
@@ -208,18 +211,16 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
         }
     }
 
-    // 1. JSON Serialization Benchmark
+    // 1. JSON Serialization Benchmark (using zero-allocation write_scratch string_view)
     {
         for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
-            json_buffer.clear();
-            (void)glz::write_json(value, json_buffer);
-            do_not_optimize(json_buffer);
+            auto sv = discusy::json::write_scratch(value);
+            do_not_optimize(sv);
         }
         const auto start = std::chrono::steady_clock::now();
         for (size_t i = 0; i < iterations; ++i) {
-            json_buffer.clear();
-            (void)glz::write_json(value, json_buffer);
-            do_not_optimize(json_buffer);
+            auto sv = discusy::json::write_scratch(value);
+            do_not_optimize(sv);
         }
         const auto end = std::chrono::steady_clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
@@ -229,18 +230,16 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
         res.json_ser_mb_s = total_mb / elapsed_s;
     }
 
-    // 2. ETF Serialization Benchmark
+    // 2. ETF Serialization Benchmark (using zero-allocation write_scratch string_view)
     {
         for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
-            etf_buffer.clear();
-            (void)glz::write_etf(value, etf_buffer);
-            do_not_optimize(etf_buffer);
+            auto sv = discusy::etf::write_scratch(value);
+            do_not_optimize(sv);
         }
         const auto start = std::chrono::steady_clock::now();
         for (size_t i = 0; i < iterations; ++i) {
-            etf_buffer.clear();
-            (void)glz::write_etf(value, etf_buffer);
-            do_not_optimize(etf_buffer);
+            auto sv = discusy::etf::write_scratch(value);
+            do_not_optimize(sv);
         }
         const auto end = std::chrono::steady_clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();

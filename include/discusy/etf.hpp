@@ -2,21 +2,24 @@
 
 #include <etf/etf.hpp>
 #include <string>
+#include <optional>
 #include <string_view>
 #include <usylibpp/strings.hpp>
 
 #include "gateway_events.hpp"
 #include "log.hpp" // IWYU pragma: keep
+#include "scratch.hpp"
 
 namespace discusy::etf {
 
 namespace detail {
-    constexpr void reset_ctx(glz::context& ctx) noexcept {
-        ctx.error = glz::error_code::none;
-        ctx.custom_error_message = {};
-        ctx.depth = 0;
-    }
+    using discusy::detail::reset_ctx;
+    using discusy::detail::scratch_storage;
+    using discusy::detail::tls_scratch;
 }
+
+using discusy::detail::scratch_storage;
+using discusy::detail::tls_scratch;
 
 inline constexpr glz::etf::etf_opts glz_opts{
     .format = glz::ETF,
@@ -102,31 +105,66 @@ requires ( log::IsLogger<F> )
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
 [[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+    auto& scratch = detail::tls_scratch;
+    scratch.buffer.clear();
+    detail::reset_ctx(scratch.ctx);
     #ifdef DISCUSY_LOGGING
-    if (const auto err = glz::write<opts>(object, etf_data)) {
+    if (const auto err = glz::write<opts>(object, scratch.buffer, scratch.ctx)) {
         logger("ETF serialising failed: {}", glz::format_error(err));
         return true;
     }
-    return false;
     #else
-    return static_cast<bool>(glz::write<opts>(object, etf_data));
+    if (static_cast<bool>(glz::write<opts>(object, scratch.buffer, scratch.ctx))) {
+        return true;
+    }
     #endif
+    if (&etf_data != &scratch.buffer) {
+        etf_data = scratch.buffer;
+    }
+    return false;
 }
 
 // On true return: failure
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
 [[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+    auto& scratch = detail::tls_scratch;
+    scratch.buffer.clear();
     detail::reset_ctx(ctx);
     #ifdef DISCUSY_LOGGING
-    if (const auto err = glz::write<opts>(object, etf_data, ctx)) {
+    if (const auto err = glz::write<opts>(object, scratch.buffer, ctx)) {
         logger("ETF serialising failed: {}", glz::format_error(err));
         return true;
     }
-    return false;
     #else
-    return static_cast<bool>(glz::write<opts>(object, etf_data, ctx));
+    if (static_cast<bool>(glz::write<opts>(object, scratch.buffer, ctx))) {
+        return true;
+    }
     #endif
+    if (&etf_data != &scratch.buffer) {
+        etf_data = scratch.buffer;
+    }
+    return false;
+}
+
+// Writes directly to the thread-local scratch buffer, returning a string_view
+template <auto opts = glz_opts, typename T, typename F = log::Logger>
+requires ( log::IsLogger<F> )
+[[nodiscard]] inline std::optional<std::string_view> write_scratch_etf(const T& object, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+    auto& scratch = detail::tls_scratch;
+    scratch.buffer.clear();
+    detail::reset_ctx(scratch.ctx);
+    #ifdef DISCUSY_LOGGING
+    if (const auto err = glz::write<opts>(object, scratch.buffer, scratch.ctx)) {
+        logger("ETF serialising failed: {}", glz::format_error(err));
+        return std::nullopt;
+    }
+    #else
+    if (static_cast<bool>(glz::write<opts>(object, scratch.buffer, scratch.ctx))) {
+        return std::nullopt;
+    }
+    #endif
+    return std::string_view{scratch.buffer};
 }
 
 // On true return: failure
@@ -262,8 +300,13 @@ template <auto opts = glz_opts_not_null_term, typename T, typename... Args>
 }
 
 template <auto opts = glz_opts, typename T, typename... Args>
-[[nodiscard]] inline bool write(const T& obj, Args&&... args) noexcept {
+[[nodiscard]] inline decltype(auto) write(const T& obj, Args&&... args) noexcept {
     return write_etf<opts>(obj, std::forward<Args>(args)...);
+}
+
+template <auto opts = glz_opts, typename T, typename... Args>
+[[nodiscard]] inline decltype(auto) write_scratch(const T& obj, Args&&... args) noexcept {
+    return write_scratch_etf<opts>(obj, std::forward<Args>(args)...);
 }
 
 }

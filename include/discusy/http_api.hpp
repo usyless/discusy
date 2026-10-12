@@ -39,15 +39,6 @@ inline constexpr bool is_iterable_v =
     !std::is_same_v<T, std::string> && 
     !std::is_same_v<T, std::string_view>;
 
-namespace detail {
-    struct http_scratch_storage {
-        std::string buffer{};
-        glz::context ctx{};
-    };
-
-    inline thread_local http_scratch_storage tls_http_scratch{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-}
-
 // struct names must not need to be url encoded
 // does this work with glz meta? idk
 template <typename T>
@@ -65,9 +56,8 @@ requires ( glz::has_reflect<T> )
             q += ulp::str::url_encode(val);
         }
         else {
-            auto& scratch = detail::tls_http_scratch;
-            scratch.buffer.clear();
-            if (discusy::json::write_json(val, scratch.buffer, scratch.ctx)) return;
+            auto& scratch = discusy::detail::tls_scratch;
+            if (discusy::json::write_json(val, scratch.buffer)) return;
             
             if (scratch.buffer.size() >= 2 && scratch.buffer.front() == '"' && scratch.buffer.back() == '"') {
                 q += ulp::str::url_encode(std::string_view{scratch.buffer.data() + 1, scratch.buffer.size() - 2});
@@ -255,9 +245,8 @@ private:
 
     template <typename T>
     [[nodiscard]] static std::expected<std::string, std::string> handle_json_body(const T& obj) {
-        auto& scratch = detail::tls_http_scratch;
         std::string json;
-        if (discusy::json::write_json(obj, json, scratch.ctx)) {
+        if (discusy::json::write_json(obj, json)) {
             return std::unexpected("Failure to write json");
         }
         return json;
@@ -265,9 +254,8 @@ private:
 
     template <typename T>
     [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_files_body(const T& obj, upload_files_param files) {
-        auto& scratch = detail::tls_http_scratch;
-        scratch.buffer.clear();
-        if (discusy::json::write_json(obj, scratch.buffer, scratch.ctx)) {
+        auto& scratch = discusy::detail::tls_scratch;
+        if (discusy::json::write_json(obj, scratch.buffer)) {
             return std::unexpected("Failure to write json");
         }
 
@@ -288,9 +276,8 @@ private:
 
     template <typename T>
     [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_body(const T& obj, std::string_view name, std::string_view content, std::string_view content_type) {
-        auto& scratch = detail::tls_http_scratch;
-        scratch.buffer.clear();
-        if (discusy::json::write_json(obj, scratch.buffer, scratch.ctx)) {
+        auto& scratch = discusy::detail::tls_scratch;
+        if (discusy::json::write_json(obj, scratch.buffer)) {
             return std::unexpected("Failure to write json");
         }
 
@@ -324,9 +311,8 @@ private:
     // a json payload plus a single named file part (eg. sticker uploads)
     template <typename T>
     [[nodiscard]] static std::expected<std::string, std::string> handle_multipart_named_file_body(const T& obj, std::string_view name, discusy::upload_file_view file) {
-        auto& scratch = detail::tls_http_scratch;
-        scratch.buffer.clear();
-        if (discusy::json::write_json(obj, scratch.buffer, scratch.ctx)) {
+        auto& scratch = discusy::detail::tls_scratch;
+        if (discusy::json::write_json(obj, scratch.buffer)) {
             return std::unexpected("Failure to write json");
         }
 
