@@ -31,7 +31,11 @@ int main() {
     auto token = get_bot_token();
     if (token.empty()) {
         std::println(stderr, "Error: DISCORD_BOT_TOKEN environment variable is not set.");
+#if defined(_WIN32) || defined(WIN32)
+        std::println(stderr, "Usage: set \"DISCORD_BOT_TOKEN=your_bot_token_here\"");
+#else
         std::println(stderr, "Usage: export DISCORD_BOT_TOKEN=\"your_bot_token_here\"");
+#endif
         return 1;
     }
 
