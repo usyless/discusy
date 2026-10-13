@@ -252,15 +252,15 @@ requires ( log::IsLogger<F> )
         json = json.substr(ulp::str::strlen(null));
     } else {
         const auto next_apostrophe = json.find('"', 1);
-        if (next_apostrophe == std::string_view::npos) {
+        if (next_apostrophe == std::string_view::npos) [[unlikely]] {
             #ifdef DISCUSY_LOGGING
             logger("Json parsing failed: no ending apostrophe on \"t\"");
             #endif
             return true;
         }
-        if (glz::read<glz_opts_not_null_term>(object.t, json.substr(0, next_apostrophe + 1))) {
+        if (glz::read<glz_opts_not_null_term>(object.t, json.substr(0, next_apostrophe + 1))) [[unlikely]] {
             object.t.reset();
-        } else if (!object.t) {
+        } else if (!object.t) [[unlikely]] {
             #ifdef DISCUSY_LOGGING
             logger("Json parsing failed: t is nullopt when it shouldn't be");
             #endif
@@ -269,7 +269,7 @@ requires ( log::IsLogger<F> )
         json = json.substr(next_apostrophe + 1);
     }
     static constexpr auto s = ",\"s\":";
-    if (!json.starts_with(s)) {
+    if (!json.starts_with(s)) [[unlikely]] {
         #ifdef DISCUSY_LOGGING
         logger("Json parsing failed: no s key");
         #endif
@@ -280,14 +280,14 @@ requires ( log::IsLogger<F> )
         json = json.substr(ulp::str::strlen(null));
     } else {
         const auto next_comma = json.find(',');
-        if (next_comma == std::string_view::npos) {
+        if (next_comma == std::string_view::npos) [[unlikely]] {
             #ifdef DISCUSY_LOGGING
             logger("Json parsing failed: no ending comma on \"s\"");
             #endif
             return true;
         }
         object.s = ulp::str::to_number<std::int64_t>(json.substr(0, next_comma));
-        if (!object.s) {
+        if (!object.s) [[unlikely]] {
             #ifdef DISCUSY_LOGGING
             logger("Json parsing failed: s is nullopt when it shouldn't be");
             #endif
@@ -296,7 +296,7 @@ requires ( log::IsLogger<F> )
         json = json.substr(next_comma);
     }
     static constexpr auto op = ",\"op\":";
-    if (!json.starts_with(op)) {
+    if (!json.starts_with(op)) [[unlikely]] {
         #ifdef DISCUSY_LOGGING
         logger("Json parsing failed: no op key");
         #endif
@@ -304,14 +304,14 @@ requires ( log::IsLogger<F> )
     }
     json = json.substr(ulp::str::strlen(op));
     const auto next_comma = json.find(',');
-    if (next_comma == std::string_view::npos) {
+    if (next_comma == std::string_view::npos) [[unlikely]] {
         #ifdef DISCUSY_LOGGING
         logger("Json parsing failed: no ending comma on \"op\"");
         #endif
         return true;
     }
     const auto op_val = ulp::str::to_number<decltype(+object.op)>(json.substr(0, next_comma));
-    if (!op_val) {
+    if (!op_val) [[unlikely]] {
         #ifdef DISCUSY_LOGGING
         logger("Json parsing failed: failed to parse value for \"op\"");
         #endif
@@ -319,7 +319,7 @@ requires ( log::IsLogger<F> )
     }
     object.op = static_cast<Opcode>(*op_val);
     json = json.substr(next_comma);
-    if (!json.starts_with(",\"d\":")) {
+    if (!json.starts_with(",\"d\":")) [[unlikely]] {
         #ifdef DISCUSY_LOGGING
         logger("Json parsing failed: no \"d\" key");
         #endif

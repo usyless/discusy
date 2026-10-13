@@ -767,20 +767,20 @@ namespace glz
 
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
-               if (bool(ctx.error)) return;
+               if (bool(ctx.error)) [[unlikely]] return;
                parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
-               if (bool(ctx.error)) return;
+               if (bool(ctx.error)) [[unlikely]] return;
                parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
             });
          }
-         if (bool(ctx.error)) return;
+         if (bool(ctx.error)) [[unlikely]] return;
          for (uint32_t i = N; i < arity; ++i) {
             skip_value<EETF>::op<Opts>(ctx, it, end);
-            if (parse_failed(ctx.error)) return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
          }
          if (tag == etf::tag::LIST_EXT) {
             skip_value<EETF>::op<Opts>(ctx, it, end); // tail term
@@ -1401,7 +1401,7 @@ namespace glz
          case etf::tag::STRING_EXT: {
             std::string s;
             from<EETF, std::string>::template op<Opts>(s, ctx, it, end);
-            if (parse_failed(ctx.error)) return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             value.data = std::move(s);
             break;
          }
@@ -1415,14 +1415,14 @@ namespace glz
          case etf::tag::LARGE_TUPLE_EXT: {
             typename generic_json<Mode, MapType>::array_t arr;
             from<EETF, decltype(arr)>::template op<Opts>(arr, ctx, it, end);
-            if (parse_failed(ctx.error)) return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             value.data = std::move(arr);
             break;
          }
          case etf::tag::MAP_EXT: {
             typename generic_json<Mode, MapType>::object_t obj;
             from<EETF, decltype(obj)>::template op<Opts>(obj, ctx, it, end);
-            if (parse_failed(ctx.error)) return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             value.data = std::move(obj);
             break;
          }

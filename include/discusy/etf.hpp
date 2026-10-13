@@ -271,7 +271,7 @@ requires ( log::IsLogger<F> )
                 return true;
             }
         }
-        else {
+        else [[unlikely]] {
             glz::skip_value<glz::EETF>::template op<glz_opts>(ctx, it, end);
             if (static_cast<bool>(ctx.error)) [[unlikely]] {
                 #ifdef DISCUSY_LOGGING

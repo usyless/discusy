@@ -250,7 +250,7 @@ namespace glz::etf
 
       template <size_t N>
       struct static_etf_key {
-         std::array<char, 5 + N> buf{};
+         std::array<char, 5 + N> buf;
          constexpr static_etf_key(std::string_view sv) noexcept {
             buf[0] = static_cast<char>(tag::BINARY_EXT);
             const auto sz = static_cast<uint32_t>(N);
@@ -631,7 +631,7 @@ namespace glz::etf
          }
 
          std::string_view atom;
-         if (!read_atom_or_str(ctx, it, end, atom)) return false;
+         if (!read_atom_or_str(ctx, it, end, atom)) [[unlikely]] return false;
          if (atom.size() == 4 && glz::compare<4>(atom.data(), "true")) { // NOLINT(bugprone-suspicious-stringview-data-usage)
             b = true;
             return true;

@@ -217,11 +217,12 @@ struct snowflake {
 };
  
 struct snowflake_str {
-    std::array<char, 24> buf{};
-    std::uint8_t len{};
+    std::array<char, 24> buf; 
+    std::uint8_t len{0};
 
-    constexpr snowflake_str() noexcept = default;
+    constexpr snowflake_str() noexcept : buf{} {}
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     constexpr explicit snowflake_str(std::uint64_t val) noexcept {
         if consteval {
             if (val == 0) {
@@ -307,7 +308,7 @@ struct snowflake_str {
 
 struct snowflake_mention_str {
     std::array<char, 32> buf{};
-    std::uint8_t len{};
+    std::uint8_t len{0};
 
     constexpr snowflake_mention_str() noexcept = default;
 
@@ -372,7 +373,7 @@ namespace detail {
             if (val == 0) {
                 buf[offset++] = '0';
             } else {
-                std::array<char, 24> temp{};
+                std::array<char, 24> temp{}; 
                 std::size_t i = 0;
                 while (val > 0) {
                     temp[i++] = static_cast<char>('0' + (val % 10));
