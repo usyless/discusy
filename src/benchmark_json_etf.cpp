@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -6,6 +8,17 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+inline void stabilize_environment() {
+    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+    // Pin to core 0 (or first affinity bit) to prevent Windows scheduler from hopping across cores / P-cores and E-cores
+    SetThreadAffinityMask(GetCurrentThread(), 1);
+}
+#else
+inline void stabilize_environment() {}
+#endif
 
 #include <discusy/gateway_events.hpp>
 #include <discusy/etf.hpp>
@@ -18,9 +31,32 @@ GLZ_ALWAYS_INLINE void do_not_optimize(T&& val) {
 #if defined(__GNUC__) || defined(__clang__)
     asm volatile("" : : "g"(val) : "memory");
 #else
+    std::atomic_signal_fence(std::memory_order_acq_rel);
     volatile auto* p = &val;
     (void)p;
 #endif
+}
+
+template <typename Func>
+double measure_median_latency(Func&& f, size_t iterations, size_t trials = 5) {
+    // Warm-up to ramp CPU turbo boost clocks and hot cache
+    for (size_t i = 0; i < (iterations / 5) + 5; ++i) {
+        f();
+    }
+
+    std::vector<double> latencies;
+    latencies.reserve(trials);
+    for (size_t t = 0; t < trials; ++t) {
+        const auto start = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < iterations; ++i) {
+            f();
+        }
+        const auto end = std::chrono::steady_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+        latencies.push_back(static_cast<double>(elapsed) / static_cast<double>(iterations));
+    }
+    std::ranges::sort(latencies);
+    return latencies[trials / 2]; // Return median of trials
 }
 
 discusy::recieve_event::message_create make_medium_payload() {
@@ -212,81 +248,37 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     }
 
     // 1. JSON Serialization Benchmark (using zero-allocation write_scratch string_view)
-    {
-        for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
-            auto sv = discusy::json::write_scratch(value);
-            do_not_optimize(sv);
-        }
-        const auto start = std::chrono::steady_clock::now();
-        for (size_t i = 0; i < iterations; ++i) {
-            auto sv = discusy::json::write_scratch(value);
-            do_not_optimize(sv);
-        }
-        const auto end = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-        res.json_ser_ns = static_cast<double>(elapsed) / static_cast<double>(iterations);
-        const double total_mb = (static_cast<double>(res.json_size) * static_cast<double>(iterations)) / (1024.0 * 1024.0);
-        const double elapsed_s = static_cast<double>(elapsed) / 1e9;
-        res.json_ser_mb_s = total_mb / elapsed_s;
-    }
+    res.json_ser_ns = measure_median_latency([&]() {
+        auto sv = discusy::json::write_scratch(value);
+        do_not_optimize(sv);
+    }, iterations);
+    res.json_ser_mb_s = (static_cast<double>(res.json_size) / res.json_ser_ns) * (1e9 / (1024.0 * 1024.0));
 
     // 2. ETF Serialization Benchmark (using zero-allocation write_scratch string_view)
-    {
-        for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
-            auto sv = discusy::etf::write_scratch(value);
-            do_not_optimize(sv);
-        }
-        const auto start = std::chrono::steady_clock::now();
-        for (size_t i = 0; i < iterations; ++i) {
-            auto sv = discusy::etf::write_scratch(value);
-            do_not_optimize(sv);
-        }
-        const auto end = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-        res.etf_ser_ns = static_cast<double>(elapsed) / static_cast<double>(iterations);
-        const double total_mb = (static_cast<double>(res.etf_size) * static_cast<double>(iterations)) / (1024.0 * 1024.0);
-        const double elapsed_s = static_cast<double>(elapsed) / 1e9;
-        res.etf_ser_mb_s = total_mb / elapsed_s;
-    }
+    res.etf_ser_ns = measure_median_latency([&]() {
+        auto sv = discusy::etf::write_scratch(value);
+        do_not_optimize(sv);
+    }, iterations);
+    res.etf_ser_mb_s = (static_cast<double>(res.etf_size) / res.etf_ser_ns) * (1e9 / (1024.0 * 1024.0));
 
     // 3. JSON Deserialization Benchmark
     {
         T target{};
-        for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
+        res.json_deser_ns = measure_median_latency([&]() {
             (void)glz::read_json(target, json_buffer);
             do_not_optimize(target);
-        }
-        const auto start = std::chrono::steady_clock::now();
-        for (size_t i = 0; i < iterations; ++i) {
-            (void)glz::read_json(target, json_buffer);
-            do_not_optimize(target);
-        }
-        const auto end = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-        res.json_deser_ns = static_cast<double>(elapsed) / static_cast<double>(iterations);
-        const double total_mb = (static_cast<double>(res.json_size) * static_cast<double>(iterations)) / (1024.0 * 1024.0);
-        const double elapsed_s = static_cast<double>(elapsed) / 1e9;
-        res.json_deser_mb_s = total_mb / elapsed_s;
+        }, iterations);
+        res.json_deser_mb_s = (static_cast<double>(res.json_size) / res.json_deser_ns) * (1e9 / (1024.0 * 1024.0));
     }
 
     // 4. ETF Deserialization Benchmark
     {
         T target{};
-        for (size_t i = 0; i < (iterations / 10) + 5; ++i) {
+        res.etf_deser_ns = measure_median_latency([&]() {
             (void)glz::read_etf(target, etf_buffer);
             do_not_optimize(target);
-        }
-        const auto start = std::chrono::steady_clock::now();
-        for (size_t i = 0; i < iterations; ++i) {
-            (void)glz::read_etf(target, etf_buffer);
-            do_not_optimize(target);
-        }
-        const auto end = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-        res.etf_deser_ns = static_cast<double>(elapsed) / static_cast<double>(iterations);
-        const double total_mb = (static_cast<double>(res.etf_size) * static_cast<double>(iterations)) / (1024.0 * 1024.0);
-        const double elapsed_s = static_cast<double>(elapsed) / 1e9;
-        res.etf_deser_mb_s = total_mb / elapsed_s;
+        }, iterations);
+        res.etf_deser_mb_s = (static_cast<double>(res.etf_size) / res.etf_deser_ns) * (1e9 / (1024.0 * 1024.0));
     }
 
     return res;
@@ -351,18 +343,20 @@ void print_table_row(const BenchResult& r) {
 using namespace bench_helpers;
 
 int main() {
+    stabilize_environment();
+
     std::cout << R"(
              JSON vs ETF Performance Benchmark (All Payload Sizes)
 
  Hardware & Architecture: )" << sizeof(void*) * 8 << "-bit, "
               << (std::endian::native == std::endian::little ? "Little-Endian" : "Big-Endian")
-              << "\n Running benchmark iterations using native discusy library types...\n";
+              << "\n Running median of 5 samples per operation (Thread: Core 0, Priority: High)...\n";
 
     // 1. Small Tier
     std::cout << "\n[1/4] Benchmarking Small Payloads (Heartbeat & Presence)..." << std::flush;
     discusy::recieve_event::payload<discusy::recieve_event::hello> hb{};
     hb.d.heartbeat_interval = 41250;
-    auto res_hb = benchmark_payload("Small: Gateway Hello / Heartbeat", hb, 50000);
+    auto res_hb = benchmark_payload("Small: Gateway Hello / Heartbeat", hb, 200000);
     print_table_row(res_hb);
 
     discusy::send_event::update_presence presence{};
@@ -372,13 +366,13 @@ int main() {
     act.name = "Playing discusy";
     act.type = discusy::recieve_event::presence::activity_type::playing;
     presence.activities.emplace_back(std::move(act));
-    auto res_pres = benchmark_payload("Small: Presence Update", presence, 30000);
+    auto res_pres = benchmark_payload("Small: Presence Update", presence, 100000);
     print_table_row(res_pres);
 
     // 2. Medium Tier
     std::cout << "\n[2/4] Benchmarking Medium Payloads (Message Create with Mentions & Embeds)..." << std::flush;
     auto msg = make_medium_payload();
-    auto res_msg = benchmark_payload("Medium: Message Create", msg, 10000);
+    auto res_msg = benchmark_payload("Medium: Message Create", msg, 20000);
     print_table_row(res_msg);
 
     // 3. Large Tier
@@ -390,7 +384,7 @@ int main() {
     // 4. Extra-Large Tier
     std::cout << "\n[4/4] Benchmarking Extra-Large Payloads (Guild Create: 800 Members, 60 Channels, 40 Roles)..." << std::flush;
     auto xl = make_xl_payload();
-    auto res_xl = benchmark_payload("Extra-Large: Full Guild Create", xl, 400);
+    auto res_xl = benchmark_payload("Extra-Large: Full Guild Create", xl, 1000);
     print_table_row(res_xl);
 
     std::cout << "\nBenchmark complete!\n";
