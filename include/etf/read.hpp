@@ -39,7 +39,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint8_t etf_version = static_cast<uint8_t>(*it++);
+            const auto etf_version = static_cast<uint8_t>(*it++);
             if (etf_version != etf::magic_version) [[unlikely]] {
                ctx.error = error_code::version_mismatch;
                return;
@@ -221,7 +221,7 @@ namespace glz
             ctx.error = error_code::unexpected_end;
             return;
          }
-         const uint8_t tag = static_cast<uint8_t>(*it);
+         const auto tag = static_cast<uint8_t>(*it);
          if (tag == etf::tag::SMALL_INTEGER_EXT || tag == etf::tag::INTEGER_EXT ||
              tag == etf::tag::SMALL_BIG_EXT || tag == etf::tag::LARGE_BIG_EXT) {
             using underlying = std::underlying_type_t<std::decay_t<T>>;
@@ -333,7 +333,7 @@ namespace glz
          depth_guard guard{ctx};
          if (!guard) [[unlikely]] return;
 
-         const uint8_t tag = static_cast<uint8_t>(*it++);
+         const auto tag = static_cast<uint8_t>(*it++);
          if (tag == etf::tag::NIL_EXT) {
             if constexpr (growable) {
                value.clear();
@@ -374,7 +374,7 @@ namespace glz
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else if constexpr (emplace_backable<T>) {
@@ -386,8 +386,9 @@ namespace glz
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                   value.emplace_back(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else if constexpr (set_like) {
@@ -399,8 +400,9 @@ namespace glz
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                   value.emplace(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else {
@@ -413,11 +415,11 @@ namespace glz
                const size_t parse_len = (len < value.size()) ? len : value.size();
                for (size_t i = 0; i < parse_len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
                for (size_t i = parse_len; i < len; ++i) {
                   skip_value<EETF>::op<Opts>(ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                }
             }
 
@@ -667,7 +669,7 @@ namespace glz
                value.resize(len);
                for (size_t i = 0; i < len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else if constexpr (emplace_backable<T>) {
@@ -679,8 +681,9 @@ namespace glz
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                   value.emplace_back(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else if constexpr (set_like) {
@@ -692,8 +695,9 @@ namespace glz
                for (size_t i = 0; i < len; ++i) {
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                   value.emplace(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
             }
             else {
@@ -706,11 +710,11 @@ namespace glz
                const size_t parse_len = (len < value.size()) ? len : value.size();
                for (size_t i = 0; i < parse_len; ++i) {
                   parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (bool(ctx.error)) [[unlikely]] return;
                }
                for (size_t i = parse_len; i < len; ++i) {
                   skip_value<EETF>::op<Opts>(ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                }
             }
             return;
@@ -763,20 +767,20 @@ namespace glz
 
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
-               if (static_cast<bool>(ctx.error)) return;
+               if (bool(ctx.error)) return;
                parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
-               if (static_cast<bool>(ctx.error)) return;
+               if (bool(ctx.error)) return;
                parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
             });
          }
-         if (static_cast<bool>(ctx.error)) return;
+         if (bool(ctx.error)) return;
          for (uint32_t i = N; i < arity; ++i) {
             skip_value<EETF>::op<Opts>(ctx, it, end);
-            if (static_cast<bool>(ctx.error)) return;
+            if (parse_failed(ctx.error)) return;
          }
          if (tag == etf::tag::LIST_EXT) {
             skip_value<EETF>::op<Opts>(ctx, it, end); // tail term
@@ -840,9 +844,9 @@ namespace glz
          for (uint32_t i = 0; i < arity; ++i) {
             Key key{};
             parse<EETF>::op<Opts>(key, ctx, it, end);
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             parse<EETF>::op<Opts>(value[std::move(key)], ctx, it, end);
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (bool(ctx.error)) [[unlikely]] return;
          }
       }
    };
@@ -934,7 +938,7 @@ namespace glz
                            }
                            else {
                               skip_value<EETF>::op<Opts>(ctx, it, end);
-                              if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                              if (parse_failed(ctx.error)) [[unlikely]] {
                                  return;
                               }
                            }
@@ -942,7 +946,7 @@ namespace glz
                      },
                      index);
 
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                  if (bool(ctx.error)) [[unlikely]] {
                      return;
                   }
 
@@ -960,7 +964,7 @@ namespace glz
                   }
                   else {
                      skip_value<EETF>::op<Opts>(ctx, it, end);
-                     if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                     if (parse_failed(ctx.error)) [[unlikely]] {
                         return;
                      }
                   }
@@ -973,7 +977,7 @@ namespace glz
                }
                else {
                   skip_value<EETF>::op<Opts>(ctx, it, end);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                  if (parse_failed(ctx.error)) [[unlikely]] {
                      return;
                   }
                }
@@ -1063,7 +1067,7 @@ namespace glz
                   using V = std::variant_alternative_t<target_idx, T>;
                   V v{};
                   parse<EETF>::template op<Opts>(v, ctx, it, end);
-                  if (!static_cast<bool>(ctx.error)) {
+                  if (!parse_failed(ctx.error)) {
                      value.template emplace<target_idx>(std::move(v));
                      return;
                   }
@@ -1128,7 +1132,7 @@ namespace glz
                            if constexpr (std::integral<id_type>) {
                               id_type id{};
                               parse<EETF>::template op<Opts>(id, ctx, scan, end);
-                              if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                              if (parse_failed(ctx.error)) [[unlikely]] {
                                  return;
                               }
                               tag_index = variant_id_to_index<T>::op(id);
@@ -1169,7 +1173,7 @@ namespace glz
                      }
 
                      skip_value<EETF>::op<Opts>(ctx, scan, end);
-                     if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                     if (parse_failed(ctx.error)) [[unlikely]] {
                         return;
                      }
                   }
@@ -1234,7 +1238,7 @@ namespace glz
                            using V = std::variant_alternative_t<I, T>;
                            V v{};
                            parse<EETF>::template op<Opts>(v, ctx, it, end);
-                           if (!static_cast<bool>(ctx.error)) {
+                           if (!parse_failed(ctx.error)) {
                               value.template emplace<I>(std::move(v));
                               deduced_matched = true;
                            }
@@ -1256,7 +1260,7 @@ namespace glz
                         using V = std::variant_alternative_t<I, T>;
                         V v{};
                         parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!static_cast<bool>(ctx.error)) {
+                        if (!parse_failed(ctx.error)) {
                            value.template emplace<I>(std::move(v));
                            matched = true;
                         }
@@ -1286,7 +1290,7 @@ namespace glz
                ctx.custom_error_message = {};
                V v{};
                parse<EETF>::template op<Opts>(v, ctx, it, end);
-               if (!static_cast<bool>(ctx.error)) {
+               if (!parse_failed(ctx.error)) {
                   value.template emplace<I>(std::move(v));
                   matched = true;
                }
@@ -1305,7 +1309,7 @@ namespace glz
                   ctx.custom_error_message = {};
                   V v{};
                   parse<EETF>::template op<Opts>(v, ctx, it, end);
-                  if (!static_cast<bool>(ctx.error)) {
+                  if (!parse_failed(ctx.error)) {
                      value.template emplace<I>(std::move(v));
                      matched = true;
                   }
@@ -1397,7 +1401,7 @@ namespace glz
          case etf::tag::STRING_EXT: {
             std::string s;
             from<EETF, std::string>::template op<Opts>(s, ctx, it, end);
-            if (static_cast<bool>(ctx.error)) return;
+            if (parse_failed(ctx.error)) return;
             value.data = std::move(s);
             break;
          }
@@ -1411,14 +1415,14 @@ namespace glz
          case etf::tag::LARGE_TUPLE_EXT: {
             typename generic_json<Mode, MapType>::array_t arr;
             from<EETF, decltype(arr)>::template op<Opts>(arr, ctx, it, end);
-            if (static_cast<bool>(ctx.error)) return;
+            if (parse_failed(ctx.error)) return;
             value.data = std::move(arr);
             break;
          }
          case etf::tag::MAP_EXT: {
             typename generic_json<Mode, MapType>::object_t obj;
             from<EETF, decltype(obj)>::template op<Opts>(obj, ctx, it, end);
-            if (static_cast<bool>(ctx.error)) return;
+            if (parse_failed(ctx.error)) return;
             value.data = std::move(obj);
             break;
          }
@@ -1445,7 +1449,7 @@ namespace glz
                if (str.size() == 10) {
                   std::chrono::year_month_day ymd{};
                   chrono_detail::parse_ymd(str, ymd, ctx.error);
-                  if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
                   value = std::chrono::time_point_cast<Duration>(std::chrono::sys_days{ymd});
                   return;
                }
@@ -1499,7 +1503,7 @@ namespace glz
       {
          auto it_start = it;
          skip_value<EETF>::op<Opts>(ctx, it, end);
-         if (static_cast<bool>(ctx.error)) [[unlikely]] {
+         if (parse_failed(ctx.error)) [[unlikely]] {
             return;
          }
          value.str = T{std::to_address(it_start), static_cast<size_t>(it - it_start)};
@@ -1514,7 +1518,7 @@ namespace glz
       {
          auto it_start = it;
          skip_value<EETF>::op<Opts>(ctx, it, end);
-         if (static_cast<bool>(ctx.error)) [[unlikely]] {
+         if (parse_failed(ctx.error)) [[unlikely]] {
             return;
          }
          value.str = T{std::to_address(it_start), static_cast<size_t>(it - it_start)};
@@ -1522,15 +1526,15 @@ namespace glz
    };
 
    // Top-level read helper functions for ETF
-   template <read_supported<EETF> T, class Buffer>
+   template <auto Opts = etf_opts, read_supported<EETF> T, class Buffer>
    [[nodiscard]] inline error_ctx read_etf(T& value, Buffer&& buffer)
    {
-      return read<etf_opts>(value, std::forward<Buffer>(buffer));
+      return read<Opts>(value, std::forward<Buffer>(buffer));
    }
 
-   template <read_supported<EETF> T, class Buffer>
+   template <auto Opts = etf_opts, read_supported<EETF> T, class Buffer>
    [[nodiscard]] inline error_ctx read_etf(T& value, Buffer&& buffer, is_context auto&& ctx)
    {
-      return read<etf_opts>(value, std::forward<Buffer>(buffer), ctx);
+      return read<Opts>(value, std::forward<Buffer>(buffer), ctx);
    }
 } // namespace glz

@@ -269,7 +269,7 @@ namespace glz
          }
          case etf::tag::PORT_EXT: {
             op<Opts>(ctx, it, end); // node
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             if (end - it < 5) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -279,7 +279,7 @@ namespace glz
          }
          case etf::tag::NEW_PORT_EXT: {
             op<Opts>(ctx, it, end); // node
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             if (end - it < 8) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -289,7 +289,7 @@ namespace glz
          }
          case etf::tag::V4_PORT_EXT: {
             op<Opts>(ctx, it, end); // node
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             if (end - it < 12) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -299,7 +299,7 @@ namespace glz
          }
          case etf::tag::PID_EXT: {
             op<Opts>(ctx, it, end); // node
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             if (end - it < 9) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -309,7 +309,7 @@ namespace glz
          }
          case etf::tag::NEW_PID_EXT: {
             op<Opts>(ctx, it, end); // node
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             if (end - it < 12) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -319,9 +319,9 @@ namespace glz
          }
          case etf::tag::EXPORT_EXT: {
             op<Opts>(ctx, it, end); // Module
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             op<Opts>(ctx, it, end); // Function
-            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (parse_failed(ctx.error)) [[unlikely]] return;
             op<Opts>(ctx, it, end); // Arity
             break;
          }

@@ -1551,6 +1551,64 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::no_matching_variant_type);
     }
+
+    SECTION("Variant alternative matched under partial_read") {
+        using Var = std::variant<int, test_etf_types::SubsetStruct>;
+
+        test_etf_types::FullPayload full{};
+        std::string encoded_full;
+        REQUIRE_FALSE(glz::write_etf(full, encoded_full));
+
+        Var dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, encoded_full);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        REQUIRE(std::holds_alternative<test_etf_types::SubsetStruct>(dec));
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec).name == "test_name");
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec).count == 42);
+    }
+
+    SECTION("Vector of structs with unknown keys decoded under read_etf") {
+        std::vector<test_etf_types::FullPayload> list{
+            test_etf_types::FullPayload{},
+            test_etf_types::FullPayload{},
+        };
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(list, enc));
+
+        std::vector<test_etf_types::SubsetStruct> dec{};
+        auto ec = glz::read_etf(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        REQUIRE(dec.size() == 2);
+        CHECK(dec[0].name == "test_name");
+        CHECK(dec[1].name == "test_name");
+    }
+
+    SECTION("Vector of structs under partial_read short-circuits after first element") {
+        std::vector<test_etf_types::FullPayload> list{
+            test_etf_types::FullPayload{},
+            test_etf_types::FullPayload{},
+        };
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(list, enc));
+
+        std::vector<test_etf_types::SubsetStruct> dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        REQUIRE(dec.size() == 2);
+        CHECK(dec[0].name == "test_name");
+        CHECK(dec[1].name == "");
+    }
+
+    SECTION("Partial read does not leak partial_read_complete as an error") {
+        test_etf_types::FullPayload full{};
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(full, enc));
+
+        test_etf_types::SubsetStruct sub{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(sub, enc);
+        CHECK(ec.ec == glz::error_code::none);
+        CHECK_FALSE(static_cast<bool>(ec));
+    }
 }
 
 TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway][interaction]") {
