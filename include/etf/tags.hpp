@@ -548,7 +548,7 @@ namespace glz::etf
                return true;
             }
             const size_t sig_digits = sz - start;
-            if (sig_digits <= 18) [[likely]] {
+            if (sig_digits <= 19) [[likely]] {
                uint64_t val = 0;
                for (size_t i = start; i < sz; ++i) {
                   const uint8_t c = static_cast<uint8_t>(sv[i]) - static_cast<uint8_t>('0');
