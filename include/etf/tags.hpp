@@ -98,12 +98,6 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void ensure_space(B& b, size_t needed)
       {
          if (needed > b.size()) [[unlikely]] {
-            if constexpr (requires { b.capacity(); }) {
-               if (b.capacity() >= needed) {
-                  glz::resize_unfilled(b, b.capacity());
-                  return;
-               }
-            }
             glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
          }
       }
@@ -134,6 +128,15 @@ namespace glz::etf
          if (!glz::ensure_space(ctx, b, ix + 1 + write_padding_bytes)) [[unlikely]] return false;
          dump_byte_unchecked(byte, b, ix);
          return true;
+      }
+
+      template <size_t Count, typename B, typename IX>
+      GLZ_ALWAYS_INLINE void dump_bytes_unchecked(const void* data, B& b, IX& ix) noexcept
+      {
+         if constexpr (Count > 0) {
+            std::memcpy(&b[ix], data, Count);
+            ix += Count;
+         }
       }
 
       template <typename B, typename IX>

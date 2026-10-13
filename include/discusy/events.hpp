@@ -6028,6 +6028,13 @@ struct glz::to<glz::EETF, discusy::components::name> { \
             ctx, b, ix \
         ); \
     } \
+    template <auto Opts> \
+    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept { \
+        glz::to<glz::EETF, discusy::components::name::variant_base>::template no_header<Opts>( \
+            static_cast<const discusy::components::name::variant_base&>(wrapper), \
+            ctx, b, ix \
+        ); \
+    } \
 };
 
 GEN_COMPONENT_ETF(action_row_component, ACTION_ROW_COMPONENTS)
@@ -6164,6 +6171,13 @@ struct glz::to<glz::EETF, discusy::interaction::component_interaction_response> 
     template <auto Opts>
     static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept {
         glz::to<glz::EETF, discusy::interaction::component_interaction_response::variant_base>::template op<Opts>(
+            static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
+            ctx, b, ix
+        );
+    }
+    template <auto Opts>
+    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept {
+        glz::to<glz::EETF, discusy::interaction::component_interaction_response::variant_base>::template no_header<Opts>(
             static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
             ctx, b, ix
         );

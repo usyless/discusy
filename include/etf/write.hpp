@@ -15,6 +15,7 @@
 #include <glaze/core/reflect.hpp>
 #include <glaze/core/to.hpp>
 #include <glaze/core/chrono.hpp>
+#include <glaze/core/custom.hpp>
 #include <glaze/core/write_chars.hpp>
 #include <glaze/core/wrappers.hpp>
 #include <glaze/util/for_each.hpp>
@@ -83,7 +84,7 @@ namespace glz
             return 5; // \x77\x03nil
          }
          else if constexpr (boolean_like<V>) {
-            return 6; // \x77\x04true
+            return 7; // \x77\x05false (or 6 for true)
          }
          else if constexpr (num_t<V>) {
             if constexpr (std::floating_point<V>) {
@@ -139,6 +140,127 @@ namespace glz
       }
 
       template <class T>
+      constexpr size_t max_scalar_etf_val_size()
+      {
+         using V = std::decay_t<T>;
+         if constexpr (std::is_void_v<V>) {
+            return 0;
+         }
+         else if constexpr (std::same_as<V, std::nullptr_t> || always_null_t<V>) {
+            return 5; // \x77\x03nil
+         }
+         else if constexpr (boolean_like<V>) {
+            return 7; // \x77\x05false (or 6 for true)
+         }
+         else if constexpr (num_t<V>) {
+            if constexpr (std::floating_point<V>) {
+               return 9; // NEW_FLOAT_EXT + 8 bytes
+            }
+            else if constexpr (sizeof(V) <= 1) {
+               return 2; // SMALL_INTEGER_EXT + 1 byte
+            }
+            else if constexpr (sizeof(V) <= 4) {
+               return 5; // INTEGER_EXT + 4 bytes
+            }
+            else {
+               return 11; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 8 = 11 bytes
+            }
+         }
+         else if constexpr (std::is_enum_v<V> && !glaze_enum_t<V> && !meta_keys<V>) {
+            using U = std::underlying_type_t<V>;
+            return max_scalar_etf_val_size<U>();
+         }
+         else if constexpr (is_opts_wrapper<V>) {
+            return max_scalar_etf_val_size<typename V::value_type>();
+         }
+         else if constexpr (glaze_value_t<V>) {
+            using M = std::decay_t<decltype(get_member(std::declval<V>(), meta_wrapper_v<V>))>;
+            return max_scalar_etf_val_size<M>();
+         }
+         else if constexpr (nullable_like<V>) {
+            using inner_t = std::decay_t<decltype(*std::declval<V>())>;
+            constexpr size_t inner_max = max_scalar_etf_val_size<inner_t>();
+            if constexpr (inner_max > 0) {
+               return (std::max)(size_t{5}, inner_max);
+            }
+            else {
+               return 0;
+            }
+         }
+         else if constexpr (nullable_value_t<V>) {
+            using inner_t = std::decay_t<decltype(std::declval<V>().value())>;
+            constexpr size_t inner_max = max_scalar_etf_val_size<inner_t>();
+            if constexpr (inner_max > 0) {
+               return (std::max)(size_t{5}, inner_max);
+            }
+            else {
+               return 0;
+            }
+         }
+         else {
+            return 0;
+         }
+      }
+
+      template <class T>
+      inline constexpr size_t fixed_etf_padding = [] {
+         using V = std::decay_t<T>;
+         if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
+            constexpr auto N = reflect<V>::size;
+            if constexpr (N == 0) {
+               return size_t{5}; // MAP_EXT + 0 arity
+            }
+            else {
+               size_t fixed = 5;
+               bool all_bounded = true;
+               for_each_short_circuit<N>([&]<auto I>() -> bool {
+                  if constexpr (skipped_by_meta<V, I, operation::serialize>) {
+                     return false; // skip
+                  }
+                  else {
+                     using field_val_t = std::decay_t<field_t<V, I>>;
+                     if constexpr (never_written<etf_opts{}, field_val_t>) {
+                        return false; // skip
+                     }
+                     else {
+                        constexpr auto key = glz::get<I>(reflect<V>::keys);
+                        constexpr size_t val_max = max_scalar_etf_val_size<field_val_t>();
+                        if constexpr (val_max > 0) {
+                           fixed += 5 + key.size() + val_max;
+                           return false; // continue
+                        }
+                        else {
+                           all_bounded = false;
+                           return true; // abort
+                        }
+                     }
+                  }
+               });
+               return all_bounded ? fixed : size_t{0};
+            }
+         }
+         else {
+            return size_t{0};
+         }
+      }();
+
+      template <class T>
+      constexpr size_t max_etf_val_size()
+      {
+         using V = std::decay_t<T>;
+         constexpr size_t scalar_max = max_scalar_etf_val_size<V>();
+         if constexpr (scalar_max > 0) {
+            return scalar_max;
+         }
+         else if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
+            return fixed_etf_padding<V>;
+         }
+         else {
+            return 0;
+         }
+      }
+
+      template <class T>
       inline constexpr size_t min_etf_size = [] {
          using V = std::decay_t<T>;
          if constexpr (std::is_void_v<V>) {
@@ -151,6 +273,26 @@ namespace glz
             return 1 + (std::max)(val_sz, obj_sz); // 1 for ETF magic_version
          }
       }();
+
+      template <class Derived, class T>
+      struct to_etf_base // NOLINT(bugprone-crtp-constructor-accessibility)
+      {
+         template <auto Opts>
+         GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+         {
+            if constexpr (!check_no_header(Opts)) {
+               constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+               etf::detail::ensure_space(b, ix + prealloc);
+               etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
+               Derived::template no_header<no_header_on<Opts>()>(
+                  std::forward<decltype(value)>(value), ctx, b, ix);
+            }
+            else {
+               Derived::template no_header<Opts>(
+                  std::forward<decltype(value)>(value), ctx, b, ix);
+            }
+         }
+      };
    } // namespace etf::detail
 
    template <>
@@ -159,67 +301,66 @@ namespace glz
       template <auto Opts, class T, is_context Ctx, class B, class IX>
       GLZ_ALWAYS_INLINE static void op(T&& value, Ctx&& ctx, B&& b, IX&& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            to<EETF, std::remove_cvref_t<T>>::template op<no_header_on<Opts>()>(
-               std::forward<T>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
-         }
-         else {
-            to<EETF, std::remove_cvref_t<T>>::template op<Opts>(
-               std::forward<T>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
-         }
+         to<EETF, std::remove_cvref_t<T>>::template op<Opts>(
+            std::forward<T>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
+      }
+
+      template <auto Opts, class T, is_context Ctx, class B, class IX>
+      GLZ_ALWAYS_INLINE static void no_header(T&& value, Ctx&& ctx, B&& b, IX&& ix)
+      {
+         to<EETF, std::remove_cvref_t<T>>::template no_header<Opts>(
+            std::forward<T>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
       }
    };
 
    // Null (atom nil)
    template <always_null_t T>
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&&, is_context auto&, auto& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = 1 + 5;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(value, ctx, b, ix);
-            return;
+         if constexpr (check_write_unchecked(Opts)) {
+            etf::detail::dump_bytes_unchecked<5>("\x77\x03" "nil", b, ix);
          }
-         etf::detail::dump_bytes("\x77\x03" "nil", 5, b, ix);
+         else {
+            etf::detail::dump_bytes("\x77\x03" "nil", 5, b, ix);
+         }
       }
    };
 
    // Skip type (no-op)
    template <>
-   struct to<EETF, skip> final
+   struct to<EETF, skip> final : etf::detail::to_etf_base<to<EETF, skip>, skip>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&&, is_context auto&&, auto&&, auto&&) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&&, is_context auto&&, auto&&, auto&&) noexcept
       {}
    };
 
    // Booleans (atom true / false)
    template <boolean_like T>
       requires(!custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(const bool value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(const bool value, is_context auto&, auto& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = 1 + 7;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(value, ctx, b, ix);
-            return;
-         }
-         if (value) {
-            etf::detail::dump_bytes("\x77\x04" "true", 6, b, ix);
+         if constexpr (check_write_unchecked(Opts)) {
+            if (value) {
+               etf::detail::dump_bytes_unchecked<6>("\x77\x04" "true", b, ix);
+            }
+            else {
+               etf::detail::dump_bytes_unchecked<7>("\x77\x05" "false", b, ix);
+            }
          }
          else {
-            etf::detail::dump_bytes("\x77\x05" "false", 7, b, ix);
+            if (value) {
+               etf::detail::dump_bytes("\x77\x04" "true", 6, b, ix);
+            }
+            else {
+               etf::detail::dump_bytes("\x77\x05" "false", 7, b, ix);
+            }
          }
       }
    };
@@ -227,20 +368,15 @@ namespace glz
    // Numbers (integers, floats, bignums, and quoted-numbers)
    template <num_t T>
       requires(!custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = 1 + 11;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
-            return;
-         }
          if constexpr (check_quoted_num(Opts)) {
-            etf::detail::ensure_space(b, ix + 5 + 64);
+            if constexpr (!check_write_unchecked(Opts)) {
+               etf::detail::ensure_space(b, ix + 5 + 64);
+            }
             const auto start_ix = ix;
             ix += 5;
             glz::write_chars::op<write_unchecked_on<opt_false<Opts, quoted_num_opt_tag{}>>()>(value, ctx, b, ix);
@@ -253,20 +389,37 @@ namespace glz
             const auto d = static_cast<double>(value);
             uint64_t bits = 0;
             std::memcpy(&bits, &d, sizeof(double));
-            etf::detail::dump_tag_be<uint64_t>(etf::tag::NEW_FLOAT_EXT, bits, b, ix);
+            if constexpr (check_write_unchecked(Opts)) {
+               etf::detail::dump_tag_be_unchecked<uint64_t>(etf::tag::NEW_FLOAT_EXT, bits, b, ix);
+            }
+            else {
+               etf::detail::dump_tag_be<uint64_t>(etf::tag::NEW_FLOAT_EXT, bits, b, ix);
+            }
          }
          else if constexpr (std::integral<std::decay_t<T>>) {
             using U = std::decay_t<T>;
             if constexpr (std::is_unsigned_v<U>) {
                if (value <= 255) {
-                  etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  if constexpr (check_write_unchecked(Opts)) {
+                     etf::detail::dump_tag_be_unchecked<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  }
+                  else {
+                     etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  }
                }
                else if (value <= 2147483647ULL) {
-                  etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  if constexpr (check_write_unchecked(Opts)) {
+                     etf::detail::dump_tag_be_unchecked<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  }
+                  else {
+                     etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  }
                }
                else {
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (8 bytes, little-endian digits)
-                  etf::detail::ensure_space(b, ix + 11);
+                  if constexpr (!check_write_unchecked(Opts)) {
+                     etf::detail::ensure_space(b, ix + 11);
+                  }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
                   b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
@@ -280,14 +433,26 @@ namespace glz
             }
             else { // signed integer
                if (value >= 0 && value <= 255) {
-                  etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  if constexpr (check_write_unchecked(Opts)) {
+                     etf::detail::dump_tag_be_unchecked<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  }
+                  else {
+                     etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                  }
                }
                else if (value >= -2147483648LL && value <= 2147483647LL) {
-                  etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  if constexpr (check_write_unchecked(Opts)) {
+                     etf::detail::dump_tag_be_unchecked<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  }
+                  else {
+                     etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                  }
                }
                else {
                   // 64-bit signed integer -> SMALL_BIG_EXT
-                  etf::detail::ensure_space(b, ix + 11);
+                  if constexpr (!check_write_unchecked(Opts)) {
+                     etf::detail::ensure_space(b, ix + 11);
+                  }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
                   if (value < 0) {
@@ -316,18 +481,11 @@ namespace glz
    // Strings (BINARY_EXT)
    template <str_t T>
       requires(!custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&, auto& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
-            return;
-         }
          const auto sv = str_view<T>(value);
          const auto len = static_cast<uint32_t>(sv.size());
          etf::detail::dump_binary(sv.data(), len, b, ix);
@@ -337,18 +495,11 @@ namespace glz
    // Byte sequences (BINARY_EXT)
    template <class T>
       requires(contiguous_byte_range<std::remove_cvref_t<T>> && !str_t<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&, auto& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), ctx, b, ix);
-            return;
-         }
          const auto len = static_cast<uint32_t>(value.size());
          etf::detail::dump_binary(value.data(), len, b, ix);
       }
@@ -357,49 +508,35 @@ namespace glz
    // Enums (reflected names as BINARY_EXT or underlying numbers)
    template <class T>
       requires(std::is_enum_v<T> && !custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          if constexpr (glaze_enum_t<T> || (meta_keys<T> && std::is_enum_v<std::decay_t<T>>)) {
             const std::string_view str = get_enum_name(value);
             if (!str.empty()) {
-               to<EETF, std::string_view>::template op<Opts>(str, ctx, b, ix);
+               to<EETF, std::string_view>::template no_header<Opts>(str, ctx, b, ix);
                return;
             }
          }
          using V = std::underlying_type_t<std::decay_t<T>>;
-         to<EETF, V>::template op<Opts>(static_cast<V>(value), ctx, b, ix);
+         to<EETF, V>::template no_header<Opts>(static_cast<V>(value), ctx, b, ix);
       }
    };
 
    // Nullable types (std::optional, std::unique_ptr, std::shared_ptr)
    template <nullable_like T>
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          if (value) {
-            serialize<EETF>::op<Opts>(*value, ctx, b, ix);
+            to<EETF, std::decay_t<decltype(*value)>>::template no_header<Opts>(*value, ctx, b, ix);
          }
          else {
-            to<EETF, std::nullptr_t>::template op<Opts>(nullptr, ctx, b, ix);
+            to<EETF, std::nullptr_t>::template no_header<Opts>(nullptr, ctx, b, ix);
          }
       }
    };
@@ -407,72 +544,79 @@ namespace glz
    // Arrays (std::vector, std::deque, std::span, etc.)
    template <readable_array_t T>
       requires(!contiguous_byte_range<std::remove_cvref_t<T>>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          const size_t sz = value.size();
          if (sz == 0) {
-            etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
+            if constexpr (check_write_unchecked(Opts)) {
+               etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
+            }
+            else {
+               etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
+            }
             return;
          }
 
          using item_t = std::decay_t<range_value_t<T>>;
-         constexpr size_t item_alloc = (std::max)(sizeof(item_t), etf::detail::min_etf_val_size<item_t>());
-         etf::detail::ensure_space(b, ix + 6 + (sz * item_alloc));
-
-         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
-         for (auto&& item : value) {
-            serialize<EETF>::op<Opts>(item, ctx, b, ix);
+         constexpr size_t max_item_sz = etf::detail::max_etf_val_size<item_t>();
+         if constexpr (max_item_sz > 0) {
+            etf::detail::ensure_space(b, ix + 6 + (sz * max_item_sz));
+            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
+            constexpr auto item_opts = write_unchecked_on<Opts>();
+            for (auto&& item : value) {
+               to<EETF, item_t>::template no_header<item_opts>(item, ctx, b, ix);
+            }
+            etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
          }
-         // Tail term is NIL_EXT
-         etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
+         else {
+            constexpr size_t item_alloc = (std::max)(sizeof(item_t), etf::detail::min_etf_val_size<item_t>());
+            etf::detail::ensure_space(b, ix + 6 + (sz * item_alloc));
+            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
+            for (auto&& item : value) {
+               to<EETF, item_t>::template no_header<Opts>(item, ctx, b, ix);
+            }
+            etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
+         }
       }
    };
 
    // Tuples
    template <class T>
       requires(tuple_t<T> || is_std_tuple<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          using V = std::decay_t<T>;
          static constexpr auto N = glz::tuple_size_v<V>;
          if constexpr (N <= 255) {
-            etf::detail::ensure_space(b, ix + 2);
+            if constexpr (!check_write_unchecked(Opts)) {
+               etf::detail::ensure_space(b, ix + 2);
+            }
             etf::detail::dump_byte_unchecked(etf::tag::SMALL_TUPLE_EXT, b, ix);
             etf::detail::dump_byte_unchecked(static_cast<uint8_t>(N), b, ix);
          }
          else {
-            etf::detail::ensure_space(b, ix + 5);
+            if constexpr (!check_write_unchecked(Opts)) {
+               etf::detail::ensure_space(b, ix + 5);
+            }
             etf::detail::dump_byte_unchecked(etf::tag::LARGE_TUPLE_EXT, b, ix);
             etf::detail::dump_be_unchecked<uint32_t>(static_cast<uint32_t>(N), b, ix);
          }
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
-               serialize<EETF>::op<Opts>(std::get<I>(value), ctx, b, ix);
+               using item_t = std::decay_t<std::tuple_element_t<I, V>>;
+               to<EETF, item_t>::template no_header<Opts>(std::get<I>(value), ctx, b, ix);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
-               serialize<EETF>::op<Opts>(glz::get<I>(value), ctx, b, ix);
+               using item_t = std::decay_t<glz::tuple_element_t<I, V>>;
+               to<EETF, item_t>::template no_header<Opts>(glz::get<I>(value), ctx, b, ix);
             });
          }
       }
@@ -481,23 +625,22 @@ namespace glz
    // Maps
    template <readable_map_t T>
       requires(!custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          const size_t sz = value.size();
          if (sz == 0) {
-            etf::detail::dump_tag_be<uint32_t>(etf::tag::MAP_EXT, 0, b, ix);
+            if constexpr (check_write_unchecked(Opts)) {
+               etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, 0, b, ix);
+            }
+            else {
+               etf::detail::dump_tag_be<uint32_t>(etf::tag::MAP_EXT, 0, b, ix);
+            }
             return;
          }
+
          using key_t = std::decay_t<typename std::decay_t<T>::key_type>;
          using mapped_t = std::decay_t<typename std::decay_t<T>::mapped_type>;
          constexpr size_t pair_alloc = (std::max)(sizeof(key_t), etf::detail::min_etf_val_size<key_t>()) +
@@ -506,116 +649,219 @@ namespace glz
 
          etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix);
          for (auto&& [k, v] : value) {
-            serialize<EETF>::op<Opts>(k, ctx, b, ix);
-            serialize<EETF>::op<Opts>(v, ctx, b, ix);
+            to<EETF, key_t>::template no_header<Opts>(k, ctx, b, ix);
+            to<EETF, mapped_t>::template no_header<Opts>(v, ctx, b, ix);
          }
       }
    };
 
    // Glaze objects & reflectable structs with STRING KEYS ONLY (BINARY_EXT)
-   // and single-pass arity back-patching.
    template <class T>
       requires((glaze_object_t<T> || reflectable<T>) && !custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
-      template <auto Opts>
-      static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      static constexpr auto N = reflect<T>::size;
+
+      template <auto Opts, size_t I>
+      static consteval bool should_skip_field()
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
+         return skipped_on_write<Opts, T, I>;
+      }
+
+      template <auto Opts>
+      static consteval size_t count_to_write()
+      {
+         return []<size_t... I>(std::index_sequence<I...>) {
+            return (size_t{} + ... + (should_skip_field<Opts, I>() ? size_t{} : size_t{1}));
+         }(std::make_index_sequence<N>{});
+      }
+
+      template <auto Opts>
+      static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      {
+         static constexpr size_t fixed_max_size = etf::detail::fixed_etf_padding<std::decay_t<T>>;
+         if constexpr (fixed_max_size > 0) {
+            if constexpr (!check_write_unchecked(Opts)) {
+               etf::detail::ensure_space(b, ix + fixed_max_size);
+            }
          }
-         static constexpr auto N = reflect<T>::size;
+         else {
+            constexpr size_t struct_min = etf::detail::min_etf_struct_size<std::decay_t<T>>();
+            etf::detail::ensure_space(b, ix + struct_min);
+         }
 
-         constexpr size_t struct_min = etf::detail::min_etf_struct_size<std::decay_t<T>>();
-         etf::detail::ensure_space(b, ix + struct_min);
-
-         const size_t count_pos = ix + 1;
-         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, 0, b, ix); // placeholder for arity
-
-         uint32_t pair_count = 0;
-
-         for_each<N>([&]<size_t I>() {
-            if constexpr (skipped_by_meta<T, I, operation::serialize>) {
-               return;
+         [[maybe_unused]] decltype(auto) t = [&]() -> decltype(auto) {
+            if constexpr (reflectable<T>) {
+               return to_tie(value);
             }
-
-            decltype(auto) member_val = [&]() -> decltype(auto) {
-               if constexpr (reflectable<T>) {
-                  return get_member(value, get<I>(to_tie(value)));
-               }
-               else {
-                  return get_member(value, get<I>(reflect<T>::values));
-               }
-            }();
-            using val_t = std::decay_t<decltype(member_val)>;
-
-            if constexpr (never_written<Opts, val_t>) {
-               return;
+            else {
+               return nullptr;
             }
+         }();
 
-            if constexpr (Opts.skip_null_members && nullable_like<val_t>) {
-               if (!member_val) {
+         if constexpr (maybe_skipped<Opts, T>) {
+            // Dynamic path: back-patching arity for runtime-skippable fields
+            const size_t count_pos = ix + 1;
+            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, 0, b, ix); // placeholder for arity
+
+            uint32_t pair_count = 0;
+
+            for_each<N>([&]<size_t I>() {
+               if constexpr (should_skip_field<Opts, I>()) {
                   return;
                }
-            }
 
-            // CRITICAL: Discord requires string keys (BINARY_EXT), never atoms!
-            static constexpr auto key = reflect<T>::keys[I];
-            static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
-            etf::detail::dump_bytes_unchecked(formatted_key.buf.data(), formatted_key.buf.size(), b, ix);
+               decltype(auto) member_val = [&]() -> decltype(auto) {
+                  if constexpr (reflectable<T>) {
+                     return get_member(value, get<I>(t));
+                  }
+                  else {
+                     return get_member(value, get<I>(reflect<T>::values));
+                  }
+               }();
+               using val_t = std::decay_t<decltype(member_val)>;
 
-            serialize<EETF>::op<Opts>(member_val, ctx, b, ix);
-            ++pair_count;
-         });
+               if constexpr (meta_has_skip_if<T>) {
+                  static constexpr auto skip_if_key = glz::get<I>(reflect<T>::keys);
+                  static constexpr meta_context mctx{.op = operation::serialize};
+                  if (meta<T>::skip_if(member_val, skip_if_key, mctx)) {
+                     return;
+                  }
+               }
 
-         // Back-patch the actual written pair count
-         etf::detail::write_be_at<uint32_t>(pair_count, b, count_pos);
+               if constexpr (Opts.skip_null_members) {
+                  if constexpr (always_null_t<val_t>) {
+                     return;
+                  }
+                  else if constexpr (null_t<val_t> || nullable_like<val_t>) {
+                     if constexpr (nullable_wrapper<val_t>) {
+                        if (!bool(member_val.val)) {
+                           return;
+                        }
+                     }
+                     else if constexpr (nullable_value_t<val_t>) {
+                        if (!member_val.has_value()) {
+                           return;
+                        }
+                     }
+                     else if constexpr (requires { bool(member_val); }) {
+                        if (!bool(member_val)) {
+                           return;
+                        }
+                     }
+                  }
+                  else if constexpr (is_specialization_v<val_t, custom_t> && custom_getter_returns_nullable<val_t>()) {
+                     if (is_custom_field_null<T, I>(value, t, ctx)) {
+                        return;
+                     }
+                  }
+                  else if constexpr (glaze_value_is_nullable<val_t>()) {
+                     if (is_glaze_value_field_null<T, I>(value, t)) {
+                        return;
+                     }
+                  }
+               }
+
+               static constexpr auto key = reflect<T>::keys[I];
+               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
+
+               if constexpr (not fixed_max_size) {
+                  etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+               }
+
+               static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+               etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+
+               if constexpr (val_max > 0) {
+                  to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+               }
+               else {
+                  to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+               }
+               ++pair_count;
+            });
+
+            // Back-patch the actual written pair count
+            etf::detail::write_be_at<uint32_t>(pair_count, b, count_pos);
+         }
+         else {
+            constexpr auto count = static_cast<uint32_t>(count_to_write<Opts>());
+            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, count, b, ix);
+
+            for_each<N>([&]<size_t I>() {
+               if constexpr (should_skip_field<Opts, I>()) {
+                  return;
+               }
+
+               decltype(auto) member_val = [&]() -> decltype(auto) {
+                  if constexpr (reflectable<T>) {
+                     return get_member(value, get<I>(t));
+                  }
+                  else {
+                     return get_member(value, get<I>(reflect<T>::values));
+                  }
+               }();
+               using val_t = std::decay_t<decltype(member_val)>;
+
+               static constexpr auto key = reflect<T>::keys[I];
+               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
+
+               if constexpr (not fixed_max_size) {
+                  etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+               }
+
+               static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+               etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+
+               if constexpr (val_max > 0) {
+                  to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+               }
+               else {
+                  to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+               }
+            });
+         }
+      }
+   };
+
+   // Custom serialization wrapper (glz::custom)
+   template <class T>
+      requires(is_specialization_v<T, custom_t>)
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
+   {
+      template <auto Opts>
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      {
+         detail::dispatch_custom_write<EETF, no_header_on<Opts>(), T>(value, ctx, b, ix);
       }
    };
 
    // Glaze value wrapper
    template <class T>
       requires(glaze_value_t<T> && !custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts, class Value, is_context Ctx, class B, class IX>
-      GLZ_ALWAYS_INLINE static void op(Value&& value, Ctx&& ctx, B&& b, IX&& ix)
+      GLZ_ALWAYS_INLINE static void no_header(Value&& value, Ctx&& ctx, B&& b, IX&& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<Value>(value), std::forward<Ctx>(ctx), std::forward<B>(b), ix);
-            return;
-         }
          using V = std::decay_t<decltype(get_member(std::declval<Value>(), meta_wrapper_v<T>))>;
-         to<EETF, V>::template op<Opts>(get_member(std::forward<Value>(value), meta_wrapper_v<T>),
-                                        std::forward<Ctx>(ctx), std::forward<B>(b), ix);
+         to<EETF, V>::template no_header<Opts>(get_member(std::forward<Value>(value), meta_wrapper_v<T>),
+                                               std::forward<Ctx>(ctx), std::forward<B>(b), ix);
       }
    };
 
    // Variants
    template <is_variant T>
       requires(not custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          glz::visit<std::variant_size_v<std::decay_t<T>>>(
             [&]<size_t I>() {
-               serialize<EETF>::op<Opts>(std::get<I>(value), ctx, b, ix);
+               using var_t = std::decay_t<std::variant_alternative_t<I, std::decay_t<T>>>;
+               to<EETF, var_t>::template no_header<Opts>(std::get<I>(value), ctx, b, ix);
             },
             value.index());
       }
@@ -624,20 +870,15 @@ namespace glz
    // Generic JSON wrapper
    template <num_mode Mode, template <class> class MapType>
    struct to<EETF, generic_json<Mode, MapType>> final
+      : etf::detail::to_etf_base<to<EETF, generic_json<Mode, MapType>>, generic_json<Mode, MapType>>
    {
       template <auto Opts>
-      static void op(const generic_json<Mode, MapType>& value, is_context auto& ctx, auto& b, auto& ix)
+      static void no_header(const generic_json<Mode, MapType>& value, is_context auto& ctx, auto& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<generic_json<Mode, MapType>>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(value, ctx, b, ix);
-            return;
-         }
          glz::visit<std::variant_size_v<decltype(value.data)>>(
             [&]<size_t I>() {
-               serialize<EETF>::op<Opts>(std::get<I>(value.data), ctx, b, ix);
+               using var_t = std::decay_t<std::variant_alternative_t<I, decltype(value.data)>>;
+               to<EETF, var_t>::template no_header<Opts>(std::get<I>(value.data), ctx, b, ix);
             },
             value.data.index());
       }
@@ -646,18 +887,11 @@ namespace glz
    // std::chrono::system_clock::time_point (discusy::timestamp): serialize as ISO 8601 string (BINARY_EXT)
    template <is_system_time_point T>
       requires(not custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
+      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(value, std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          using Period = std::remove_cvref_t<decltype(value)>::duration::period;
          constexpr auto max_ts_len = chrono_detail::iso_time_point_max_size<Period>;
          etf::detail::ensure_space(b, ix + 5 + max_ts_len);
@@ -675,18 +909,11 @@ namespace glz
    // std::chrono::year_month_day
    template <is_year_month_day T>
       requires(not custom_write<T>)
-   struct to<EETF, T> final
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void op(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
+      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(value, std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          etf::detail::ensure_space(b, ix + 5 + chrono_detail::iso_date_max_size);
          const auto start_ix = ix;
          ix += 5;
@@ -704,35 +931,21 @@ namespace glz
 
    // Raw JSON & Text wrappers
    template <class T>
-   struct to<EETF, basic_raw_json<T>> final
+   struct to<EETF, basic_raw_json<T>> final : etf::detail::to_etf_base<to<EETF, basic_raw_json<T>>, basic_raw_json<T>>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&&, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<basic_raw_json<T>>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          etf::detail::dump_bytes(value.str.data(), value.str.size(), b, ix);
       }
    };
 
    template <class T>
-   struct to<EETF, basic_text<T>> final
+   struct to<EETF, basic_text<T>> final : etf::detail::to_etf_base<to<EETF, basic_text<T>>, basic_text<T>>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&&, auto&& b, auto& ix)
       {
-         if constexpr (!check_no_header(Opts)) {
-            constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<basic_text<T>>>;
-            etf::detail::ensure_space(b, ix + prealloc);
-            etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-            op<no_header_on<Opts>()>(std::forward<decltype(value)>(value), std::forward<decltype(ctx)>(ctx), b, ix);
-            return;
-         }
          etf::detail::dump_bytes(value.str.data(), value.str.size(), b, ix);
       }
    };
