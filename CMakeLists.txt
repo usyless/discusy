@@ -99,7 +99,7 @@ set_tracked_cache_version(DISCUSY_MLSPP_VERSION "fc724c3100ce3b5d8565dbd6d93648a
 set_tracked_cache_version(DISCUSY_LIBDAVE_VERSION "v1.2.1/cpp" "Version (git tag/branch) to use for libdave")
 set_tracked_cache_version(DISCUSY_OPUS_VERSION "v1.6.1" "Version (git tag/branch) to use for opus")
 set_tracked_cache_version(DISCUSY_MIMALLOC_VERSION "v3.5.3" "Version (git tag/branch) to use for mimalloc")
-set_tracked_cache_version(DISCUSY_CATCH2_VERSION "v3.16.0" "Version (git tag/branch) to use for Catch2")
+set_tracked_cache_version(DISCUSY_CATCH2_VERSION "v3.16.1" "Version (git tag/branch) to use for Catch2")
 
 set(DISCUSY_EXTRA_BOOST_LIBS "" CACHE STRING "Additional Boost libraries to include")
 
