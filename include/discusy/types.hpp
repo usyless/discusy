@@ -286,7 +286,9 @@ struct snowflake_str {
     constexpr bool operator==(const snowflake_str& other) const noexcept {
         return view() == other.view();
     }
-    constexpr auto operator<=>(const snowflake_str& other) const noexcept = default;
+    constexpr auto operator<=>(const snowflake_str& other) const noexcept {
+        return view() <=> other.view();
+    }
 
     constexpr bool operator==(std::string_view sv) const noexcept {
         return view() == sv;
@@ -347,7 +349,9 @@ struct snowflake_mention_str {
     constexpr bool operator==(const snowflake_mention_str& other) const noexcept {
         return view() == other.view();
     }
-    constexpr auto operator<=>(const snowflake_mention_str& other) const noexcept = default;
+    constexpr auto operator<=>(const snowflake_mention_str& other) const noexcept {
+        return view() <=> other.view();
+    }
 
     constexpr bool operator==(std::string_view sv) const noexcept {
         return view() == sv;

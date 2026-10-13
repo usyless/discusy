@@ -90,4 +90,43 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(std::is_lt(sf_smaller <=> sf));
         CHECK(std::is_gt(sf <=> sf_smaller));
     }
+
+    SECTION("snowflake_str comparison semantics") {
+        constexpr auto str1 = sf.str();
+        constexpr auto str2 = sf2.str();
+        constexpr auto str_smaller_val = sf_smaller.str();
+
+        CHECK(str1 == str2);
+        CHECK_FALSE(str1 != str2);
+        CHECK(str1 <= str2);
+        CHECK(str1 >= str2);
+        CHECK_FALSE(str1 < str2);
+        CHECK_FALSE(str1 > str2);
+
+        CHECK(std::is_eq(str1 <=> str2));
+        CHECK(std::is_lt(str_smaller_val <=> str1));
+        CHECK(std::is_gt(str1 <=> str_smaller_val));
+        CHECK(str_smaller_val < str1);
+
+        static_assert(str1 == str2);
+        static_assert(std::is_eq(str1 <=> str2));
+        static_assert(std::is_lt(str_smaller_val <=> str1));
+
+        // Comparing snowflake_str constructed at runtime
+        discusy::snowflake_str rt1{raw_val};
+        discusy::snowflake_str rt2{raw_val};
+        CHECK(rt1 == rt2);
+        CHECK(std::is_eq(rt1 <=> rt2));
+        CHECK_FALSE(rt1 < rt2);
+        CHECK_FALSE(rt1 > rt2);
+    }
+
+    SECTION("snowflake_mention_str comparison semantics") {
+        constexpr auto mu1 = sf.mention_user();
+        constexpr auto mu2 = sf2.mention_user();
+        CHECK(mu1 == mu2);
+        CHECK(std::is_eq(mu1 <=> mu2));
+        static_assert(mu1 == mu2);
+        static_assert(std::is_eq(mu1 <=> mu2));
+    }
 }
