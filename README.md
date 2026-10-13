@@ -31,10 +31,11 @@ A compiler supporting C++23 and at least meeting [Glaze's](https://github.com/st
 
 ### Platform Support
 - Linux
-    - Dependencies: `io_uring` if asynchronous file reading is used, can also enable it for networking
+    - Dependencies: `openssl`, `io_uring` if asynchronous file reading is used, can also enable it for networking
 - Windows
     - Works out of the box with the bundled OpenSSL 4.0.1 (make sure to copy its dll's into your build directory), you can also provide your own
 - MacOS
+    - Dependencies: `openssl`
     - Untested, but should likely work as it is mostly platform-agnostic
 
 All other dependencies are fetched via CMake as needed
