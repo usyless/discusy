@@ -225,6 +225,7 @@ struct snowflake_str {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     constexpr explicit snowflake_str(std::uint64_t val) noexcept {
         if consteval {
+            buf = {};
             if (val == 0) {
                 buf[0] = '0';
                 buf[1] = '\0';

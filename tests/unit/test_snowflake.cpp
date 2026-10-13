@@ -11,6 +11,8 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
     // Increment = 175928847299117063 & 0xFFF
     constexpr std::uint64_t raw_val = 175928847299117063ULL;
     constexpr discusy::snowflake sf{raw_val};
+    constexpr discusy::snowflake sf2{raw_val};
+    constexpr discusy::snowflake sf_smaller{raw_val - 1};
     constexpr std::uint64_t shifted = (raw_val >> 22);
 
     SECTION("Bit field deconstruction") {
@@ -75,7 +77,6 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(static_cast<bool>(sf));
         CHECK_FALSE(!sf);
 
-        constexpr discusy::snowflake sf2{raw_val};
         CHECK(sf == sf2);
         CHECK_FALSE(sf != sf2);
         CHECK(sf <= sf2);
@@ -83,7 +84,6 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK_FALSE(sf < sf2);
         CHECK_FALSE(sf > sf2);
 
-        constexpr discusy::snowflake sf_smaller{raw_val - 1};
         CHECK(sf_smaller < sf);
         CHECK(sf > sf_smaller);
         CHECK(std::is_eq(sf <=> sf2));
