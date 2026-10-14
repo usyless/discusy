@@ -203,6 +203,9 @@ namespace glz
       }
 
       template <class T>
+      constexpr size_t max_etf_val_size();
+
+      template <class T>
       inline constexpr size_t fixed_etf_padding = [] {
          using V = std::decay_t<T>;
          if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
@@ -224,7 +227,7 @@ namespace glz
                      }
                      else {
                         constexpr auto key = glz::get<I>(reflect<V>::keys);
-                        constexpr size_t val_max = max_scalar_etf_val_size<field_val_t>();
+                        constexpr size_t val_max = max_etf_val_size<field_val_t>();
                         if constexpr (val_max > 0) {
                            fixed += 5 + key.size() + val_max;
                            return false; // continue
@@ -267,10 +270,15 @@ namespace glz
             return 1;
          }
          else {
-            constexpr size_t val_sz = min_etf_val_size<V>();
-            constexpr size_t obj_sz = sizeof(V);
-            // Pre-allocate buffer with a minimum size of the size of the object
-            return 1 + (std::max)(val_sz, obj_sz); // 1 for ETF magic_version
+            if constexpr (fixed_etf_padding<V> > 0) {
+               return 1 + fixed_etf_padding<V>;
+            }
+            else {
+               constexpr size_t val_sz = min_etf_val_size<V>();
+               constexpr size_t obj_sz = sizeof(V);
+               // Pre-allocate buffer with a minimum size of the size of the object
+               return 1 + (std::max)(val_sz, obj_sz); // 1 for ETF magic_version
+            }
          }
       }();
 
@@ -284,7 +292,15 @@ namespace glz
                constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
                etf::detail::ensure_space(b, ix + prealloc);
                etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-               Derived::template no_header<no_header_on<Opts>()>(
+               constexpr auto next_opts = [] {
+                  if constexpr (etf::detail::fixed_etf_padding<std::decay_t<T>> > 0) {
+                     return write_unchecked_on<no_header_on<Opts>()>();
+                  }
+                  else {
+                     return no_header_on<Opts>();
+                  }
+               }();
+               Derived::template no_header<next_opts>(
                   std::forward<decltype(value)>(value), ctx, b, ix);
             }
             else {
