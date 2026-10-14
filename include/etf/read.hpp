@@ -28,6 +28,93 @@
 
 namespace glz
 {
+   namespace etf::detail
+   {
+      template <size_t Base, size_t Rem, class Lambda>
+      GLZ_ALWAYS_INLINE constexpr void switch_chunk_16(Lambda&& lambda, size_t offset)
+      {
+         switch (offset) {
+         case 0: if constexpr (0 < Rem) lambda.template operator()<Base + 0>(); break;
+         case 1: if constexpr (1 < Rem) lambda.template operator()<Base + 1>(); break;
+         case 2: if constexpr (2 < Rem) lambda.template operator()<Base + 2>(); break;
+         case 3: if constexpr (3 < Rem) lambda.template operator()<Base + 3>(); break;
+         case 4: if constexpr (4 < Rem) lambda.template operator()<Base + 4>(); break;
+         case 5: if constexpr (5 < Rem) lambda.template operator()<Base + 5>(); break;
+         case 6: if constexpr (6 < Rem) lambda.template operator()<Base + 6>(); break;
+         case 7: if constexpr (7 < Rem) lambda.template operator()<Base + 7>(); break;
+         case 8: if constexpr (8 < Rem) lambda.template operator()<Base + 8>(); break;
+         case 9: if constexpr (9 < Rem) lambda.template operator()<Base + 9>(); break;
+         case 10: if constexpr (10 < Rem) lambda.template operator()<Base + 10>(); break;
+         case 11: if constexpr (11 < Rem) lambda.template operator()<Base + 11>(); break;
+         case 12: if constexpr (12 < Rem) lambda.template operator()<Base + 12>(); break;
+         case 13: if constexpr (13 < Rem) lambda.template operator()<Base + 13>(); break;
+         case 14: if constexpr (14 < Rem) lambda.template operator()<Base + 14>(); break;
+         case 15: if constexpr (15 < Rem) lambda.template operator()<Base + 15>(); break;
+         default: break;
+         }
+      }
+
+      template <size_t N, class Lambda>
+      GLZ_ALWAYS_INLINE constexpr void direct_visit(Lambda&& lambda, size_t index)
+      {
+         if constexpr (N == 0) {
+            (void)lambda;
+            (void)index;
+         }
+         else if constexpr (N == 1) {
+            (void)index;
+            lambda.template operator()<0>();
+         }
+         else if constexpr (N <= 16) {
+            switch_chunk_16<0, N>(std::forward<Lambda>(lambda), index);
+         }
+         else if constexpr (N <= 32) {
+            if (index < 16) {
+               switch_chunk_16<0, 16>(std::forward<Lambda>(lambda), index);
+            }
+            else {
+               switch_chunk_16<16, N - 16>(std::forward<Lambda>(lambda), index - 16);
+            }
+         }
+         else if constexpr (N <= 48) {
+            if (index < 16) {
+               switch_chunk_16<0, 16>(std::forward<Lambda>(lambda), index);
+            }
+            else if (index < 32) {
+               switch_chunk_16<16, 16>(std::forward<Lambda>(lambda), index - 16);
+            }
+            else {
+               switch_chunk_16<32, N - 32>(std::forward<Lambda>(lambda), index - 32);
+            }
+         }
+         else if constexpr (N <= 64) {
+            if (index < 32) {
+               if (index < 16) { switch_chunk_16<0, 16>(std::forward<Lambda>(lambda), index); }
+               else { switch_chunk_16<16, 16>(std::forward<Lambda>(lambda), index - 16); }
+            }
+            else {
+               if (index < 48) { switch_chunk_16<32, 16>(std::forward<Lambda>(lambda), index - 32); }
+               else { switch_chunk_16<48, N - 48>(std::forward<Lambda>(lambda), index - 48); }
+            }
+         }
+         else if constexpr (N <= 96) {
+            if (index < 48) {
+               if (index < 16) { switch_chunk_16<0, 16>(std::forward<Lambda>(lambda), index); }
+               else if (index < 32) { switch_chunk_16<16, 16>(std::forward<Lambda>(lambda), index - 16); }
+               else { switch_chunk_16<32, 16>(std::forward<Lambda>(lambda), index - 32); }
+            }
+            else {
+               if (index < 64) { switch_chunk_16<48, 16>(std::forward<Lambda>(lambda), index - 48); }
+               else if (index < 80) { switch_chunk_16<64, 16>(std::forward<Lambda>(lambda), index - 64); }
+               else { switch_chunk_16<80, N - 80>(std::forward<Lambda>(lambda), index - 80); }
+            }
+         }
+         else {
+            glz::visit<N>(std::forward<Lambda>(lambda), index);
+         }
+      }
+   }
+
    template <>
    struct parse<EETF>
    {
@@ -121,22 +208,19 @@ namespace glz
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto& ctx, auto& it, auto end) noexcept
       {
          if constexpr (check_quoted_num(Opts)) {
-            if (it >= end) [[unlikely]] {
-               ctx.error = error_code::unexpected_end;
-               return;
-            }
-            if (static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[likely]] {
-               ++it;
-               if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
-               const uint32_t len = etf::detail::read_be<uint32_t>(it);
-               it += 4;
-               if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
-               std::string_view sv{reinterpret_cast<const char*>(it), len};
-               it += len;
+            if (end - it >= 5 && static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[likely]] {
+               const uint32_t len = etf::detail::read_be<uint32_t>(it + 1);
+               if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
+               std::string_view sv{reinterpret_cast<const char*>(it + 5), len};
+               it += 5 + len;
                if (!etf::detail::parse_number_from_string(sv, value)) [[unlikely]] {
                   ctx.error = error_code::parse_number_failure;
                   return;
                }
+               return;
+            }
+            if (it >= end || static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
                return;
             }
          }
@@ -222,8 +306,56 @@ namespace glz
             return;
          }
          const auto tag = static_cast<uint8_t>(*it);
-         if (tag == etf::tag::SMALL_INTEGER_EXT || tag == etf::tag::INTEGER_EXT ||
-             tag == etf::tag::SMALL_BIG_EXT || tag == etf::tag::LARGE_BIG_EXT) {
+         if (tag == etf::tag::SMALL_INTEGER_EXT) [[likely]] {
+            if (end - it < 2) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const auto val = static_cast<uint8_t>(*(it + 1));
+            using underlying = std::underlying_type_t<std::decay_t<T>>;
+            if constexpr (std::is_signed_v<underlying> && sizeof(underlying) == 1) {
+               if (val > static_cast<uint64_t>((std::numeric_limits<underlying>::max)())) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+            }
+            value = static_cast<std::decay_t<T>>(val);
+            it += 2;
+            return;
+         }
+         if (tag == etf::tag::INTEGER_EXT) [[likely]] {
+            if (end - it < 5) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const int32_t val = etf::detail::read_be<int32_t>(it + 1);
+            using underlying = std::underlying_type_t<std::decay_t<T>>;
+            if constexpr (std::is_unsigned_v<underlying>) {
+               if (val < 0) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+               if constexpr (sizeof(underlying) < 4) {
+                  if (static_cast<uint64_t>(val) > static_cast<uint64_t>((std::numeric_limits<underlying>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return;
+                  }
+               }
+            }
+            else {
+               if constexpr (sizeof(underlying) < 4) {
+                  if (val < static_cast<int64_t>((std::numeric_limits<underlying>::min)()) ||
+                      val > static_cast<int64_t>((std::numeric_limits<underlying>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return;
+                  }
+               }
+            }
+            value = static_cast<std::decay_t<T>>(val);
+            it += 5;
+            return;
+         }
+         if (tag == etf::tag::SMALL_BIG_EXT || tag == etf::tag::LARGE_BIG_EXT) {
             using underlying = std::underlying_type_t<std::decay_t<T>>;
             using U = std::conditional_t<std::same_as<underlying, bool>, uint8_t, underlying>;
             U u{};
@@ -242,7 +374,7 @@ namespace glz
                      sv.data(), sv.data() + sv.size(), sv.size());
                   if (index < N) {
                      bool matched = false;
-                     visit<N>([&]<size_t I>() {
+                     etf::detail::direct_visit<N>([&]<size_t I>() {
                         static constexpr auto TargetKey = get<I>(reflect<T>::keys);
                         if (TargetKey.size() == sv.size() && compare<TargetKey.size()>(TargetKey.data(), sv.data())) {
                            value = static_cast<std::decay_t<T>>(get<I>(reflect<T>::values));
@@ -859,28 +991,22 @@ namespace glz
       template <auto Opts, class Value, is_context Ctx, class It0, class It1>
       static void op(Value&& value, Ctx&& ctx, It0&& it, It1 end)
       {
-         if (it >= end) [[unlikely]] {
-            ctx.error = error_code::unexpected_end;
-            return;
-         }
-
          depth_guard guard{ctx};
          if (!guard) [[unlikely]] {
             return;
          }
 
-         const uint8_t tag = static_cast<uint8_t>(*it++);
+         if (end - it < 5) [[unlikely]] {
+            ctx.error = error_code::unexpected_end;
+            return;
+         }
+         const auto tag = static_cast<uint8_t>(*it);
          if (tag != etf::tag::MAP_EXT) [[unlikely]] {
             ctx.error = error_code::syntax_error;
             return;
          }
-
-         if (end - it < 4) [[unlikely]] {
-            ctx.error = error_code::unexpected_end;
-            return;
-         }
-         const uint32_t arity = etf::detail::read_be<uint32_t>(it);
-         it += 4;
+         const uint32_t arity = etf::detail::read_be<uint32_t>(it + 1);
+         it += 5;
 
          if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
@@ -889,6 +1015,62 @@ namespace glz
 
          static constexpr auto N = reflect<T>::size;
          [[maybe_unused]] size_t read_count{};
+
+         [[maybe_unused]] auto fields = [&] {
+            if constexpr (reflectable<T>) {
+               return to_tie(value);
+            }
+            else {
+               return nullptr;
+            }
+         }();
+
+         if constexpr (N == 1) {
+            if (arity == 1) [[likely]] {
+               static constexpr auto TargetKey = get<0>(reflect<T>::keys);
+               static constexpr size_t KeyLen = TargetKey.size();
+               static constexpr size_t WireKeyLen = 5 + KeyLen;
+               static constexpr auto ExpectedWireKey = []() constexpr {
+                  std::array<char, WireKeyLen> arr{};
+                  arr[0] = static_cast<char>(etf::tag::BINARY_EXT);
+                  arr[1] = static_cast<char>((KeyLen >> 24) & 0xFF);
+                  arr[2] = static_cast<char>((KeyLen >> 16) & 0xFF);
+                  arr[3] = static_cast<char>((KeyLen >> 8) & 0xFF);
+                  arr[4] = static_cast<char>(KeyLen & 0xFF);
+                  for (size_t i = 0; i < KeyLen; ++i) {
+                     arr[5 + i] = TargetKey[i];
+                  }
+                  return arr;
+               }();
+
+               if (end - it >= static_cast<std::ptrdiff_t>(WireKeyLen) &&
+                   glz::compare<WireKeyLen>(reinterpret_cast<const char*>(it), ExpectedWireKey.data())) [[likely]] {
+                  it += WireKeyLen;
+                  if constexpr (skipped_by_meta<T, 0, operation::parse>) {
+                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                  }
+                  else {
+                     using val_t = refl_t<T, 0>;
+                     if constexpr (always_skipped<val_t>) {
+                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                     }
+                     else if constexpr (reflectable<T>) {
+                        parse<EETF>::op<Opts>(get_member(value, get<0>(fields)), ctx, it, end);
+                     }
+                     else {
+                        parse<EETF>::op<Opts>(get_member(value, get<0>(reflect<T>::values)), ctx, it, end);
+                     }
+                  }
+                  if (bool(ctx.error)) [[unlikely]] {
+                     return;
+                  }
+                  if constexpr (Opts.partial_read) {
+                     ctx.error = error_code::partial_read_complete;
+                  }
+                  return;
+               }
+            }
+         }
 
          for (uint32_t key_idx = 0; key_idx < arity; ++key_idx) {
             if constexpr (Opts.partial_read) {
@@ -909,7 +1091,7 @@ namespace glz
                   key.data(), key.data() + key.size(), key.size());
 
                if (index < N) [[likely]] {
-                  visit<N>(
+                  etf::detail::direct_visit<N>(
                      [&]<size_t I>() {
                         static constexpr auto TargetKey = get<I>(reflect<T>::keys);
                         static constexpr auto Length = TargetKey.size();
@@ -924,7 +1106,7 @@ namespace glz
                                  skip_value<EETF>::op<Opts>(ctx, it, end);
                               }
                               else if constexpr (reflectable<T>) {
-                                 parse<EETF>::op<Opts>(get_member(value, get<I>(to_tie(value))), ctx, it, end);
+                                 parse<EETF>::op<Opts>(get_member(value, get<I>(fields)), ctx, it, end);
                               }
                               else {
                                  parse<EETF>::op<Opts>(get_member(value, get<I>(reflect<T>::values)), ctx, it, end);
@@ -1233,7 +1415,7 @@ namespace glz
                      ctx.error = error_code::none;
                      ctx.custom_error_message = {};
                      bool deduced_matched = false;
-                     visit<variant_size>(
+                     etf::detail::direct_visit<variant_size>(
                         [&]<size_t I>() {
                            using V = std::variant_alternative_t<I, T>;
                            V v{};

@@ -280,12 +280,23 @@ namespace glz::etf
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_key(Ctx& ctx, It0& it, It1 end, std::string_view& key) noexcept
       {
+         if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
+            const uint32_t len = read_be<uint32_t>(it + 1);
+            if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return false;
+            }
+            key = std::string_view{reinterpret_cast<const char*>(it + 5), len};
+            it += 5 + len;
+            return true;
+         }
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return false;
          }
          const auto tag = static_cast<uint8_t>(*it++);
-         if (tag == tag::BINARY_EXT) [[likely]] {
+         switch (tag) {
+         case tag::BINARY_EXT: {
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return false;
@@ -300,7 +311,6 @@ namespace glz::etf
             it += len;
             return true;
          }
-         switch (tag) {
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -356,6 +366,12 @@ namespace glz::etf
       template <typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool is_nil(It0 it, It1 end) noexcept
       {
+         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
+            return true;
+         }
+         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
+            return true;
+         }
          if (it >= end) return false;
          const auto tag = static_cast<uint8_t>(*it);
          if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
@@ -392,6 +408,14 @@ namespace glz::etf
       template <typename It0, typename It1>
       GLZ_ALWAYS_INLINE void skip_nil(It0& it, It1 end) noexcept
       {
+         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
+            it += 5;
+            return;
+         }
+         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
+            it += 6;
+            return;
+         }
          if (it >= end) return;
          const auto tag = static_cast<uint8_t>(*it++);
          if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
@@ -412,9 +436,18 @@ namespace glz::etf
       template <typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_nil(It0& it, It1 end) noexcept
       {
+         // Fast path for standard ETF nil: \x77\x03nil
+         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
+            it += 5;
+            return true;
+         }
+         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
+            it += 6;
+            return true;
+         }
          if (it >= end) return false;
          const auto tag = static_cast<uint8_t>(*it);
-         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
+         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag::SMALL_ATOM_EXT == tag) {
             if (end - it >= 2) {
                const auto len = static_cast<uint8_t>(*(it + 1));
                if (len == 3 && end - it >= 5 && glz::compare<3>(reinterpret_cast<const char*>(it + 2), "nil")) {
@@ -454,12 +487,20 @@ namespace glz::etf
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
       {
+         if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
+            const uint32_t len = read_be<uint32_t>(it + 1);
+            if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+            sv = std::string_view{reinterpret_cast<const char*>(it + 5), len};
+            it += 5 + len;
+            return true;
+         }
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return false;
          }
          const auto tag = static_cast<uint8_t>(*it++);
-         if (tag == tag::BINARY_EXT) [[likely]] {
+         switch (tag) {
+         case tag::BINARY_EXT: {
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint32_t len = read_be<uint32_t>(it);
             it += 4;
@@ -468,7 +509,6 @@ namespace glz::etf
             it += len;
             return true;
          }
-         switch (tag) {
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const uint16_t len = read_be<uint16_t>(it);
@@ -551,6 +591,45 @@ namespace glz::etf
                return true;
             }
             const size_t sig_digits = sz - start;
+            if constexpr (sizeof(T) == 8 && std::endian::native == std::endian::little) {
+               if (sig_digits >= 16 && sig_digits <= 19) [[likely]] {
+                  const char* p = sv.data() + start;
+                  const size_t rem = sig_digits - 16;
+                  uint64_t prefix = 0;
+                  bool valid = true;
+                  if (rem == 1) {
+                     const uint8_t c = static_cast<uint8_t>(p[0]) - static_cast<uint8_t>('0');
+                     valid = (c <= 9);
+                     prefix = c;
+                  }
+                  else if (rem == 2) {
+                     const uint8_t c0 = static_cast<uint8_t>(p[0]) - static_cast<uint8_t>('0');
+                     const uint8_t c1 = static_cast<uint8_t>(p[1]) - static_cast<uint8_t>('0');
+                     valid = (c0 <= 9) && (c1 <= 9);
+                     prefix = (static_cast<uint64_t>(c0) * 10) + c1;
+                  }
+                  else if (rem == 3) {
+                     const uint8_t c0 = static_cast<uint8_t>(p[0]) - static_cast<uint8_t>('0');
+                     const uint8_t c1 = static_cast<uint8_t>(p[1]) - static_cast<uint8_t>('0');
+                     const uint8_t c2 = static_cast<uint8_t>(p[2]) - static_cast<uint8_t>('0');
+                     valid = (c0 <= 9) && (c1 <= 9) && (c2 <= 9);
+                     prefix = (static_cast<uint64_t>(c0) * 100) + (static_cast<uint64_t>(c1) * 10) + c2;
+                  }
+                  if (!valid) [[unlikely]] return false;
+
+                  uint64_t w0; // NOLINT(cppcoreguidelines-init-variables)
+                  uint64_t w1; // NOLINT(cppcoreguidelines-init-variables)
+                  std::memcpy(&w0, p + rem, 8);
+                  std::memcpy(&w1, p + rem + 8, 8);
+                  if (!glz::fast_float::is_made_of_eight_digits_fast(w0) || !glz::fast_float::is_made_of_eight_digits_fast(w1)) [[unlikely]] {
+                     return false;
+                  }
+                  const uint32_t mid = glz::fast_float::parse_eight_digits_unrolled(w0);
+                  const uint32_t low = glz::fast_float::parse_eight_digits_unrolled(w1);
+                  num = (((prefix * 100000000ULL) + mid) * 100000000ULL) + low;
+                  return true;
+               }
+            }
             if (sig_digits <= 19) [[likely]] {
                uint64_t val = 0;
                for (size_t i = start; i < sz; ++i) {
@@ -589,6 +668,16 @@ namespace glz::etf
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_bool(Ctx& ctx, It0& it, It1 end, bool& b) noexcept
       {
+         if (end - it >= 7 && glz::compare<7>(reinterpret_cast<const char*>(it), "\x77\x05" "false")) [[likely]] {
+            it += 7;
+            b = false;
+            return true;
+         }
+         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04" "true")) [[likely]] {
+            it += 6;
+            b = true;
+            return true;
+         }
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return false;
@@ -660,7 +749,7 @@ namespace glz::etf
             if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto val = static_cast<uint8_t>(*it++);
             if constexpr (std::integral<T>) {
-               if constexpr (std::is_signed_v<T>) {
+               if constexpr (std::is_signed_v<T> && sizeof(T) == 1) {
                   if (val > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
@@ -680,16 +769,20 @@ namespace glz::etf
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
-                  if (static_cast<uint64_t>(val) > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
-                     ctx.error = error_code::parse_number_failure;
-                     return false;
+                  if constexpr (sizeof(T) < 4) {
+                     if (static_cast<uint64_t>(val) > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
                   }
                }
                else {
-                  if (val < static_cast<int64_t>((std::numeric_limits<T>::min)()) ||
-                      val > static_cast<int64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
-                     ctx.error = error_code::parse_number_failure;
-                     return false;
+                  if constexpr (sizeof(T) < 4) {
+                     if (val < static_cast<int64_t>((std::numeric_limits<T>::min)()) ||
+                         val > static_cast<int64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
                   }
                }
             }

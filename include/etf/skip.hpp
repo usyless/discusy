@@ -22,11 +22,6 @@ namespace glz
             return;
          }
 
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] {
-            return;
-         }
-
          const auto tag = static_cast<uint8_t>(*it++);
          switch (tag) {
          case etf::tag::SMALL_INTEGER_EXT: {
@@ -151,6 +146,8 @@ namespace glz
             break;
          }
          case etf::tag::SMALL_TUPLE_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             if (it >= end) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -163,6 +160,8 @@ namespace glz
             break;
          }
          case etf::tag::LARGE_TUPLE_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -180,6 +179,8 @@ namespace glz
             break;
          }
          case etf::tag::LIST_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -199,6 +200,8 @@ namespace glz
             break;
          }
          case etf::tag::MAP_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
