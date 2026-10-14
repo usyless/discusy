@@ -364,107 +364,41 @@ namespace glz::etf
       }
 
       template <typename It0, typename It1>
-      GLZ_ALWAYS_INLINE bool is_nil(It0 it, It1 end) noexcept
-      {
-         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
-            return true;
-         }
-         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
-            return true;
-         }
-         if (it >= end) return false;
-         const auto tag = static_cast<uint8_t>(*it);
-         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
-            if (end - it >= 2) {
-               const auto len = static_cast<uint8_t>(*(it + 1));
-               if (len == 3 && end - it >= 5) {
-                  return glz::compare<3>(reinterpret_cast<const char*>(it + 2), "nil");
-               }
-               if (len == 4 && end - it >= 6) {
-                  return glz::compare<4>(reinterpret_cast<const char*>(it + 2), "null");
-               }
-               if (len == 9 && end - it >= 11) {
-                  return glz::compare<9>(reinterpret_cast<const char*>(it + 2), "undefined");
-               }
-            }
-         }
-         else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
-            if (end - it >= 3) {
-               const uint16_t len = read_be<uint16_t>(it + 1);
-               if (len == 3 && end - it >= 6) {
-                  return glz::compare<3>(reinterpret_cast<const char*>(it + 3), "nil");
-               }
-               if (len == 4 && end - it >= 7) {
-                  return glz::compare<4>(reinterpret_cast<const char*>(it + 3), "null");
-               }
-               if (len == 9 && end - it >= 12) {
-                  return glz::compare<9>(reinterpret_cast<const char*>(it + 3), "undefined");
-               }
-            }
-         }
-         return false;
-      }
-
-      template <typename It0, typename It1>
-      GLZ_ALWAYS_INLINE void skip_nil(It0& it, It1 end) noexcept
-      {
-         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
-            it += 5;
-            return;
-         }
-         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
-            it += 6;
-            return;
-         }
-         if (it >= end) return;
-         const auto tag = static_cast<uint8_t>(*it++);
-         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
-            if (it < end) {
-               const auto len = static_cast<uint8_t>(*it++);
-               it += (std::min)(static_cast<size_t>(end - it), static_cast<size_t>(len));
-            }
-         }
-         else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
-            if (end - it >= 2) {
-               const uint16_t len = read_be<uint16_t>(it);
-               it += 2;
-               it += (std::min)(static_cast<size_t>(end - it), static_cast<size_t>(len));
-            }
-         }
-      }
-
-      template <typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_nil(It0& it, It1 end) noexcept
       {
-         // Fast path for standard ETF nil: \x77\x03nil
-         if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
-            it += 5;
-            return true;
-         }
-         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
-            it += 6;
-            return true;
-         }
          if (it >= end) return false;
          const auto tag = static_cast<uint8_t>(*it);
-         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag::SMALL_ATOM_EXT == tag) {
-            if (end - it >= 2) {
-               const auto len = static_cast<uint8_t>(*(it + 1));
-               if (len == 3 && end - it >= 5 && glz::compare<3>(reinterpret_cast<const char*>(it + 2), "nil")) {
-                  it += 5;
-                  return true;
-               }
-               if (len == 4 && end - it >= 6 && glz::compare<4>(reinterpret_cast<const char*>(it + 2), "null")) {
-                  it += 6;
-                  return true;
-               }
-               if (len == 9 && end - it >= 11 && glz::compare<9>(reinterpret_cast<const char*>(it + 2), "undefined")) {
-                  it += 11;
-                  return true;
-               }
+         if (tag == tag::SMALL_ATOM_UTF8_EXT) [[likely]] {
+            if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x77\x03nil")) [[likely]] {
+               it += 5;
+               return true;
             }
+            if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04null")) {
+               it += 6;
+               return true;
+            }
+            if (end - it >= 11 && glz::compare<11>(reinterpret_cast<const char*>(it), "\x77\x09undefined")) {
+               it += 11;
+               return true;
+            }
+            return false;
          }
-         else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
+         if (tag == tag::SMALL_ATOM_EXT) {
+            if (end - it >= 5 && glz::compare<5>(reinterpret_cast<const char*>(it), "\x73\x03nil")) {
+               it += 5;
+               return true;
+            }
+            if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x73\x04null")) {
+               it += 6;
+               return true;
+            }
+            if (end - it >= 11 && glz::compare<11>(reinterpret_cast<const char*>(it), "\x73\x09undefined")) {
+               it += 11;
+               return true;
+            }
+            return false;
+         }
+         if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
             if (end - it >= 3) {
                const uint16_t len = read_be<uint16_t>(it + 1);
                if (len == 3 && end - it >= 6 && glz::compare<3>(reinterpret_cast<const char*>(it + 3), "nil")) {
@@ -482,6 +416,19 @@ namespace glz::etf
             }
          }
          return false;
+      }
+
+      template <typename It0, typename It1>
+      GLZ_ALWAYS_INLINE bool is_nil(It0 it, It1 end) noexcept
+      {
+         auto it_copy = it;
+         return read_nil(it_copy, end);
+      }
+
+      template <typename It0, typename It1>
+      GLZ_ALWAYS_INLINE void skip_nil(It0& it, It1 end) noexcept
+      {
+         (void)read_nil(it, end);
       }
 
       template <is_context Ctx, typename It0, typename It1>
@@ -668,56 +615,47 @@ namespace glz::etf
       template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_bool(Ctx& ctx, It0& it, It1 end, bool& b) noexcept
       {
-         if (end - it >= 7 && glz::compare<7>(reinterpret_cast<const char*>(it), "\x77\x05" "false")) [[likely]] {
-            it += 7;
-            b = false;
-            return true;
-         }
-         if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04" "true")) [[likely]] {
-            it += 6;
-            b = true;
-            return true;
-         }
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return false;
          }
          const auto tag = static_cast<uint8_t>(*it);
-         if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) [[likely]] {
-            if (end - it >= 2) [[likely]] {
-               const auto len = static_cast<uint8_t>(*(it + 1));
-               if (len == 4 && end - it >= 6) {
-                  if (glz::compare<4>(reinterpret_cast<const char*>(it + 2), "true")) {
-                     it += 6;
-                     b = true;
-                     return true;
-                  }
-               }
-               else if (len == 5 && end - it >= 7) {
-                  if (glz::compare<5>(reinterpret_cast<const char*>(it + 2), "false")) {
-                     it += 7;
-                     b = false;
-                     return true;
-                  }
-               }
+         if (tag == tag::SMALL_ATOM_UTF8_EXT) [[likely]] {
+            if (end - it >= 7 && glz::compare<7>(reinterpret_cast<const char*>(it), "\x77\x05" "false")) {
+               it += 7;
+               b = false;
+               return true;
+            }
+            if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x77\x04" "true")) {
+               it += 6;
+               b = true;
+               return true;
+            }
+         }
+         else if (tag == tag::SMALL_ATOM_EXT) {
+            if (end - it >= 7 && glz::compare<7>(reinterpret_cast<const char*>(it), "\x73\x05" "false")) {
+               it += 7;
+               b = false;
+               return true;
+            }
+            if (end - it >= 6 && glz::compare<6>(reinterpret_cast<const char*>(it), "\x73\x04" "true")) {
+               it += 6;
+               b = true;
+               return true;
             }
          }
          else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
             if (end - it >= 3) {
                const uint16_t len = read_be<uint16_t>(it + 1);
-               if (len == 4 && end - it >= 7) {
-                  if (glz::compare<4>(reinterpret_cast<const char*>(it + 3), "true")) {
-                     it += 7;
-                     b = true;
-                     return true;
-                  }
+               if (len == 4 && end - it >= 7 && glz::compare<4>(reinterpret_cast<const char*>(it + 3), "true")) {
+                  it += 7;
+                  b = true;
+                  return true;
                }
-               else if (len == 5 && end - it >= 8) {
-                  if (glz::compare<5>(reinterpret_cast<const char*>(it + 3), "false")) {
-                     it += 8;
-                     b = false;
-                     return true;
-                  }
+               if (len == 5 && end - it >= 8 && glz::compare<5>(reinterpret_cast<const char*>(it + 3), "false")) {
+                  it += 8;
+                  b = false;
+                  return true;
                }
             }
          }
@@ -796,7 +734,13 @@ namespace glz::etf
             const auto sign = static_cast<uint8_t>(*it++);
             uint64_t raw = 0;
             bool overflow = false;
-            if (n <= 8) [[likely]] {
+            if (n == 8) [[likely]] {
+               std::memcpy(&raw, it, 8);
+               if constexpr (std::endian::native == std::endian::big) {
+                  raw = std::byteswap(raw);
+               }
+            }
+            else if (n < 8) {
                if constexpr (std::endian::native == std::endian::little) {
                   std::memcpy(&raw, it, n);
                }
@@ -871,7 +815,13 @@ namespace glz::etf
             const auto sign = static_cast<uint8_t>(*it++);
             bool overflow = false;
             uint64_t raw = 0;
-            if (n <= 8) [[likely]] {
+            if (n == 8) [[likely]] {
+               std::memcpy(&raw, it, 8);
+               if constexpr (std::endian::native == std::endian::big) {
+                  raw = std::byteswap(raw);
+               }
+            }
+            else if (n < 8) {
                if constexpr (std::endian::native == std::endian::little) {
                   std::memcpy(&raw, it, n);
                }

@@ -468,7 +468,9 @@ namespace glz
          const auto tag = static_cast<uint8_t>(*it++);
          if (tag == etf::tag::NIL_EXT) {
             if constexpr (growable) {
-               value.clear();
+               if constexpr (not check_append_arrays(Opts)) {
+                  value.clear();
+               }
             }
             return;
          }
@@ -502,25 +504,51 @@ namespace glz
             }
 
             if constexpr (resizable<T>) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.resize(len);
-               for (size_t i = 0; i < len; ++i) {
-                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (bool(ctx.error)) [[unlikely]] return;
+               if constexpr (check_append_arrays(Opts)) {
+                  const auto orig_size = value.size();
+                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                  value.resize(orig_size + len);
+                  for (size_t i = orig_size; i < orig_size + len; ++i) {
+                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
+               }
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  value.resize(len);
+                  for (auto&& elem : value) {
+                     parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
             }
             else if constexpr (emplace_backable<T>) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.clear();
-               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(len);
+               if constexpr (check_append_arrays(Opts)) {
+                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(value.size() + len);
+                  }
+                  for (size_t i = 0; i < len; ++i) {
+                     V elem{};
+                     parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if (parse_failed(ctx.error)) [[unlikely]] return;
+                     value.emplace_back(std::move(elem));
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
-               for (size_t i = 0; i < len; ++i) {
-                  V elem{};
-                  parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-                  value.emplace_back(std::move(elem));
-                  if (bool(ctx.error)) [[unlikely]] return;
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(len);
+                  }
+                  for (size_t i = 0; i < len; ++i) {
+                     V elem{};
+                     parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if (parse_failed(ctx.error)) [[unlikely]] return;
+                     value.emplace_back(std::move(elem));
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
             }
             else if constexpr (set_like) {
@@ -1090,12 +1118,14 @@ namespace glz
                const auto index = decode_hash_with_size<EETF, T, HashInfo, HashInfo.type>::op(
                   key.data(), key.data() + key.size(), key.size());
 
+               bool matched = false;
                if (index < N) [[likely]] {
                   etf::detail::direct_visit<N>(
                      [&]<size_t I>() {
                         static constexpr auto TargetKey = get<I>(reflect<T>::keys);
                         static constexpr auto Length = TargetKey.size();
                         if ((Length == key.size()) && compare<Length>(TargetKey.data(), key.data())) [[likely]] {
+                           matched = true;
                            ++read_count;
                            if constexpr (skipped_by_meta<T, I, operation::parse>) {
                               skip_value<EETF>::op<Opts>(ctx, it, end);
@@ -1113,33 +1143,11 @@ namespace glz
                               }
                            }
                         }
-                        else {
-                           if constexpr (Opts.error_on_unknown_keys) {
-                              ctx.error = error_code::unknown_key;
-                              return;
-                           }
-                           else {
-                              skip_value<EETF>::op<Opts>(ctx, it, end);
-                              if (parse_failed(ctx.error)) [[unlikely]] {
-                                 return;
-                              }
-                           }
-                        }
                      },
                      index);
-
-                  if (bool(ctx.error)) [[unlikely]] {
-                     return;
-                  }
-
-                  if constexpr (Opts.partial_read) {
-                     if (read_count >= N) {
-                        ctx.error = error_code::partial_read_complete;
-                        return;
-                     }
-                  }
                }
-               else [[unlikely]] {
+
+               if (!matched) [[unlikely]] {
                   if constexpr (Opts.error_on_unknown_keys) {
                      ctx.error = error_code::unknown_key;
                      return;
@@ -1149,6 +1157,17 @@ namespace glz
                      if (parse_failed(ctx.error)) [[unlikely]] {
                         return;
                      }
+                  }
+               }
+
+               if (bool(ctx.error)) [[unlikely]] {
+                  return;
+               }
+
+               if constexpr (Opts.partial_read) {
+                  if (read_count >= N) {
+                     ctx.error = error_code::partial_read_complete;
+                     return;
                   }
                }
             }
@@ -1623,36 +1642,44 @@ namespace glz
       template <auto Opts>
       static void op(auto& value, is_context auto& ctx, auto& it, auto end) noexcept
       {
-         std::string_view str{};
-         if (etf::detail::read_str(ctx, it, end, str)) {
-            using Duration = std::remove_cvref_t<T>::duration;
-            using Period = Duration::period;
-            if constexpr (std::ratio_equal_v<Period, std::ratio<86400>>) {
-               if (str.size() == 10) {
-                  std::chrono::year_month_day ymd{};
-                  chrono_detail::parse_ymd(str, ymd, ctx.error);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-                  value = std::chrono::time_point_cast<Duration>(std::chrono::sys_days{ymd});
-                  return;
-               }
-            }
-            chrono_detail::parse_iso8601(str, value, ctx.error);
+         if (it >= end) [[unlikely]] {
+            ctx.error = error_code::unexpected_end;
             return;
          }
 
-         // Numeric timestamp in seconds or milliseconds
-         int64_t num{};
-         if (etf::detail::read_number(ctx, it, end, num)) {
-            using Duration = std::remove_cvref_t<T>::duration;
-            if (num > 100000000000LL) {
-               value = std::chrono::time_point_cast<Duration>(
-                  std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
+         const auto tag = static_cast<uint8_t>(*it);
+         if (tag == etf::tag::BINARY_EXT || tag == etf::tag::STRING_EXT) {
+            std::string_view str{};
+            if (etf::detail::read_str(ctx, it, end, str)) {
+               using Duration = std::remove_cvref_t<T>::duration;
+               using Period = Duration::period;
+               if constexpr (std::ratio_equal_v<Period, std::ratio<86400>>) {
+                  if (str.size() == 10) {
+                     std::chrono::year_month_day ymd{};
+                     chrono_detail::parse_ymd(str, ymd, ctx.error);
+                     if (parse_failed(ctx.error)) [[unlikely]] return;
+                     value = std::chrono::time_point_cast<Duration>(std::chrono::sys_days{ymd});
+                     return;
+                  }
+               }
+               chrono_detail::parse_iso8601(str, value, ctx.error);
+               return;
             }
-            else {
-               value = std::chrono::time_point_cast<Duration>(
-                  std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+         }
+         else {
+            int64_t num{};
+            if (etf::detail::read_number(ctx, it, end, num)) {
+               using Duration = std::remove_cvref_t<T>::duration;
+               if (num > 100000000000LL) {
+                  value = std::chrono::time_point_cast<Duration>(
+                     std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
+               }
+               else {
+                  value = std::chrono::time_point_cast<Duration>(
+                     std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+               }
+               return;
             }
-            return;
          }
 
          ctx.error = error_code::syntax_error;
