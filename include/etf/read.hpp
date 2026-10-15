@@ -9,6 +9,7 @@
 #include <memory>
 #include <type_traits>
 #include <chrono>
+#include <vector>
 
 #include <glaze/core/context.hpp>
 #include <glaze/core/opts.hpp>
@@ -28,6 +29,30 @@
 
 namespace glz
 {
+   // Specialize decode_hash_with_size for EETF to delegate to JSON
+   template <class T, auto HashInfo, hash_type Type>
+   struct decode_hash_with_size<EETF, T, HashInfo, Type> : decode_hash_with_size<JSON, T, HashInfo, Type>
+   {};
+
+   // Fast-path unfilled resize for std::vector with trivially copyable elements
+   template <class Item, class Alloc>
+      requires(std::is_trivially_copyable_v<Item>)
+   GLZ_ALWAYS_INLINE void resize_unfilled(std::vector<Item, Alloc>& b, const size_t n)
+   {
+      if constexpr (requires { b.__resize_default_init(n); }) {
+         b.__resize_default_init(n);
+      }
+      else if constexpr (requires { b.resize_uninitialized(n); }) {
+         b.resize_uninitialized(n);
+      }
+      else if constexpr (requires { b.resize_and_overwrite(n, [](auto*, size_t written) noexcept { return written; }); }) {
+         b.resize_and_overwrite(n, [](auto*, size_t written) noexcept { return written; });
+      }
+      else {
+         b.resize(n);
+      }
+   }
+
    namespace etf::detail
    {
       template <size_t Base, size_t Rem, class Lambda>
@@ -519,7 +544,12 @@ namespace glz
                         }
                      }
                      else {
-                        value.resize(orig_size + len);
+                        if constexpr (std::is_trivially_copyable_v<V>) {
+                           resize_unfilled(value, orig_size + len);
+                        }
+                        else {
+                           value.resize(orig_size + len);
+                        }
                         for (size_t i = orig_size; i < orig_size + len; ++i) {
                            parse<EETF>::op<Opts>(value[i], ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
@@ -527,7 +557,12 @@ namespace glz
                      }
                   }
                   else {
-                     value.resize(orig_size + len);
+                     if constexpr (std::is_trivially_copyable_v<V>) {
+                        resize_unfilled(value, orig_size + len);
+                     }
+                     else {
+                        value.resize(orig_size + len);
+                     }
                      for (size_t i = orig_size; i < orig_size + len; ++i) {
                         parse<EETF>::op<Opts>(value[i], ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
@@ -549,7 +584,12 @@ namespace glz
                         }
                      }
                      else {
-                        value.resize(len);
+                        if constexpr (std::is_trivially_copyable_v<V>) {
+                           resize_unfilled(value, len);
+                        }
+                        else {
+                           value.resize(len);
+                        }
                         for (auto&& elem : value) {
                            parse<EETF>::op<Opts>(elem, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
@@ -557,7 +597,12 @@ namespace glz
                      }
                   }
                   else {
-                     value.resize(len);
+                     if constexpr (std::is_trivially_copyable_v<V>) {
+                        resize_unfilled(value, len);
+                     }
+                     else {
+                        value.resize(len);
+                     }
                      for (auto&& elem : value) {
                         parse<EETF>::op<Opts>(elem, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
@@ -577,10 +622,14 @@ namespace glz
                            value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
                         }
                      }
-                     V elem{};
+                     auto& elem = value.emplace_back();
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] return;
-                     value.emplace_back(std::move(elem));
+                     if (parse_failed(ctx.error)) [[unlikely]] {
+                        if constexpr (requires { value.pop_back(); }) {
+                           value.pop_back();
+                        }
+                        return;
+                     }
                      if (bool(ctx.error)) [[unlikely]] return;
                   }
                }
@@ -596,10 +645,14 @@ namespace glz
                            value.reserve(std::min<size_t>(len, i + 4096));
                         }
                      }
-                     V elem{};
+                     auto& elem = value.emplace_back();
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] return;
-                     value.emplace_back(std::move(elem));
+                     if (parse_failed(ctx.error)) [[unlikely]] {
+                        if constexpr (requires { value.pop_back(); }) {
+                           value.pop_back();
+                        }
+                        return;
+                     }
                      if (bool(ctx.error)) [[unlikely]] return;
                   }
                }
@@ -731,7 +784,12 @@ namespace glz
                else {
                   if constexpr (resizable<T>) {
                      if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     value.resize(len);
+                     if constexpr (std::is_trivially_copyable_v<V>) {
+                        resize_unfilled(value, len);
+                     }
+                     else {
+                        value.resize(len);
+                     }
                      for (size_t i = 0; i < len; ++i) {
                         value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
                      }
@@ -903,7 +961,12 @@ namespace glz
                         }
                      }
                      else {
-                        value.resize(orig_size + len);
+                        if constexpr (std::is_trivially_copyable_v<V>) {
+                           resize_unfilled(value, orig_size + len);
+                        }
+                        else {
+                           value.resize(orig_size + len);
+                        }
                         for (size_t i = orig_size; i < orig_size + len; ++i) {
                            parse<EETF>::op<Opts>(value[i], ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
@@ -911,7 +974,12 @@ namespace glz
                      }
                   }
                   else {
-                     value.resize(orig_size + len);
+                     if constexpr (std::is_trivially_copyable_v<V>) {
+                        resize_unfilled(value, orig_size + len);
+                     }
+                     else {
+                        value.resize(orig_size + len);
+                     }
                      for (size_t i = orig_size; i < orig_size + len; ++i) {
                         parse<EETF>::op<Opts>(value[i], ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
@@ -933,7 +1001,12 @@ namespace glz
                         }
                      }
                      else {
-                        value.resize(len);
+                        if constexpr (std::is_trivially_copyable_v<V>) {
+                           resize_unfilled(value, len);
+                        }
+                        else {
+                           value.resize(len);
+                        }
                         for (auto&& elem : value) {
                            parse<EETF>::op<Opts>(elem, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
@@ -941,7 +1014,12 @@ namespace glz
                      }
                   }
                   else {
-                     value.resize(len);
+                     if constexpr (std::is_trivially_copyable_v<V>) {
+                        resize_unfilled(value, len);
+                     }
+                     else {
+                        value.resize(len);
+                     }
                      for (auto&& elem : value) {
                         parse<EETF>::op<Opts>(elem, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
@@ -961,10 +1039,14 @@ namespace glz
                            value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
                         }
                      }
-                     V elem{};
+                     auto& elem = value.emplace_back();
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] return;
-                     value.emplace_back(std::move(elem));
+                     if (parse_failed(ctx.error)) [[unlikely]] {
+                        if constexpr (requires { value.pop_back(); }) {
+                           value.pop_back();
+                        }
+                        return;
+                     }
                      if (bool(ctx.error)) [[unlikely]] return;
                   }
                }
@@ -980,10 +1062,14 @@ namespace glz
                            value.reserve(std::min<size_t>(len, i + 4096));
                         }
                      }
-                     V elem{};
+                     auto& elem = value.emplace_back();
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] return;
-                     value.emplace_back(std::move(elem));
+                     if (parse_failed(ctx.error)) [[unlikely]] {
+                        if constexpr (requires { value.pop_back(); }) {
+                           value.pop_back();
+                        }
+                        return;
+                     }
                      if (bool(ctx.error)) [[unlikely]] return;
                   }
                }
@@ -1512,7 +1598,7 @@ namespace glz
                      if constexpr (variant_deduction_key_count<T> > 0) {
                         using dk = keys_wrapper<variant_deduction_keys<T>>;
                         static constexpr auto& H = hash_info<dk>;
-                        const auto di = decode_hash_with_size<JSON, dk, H, H.type>::op(
+                        const auto di = decode_hash_with_size<EETF, dk, H, H.type>::op(
                            key.data(), key.data() + key.size(), key.size());
                         if (di < variant_deduction_key_count<T> && variant_deduction_keys<T>[di] == key) {
                            possible = possible & narrowing_bits[di];
