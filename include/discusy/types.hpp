@@ -212,6 +212,7 @@ struct snowflake {
     struct glaze {
         using T = snowflake;
         // maybe add mimic?
+        using mimic = std::uint64_t;
         static constexpr auto value = glz::quoted_num<&T::value>;
     };
 };
