@@ -311,7 +311,8 @@ TEST_CASE("ETF: Basic types serialization and deserialization", "[etf]") {
         CHECK(dec_neg == negative);
     }
 
-    SECTION("64-bit integers (SMALL_BIG_EXT)") {
+    SECTION("64-bit integers (compact encoding & SMALL_BIG_EXT)") {
+        // Full 8-byte bignum
         std::uint64_t large_uint = 175928847299117063ULL;
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(large_uint, encoded));
@@ -326,6 +327,64 @@ TEST_CASE("ETF: Basic types serialization and deserialization", "[etf]") {
         std::uint64_t decoded = 0;
         REQUIRE_FALSE(glz::read_etf(decoded, encoded));
         CHECK(decoded == large_uint);
+
+        // Compact uint64_t: small integer (0-255) -> SMALL_INTEGER_EXT (2 bytes + 1 magic)
+        std::uint64_t small_u64 = 200ULL;
+        std::string enc_small;
+        REQUIRE_FALSE(glz::write_etf(small_u64, enc_small));
+        REQUIRE(enc_small.size() == 1 + 1 + 1);
+        CHECK(static_cast<std::uint8_t>(enc_small[1]) == glz::etf::tag::SMALL_INTEGER_EXT);
+        CHECK(static_cast<std::uint8_t>(enc_small[2]) == 200);
+        std::uint64_t dec_small = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_small, enc_small));
+        CHECK(dec_small == small_u64);
+
+        // Compact uint64_t: <= 2147483647 -> INTEGER_EXT (4 bytes + 1 tag + 1 magic)
+        std::uint64_t int_u64 = 100000ULL;
+        std::string enc_int;
+        REQUIRE_FALSE(glz::write_etf(int_u64, enc_int));
+        REQUIRE(enc_int.size() == 1 + 1 + 4);
+        CHECK(static_cast<std::uint8_t>(enc_int[1]) == glz::etf::tag::INTEGER_EXT);
+        std::uint64_t dec_int = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_int, enc_int));
+        CHECK(dec_int == int_u64);
+
+        // Compact uint64_t: > 2147483647 with stripped leading zeros -> SMALL_BIG_EXT with n = 4
+        std::uint64_t med_u64 = 3000000000ULL;
+        std::string enc_med;
+        REQUIRE_FALSE(glz::write_etf(med_u64, enc_med));
+        // magic(1) + SMALL_BIG_EXT(1) + len(1) + sign(1) + 4 bytes = 8 bytes
+        REQUIRE(enc_med.size() == 1 + 1 + 1 + 1 + 4);
+        CHECK(static_cast<std::uint8_t>(enc_med[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<std::uint8_t>(enc_med[2]) == 4);
+        CHECK(static_cast<std::uint8_t>(enc_med[3]) == 0);
+        std::uint64_t dec_med = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_med, enc_med));
+        CHECK(dec_med == med_u64);
+
+        // Compact int64_t signed: negative with stripped zeros
+        std::int64_t med_i64 = -3000000000LL;
+        std::string enc_i64;
+        REQUIRE_FALSE(glz::write_etf(med_i64, enc_i64));
+        REQUIRE(enc_i64.size() == 1 + 1 + 1 + 1 + 4);
+        CHECK(static_cast<std::uint8_t>(enc_i64[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<std::uint8_t>(enc_i64[2]) == 4);
+        CHECK(static_cast<std::uint8_t>(enc_i64[3]) == 1); // negative sign = 1
+        std::int64_t dec_i64 = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_i64, enc_i64));
+        CHECK(dec_i64 == med_i64);
+
+        // int64_t boundary: std::numeric_limits<int64_t>::min()
+        std::int64_t min_i64 = (std::numeric_limits<std::int64_t>::min)();
+        std::string enc_min;
+        REQUIRE_FALSE(glz::write_etf(min_i64, enc_min));
+        REQUIRE(enc_min.size() == 1 + 1 + 1 + 1 + 8);
+        CHECK(static_cast<std::uint8_t>(enc_min[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<std::uint8_t>(enc_min[2]) == 8);
+        CHECK(static_cast<std::uint8_t>(enc_min[3]) == 1);
+        std::int64_t dec_min = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_min, enc_min));
+        CHECK(dec_min == min_i64);
     }
 
     SECTION("Floating point numbers") {
@@ -416,18 +475,31 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
         CHECK(raw_decoded == raw_id);
     }
 
-    SECTION("Snowflake direct serialization (writes quoted string due to glz::quoted_num)") {
+    SECTION("Snowflake direct serialization (writes native integer, ignoring glz::quoted_num)") {
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(sf, encoded));
 
-        // When serialized directly, snowflake uses quoted_num so ETF writes it as BINARY_EXT string
-        REQUIRE(encoded.size() > 1);
-        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::BINARY_EXT);
+        // When serialized directly, snowflake ignores quoted_num in ETF and writes native integer (SMALL_BIG_EXT)
+        REQUIRE(encoded.size() == 1 + 1 + 1 + 1 + 8);
+        CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<std::uint8_t>(encoded[2]) == 8); // 8 bytes for raw_id
+        CHECK(static_cast<std::uint8_t>(encoded[3]) == 0); // positive sign
 
         discusy::snowflake decoded{};
         REQUIRE_FALSE(glz::read_etf(decoded, encoded));
         CHECK(decoded == sf);
         CHECK(decoded.value == raw_id);
+
+        // Small snowflake IDs also compact properly
+        discusy::snowflake small_sf{42ULL};
+        std::string small_encoded;
+        REQUIRE_FALSE(glz::write_etf(small_sf, small_encoded));
+        REQUIRE(small_encoded.size() == 1 + 1 + 1);
+        CHECK(static_cast<std::uint8_t>(small_encoded[1]) == glz::etf::tag::SMALL_INTEGER_EXT);
+        CHECK(static_cast<std::uint8_t>(small_encoded[2]) == 42);
+        discusy::snowflake small_decoded{};
+        REQUIRE_FALSE(glz::read_etf(small_decoded, small_encoded));
+        CHECK(small_decoded == small_sf);
     }
 
     SECTION("Snowflake deserialization from string (BINARY_EXT)") {
@@ -522,14 +594,50 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
         CHECK(sample_from_int.name == "test");
 
         // 2. When payload sends id as string (BINARY_EXT)
-        SampleStruct original{.id = sf, .name = "test"};
         std::string etf_str_payload;
-        REQUIRE_FALSE(glz::write_etf(original, etf_str_payload));
+        {
+            etf_str_payload.push_back(static_cast<char>(glz::etf::magic_version));
+            etf_str_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            std::uint32_t arity = glz::etf::detail::to_big_endian(2U);
+            etf_str_payload.append(reinterpret_cast<const char*>(&arity), 4);
+
+            // "id" => "175928847299117063" (BINARY_EXT)
+            std::string id_key = "id";
+            std::string key_etf;
+            REQUIRE_FALSE(glz::write_etf(id_key, key_etf));
+            etf_str_payload.append(key_etf.data() + 1, key_etf.size() - 1);
+
+            std::string val_etf;
+            std::string str_id = "175928847299117063";
+            REQUIRE_FALSE(glz::write_etf(str_id, val_etf));
+            etf_str_payload.append(val_etf.data() + 1, val_etf.size() - 1);
+
+            // "name" => "test"
+            std::string name_key = "name";
+            std::string name_key_etf;
+            REQUIRE_FALSE(glz::write_etf(name_key, name_key_etf));
+            etf_str_payload.append(name_key_etf.data() + 1, name_key_etf.size() - 1);
+
+            std::string name_val = "test";
+            std::string name_val_etf;
+            REQUIRE_FALSE(glz::write_etf(name_val, name_val_etf));
+            etf_str_payload.append(name_val_etf.data() + 1, name_val_etf.size() - 1);
+        }
 
         SampleStruct sample_from_str{};
         REQUIRE_FALSE(glz::read_etf(sample_from_str, etf_str_payload));
         CHECK(sample_from_str.id == sf);
         CHECK(sample_from_str.name == "test");
+
+        // 3. Roundtrip struct with native integer snowflake
+        SampleStruct original{.id = sf, .name = "test"};
+        std::string roundtrip_payload;
+        REQUIRE_FALSE(glz::write_etf(original, roundtrip_payload));
+
+        SampleStruct sample_roundtrip{};
+        REQUIRE_FALSE(glz::read_etf(sample_roundtrip, roundtrip_payload));
+        CHECK(sample_roundtrip.id == sf);
+        CHECK(sample_roundtrip.name == "test");
     }
 }
 
@@ -3666,10 +3774,10 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         multi_p.add_flag(discusy::permissions::permissions::SEND_MESSAGES);
         CHECK(multi_p.value == 3112);
 
-        // ETF roundtrip
+        // ETF roundtrip: with quoted_num ignored in ETF writes, flags_t serializes as native ETF integer (INTEGER_EXT for 3112)
         std::string enc_multi_etf;
         REQUIRE_FALSE(glz::write_etf(multi_p, enc_multi_etf));
-        CHECK(static_cast<uint8_t>(enc_multi_etf[1]) == glz::etf::tag::BINARY_EXT);
+        CHECK(static_cast<uint8_t>(enc_multi_etf[1]) == glz::etf::tag::INTEGER_EXT);
         discusy::permissions_t dec_multi_etf{};
         REQUIRE_FALSE(glz::read_etf(dec_multi_etf, enc_multi_etf));
         CHECK(dec_multi_etf.has_flag(discusy::permissions::permissions::ADMINISTRATOR));
@@ -3679,6 +3787,19 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         CHECK_FALSE(dec_multi_etf.has_flag(discusy::permissions::permissions::BAN_MEMBERS));
         CHECK_FALSE(dec_multi_etf.has_flag(discusy::permissions::permissions::KICK_MEMBERS));
         CHECK(dec_multi_etf == multi_p);
+
+        // Verify permissions_t also deserializes from string (BINARY_EXT) payload as sent by Discord
+        std::string str_multi_payload;
+        str_multi_payload.push_back(static_cast<char>(glz::etf::magic_version));
+        str_multi_payload.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        std::string str_3112 = "3112";
+        uint32_t be_len = glz::etf::detail::to_big_endian(static_cast<uint32_t>(str_3112.size()));
+        str_multi_payload.append(reinterpret_cast<const char*>(&be_len), 4);
+        str_multi_payload.append(str_3112);
+
+        discusy::permissions_t dec_from_str{};
+        REQUIRE_FALSE(glz::read_etf(dec_from_str, str_multi_payload));
+        CHECK(dec_from_str == multi_p);
 
         // JSON roundtrip
         std::string enc_multi_json;

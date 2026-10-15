@@ -90,14 +90,8 @@ namespace glz
             if constexpr (std::floating_point<V>) {
                return 9; // NEW_FLOAT_EXT + 8 bytes
             }
-            else if constexpr (sizeof(V) <= 1) {
-               return 2; // SMALL_INTEGER_EXT + 1 byte
-            }
-            else if constexpr (sizeof(V) <= 4) {
-               return 5; // INTEGER_EXT + 4 bytes
-            }
             else {
-               return 11; // SMALL_BIG_EXT (or quoted_num)
+               return 2; // SMALL_INTEGER_EXT + 1 byte
             }
          }
          else if constexpr (is_system_time_point<V>) {
@@ -159,8 +153,16 @@ namespace glz
             else if constexpr (sizeof(V) <= 1) {
                return 2; // SMALL_INTEGER_EXT + 1 byte
             }
-            else if constexpr (sizeof(V) <= 4) {
+            else if constexpr (sizeof(V) <= 2) {
                return 5; // INTEGER_EXT + 4 bytes
+            }
+            else if constexpr (sizeof(V) <= 4) {
+               if constexpr (std::is_signed_v<V>) {
+                  return 5; // INTEGER_EXT + 4 bytes
+               }
+               else {
+                  return 7; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 4 bytes = 7 bytes
+               }
             }
             else {
                return 11; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 8 = 11 bytes
@@ -381,27 +383,15 @@ namespace glz
       }
    };
 
-   // Numbers (integers, floats, bignums, and quoted-numbers)
+   // Numbers (integers, floats, bignums; ignores quoted_num in binary ETF)
    template <num_t T>
       requires(!custom_write<T>)
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, [[maybe_unused]] is_context auto& ctx, auto& b, auto& ix) noexcept
       {
-         if constexpr (check_quoted_num(Opts)) {
-            if constexpr (!check_write_unchecked(Opts)) {
-               etf::detail::ensure_space(b, ix + 5 + 64);
-            }
-            const auto start_ix = ix;
-            ix += 5;
-            glz::write_chars::op<write_unchecked_on<opt_false<Opts, quoted_num_opt_tag{}>>()>(value, ctx, b, ix);
-            const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
-            b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
-            etf::detail::write_be_at<uint32_t>(len, b, start_ix + 1);
-            return;
-         }
-         else if constexpr (std::floating_point<std::decay_t<T>>) {
+         if constexpr (std::floating_point<std::decay_t<T>>) {
             const auto d = static_cast<double>(value);
             uint64_t bits = 0;
             std::memcpy(&bits, &d, sizeof(double));
@@ -432,19 +422,22 @@ namespace glz
                   }
                }
                else {
-                  // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (8 bytes, little-endian digits)
+                  // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (stripped little-endian bytes)
+                  const auto uval = static_cast<uint64_t>(value);
+                  const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
+                  const size_t needed = 3 + n;
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + 11);
+                     etf::detail::ensure_space(b, ix + needed);
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
-                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
                   b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
-                  auto raw = static_cast<uint64_t>(value);
+                  auto raw = uval;
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
-                  std::memcpy(&b[ix + 3], &raw, 8);
-                  ix += 11;
+                  std::memcpy(&b[ix + 3], &raw, n);
+                  ix += needed;
                }
             }
             else { // signed integer
@@ -465,29 +458,23 @@ namespace glz
                   }
                }
                else {
-                  // 64-bit signed integer -> SMALL_BIG_EXT
+                  // 64-bit signed integer -> SMALL_BIG_EXT (stripped little-endian bytes)
+                  const bool is_negative = value < 0;
+                  const uint64_t uval = is_negative ? (0ULL - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
+                  const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
+                  const size_t needed = 3 + n;
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + 11);
+                     etf::detail::ensure_space(b, ix + needed);
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
-                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
-                  if (value < 0) {
-                     b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(1); // negative sign = 1
-                     auto raw = static_cast<uint64_t>(-static_cast<int64_t>(value));
-                     if constexpr (std::endian::native == std::endian::big) {
-                        raw = std::byteswap(raw);
-                     }
-                     std::memcpy(&b[ix + 3], &raw, 8);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
+                  b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(is_negative ? 1 : 0);
+                  auto raw = uval;
+                  if constexpr (std::endian::native == std::endian::big) {
+                     raw = std::byteswap(raw);
                   }
-                  else {
-                     b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0); // positive sign = 0
-                     auto raw = static_cast<uint64_t>(value);
-                     if constexpr (std::endian::native == std::endian::big) {
-                        raw = std::byteswap(raw);
-                     }
-                     std::memcpy(&b[ix + 3], &raw, 8);
-                  }
-                  ix += 11;
+                  std::memcpy(&b[ix + 3], &raw, n);
+                  ix += needed;
                }
             }
          }
