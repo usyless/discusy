@@ -4572,3 +4572,211 @@ TEST_CASE("ETF & JSON: struct glaze and glz::meta with mimic support", "[etf][js
         CHECK(std::get<LocalMimicString>(dec_s_json).val == "variant_text");
     }
 }
+
+TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED skip, 32-bit overflow, tuple append, timestamp heuristics", "[etf][security][fixes]") {
+    auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24) & 0xFF));
+        s.push_back(static_cast<char>((val >> 16) & 0xFF));
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+
+    auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+
+    SECTION("1. Map and Array DoS memory exhaustion protection and chunked reservation") {
+        // Corrupted/malicious arity in MAP_EXT: claims 30000 pairs in a 64-byte payload
+        std::string malicious_map;
+        malicious_map.push_back(static_cast<char>(glz::etf::magic_version));
+        malicious_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        append_be32(malicious_map, 30000);
+        malicious_map.append(60, '\x00'); // only 60 bytes left
+
+        std::unordered_map<std::uint64_t, std::string> dec_map;
+        auto ec_map = glz::read_etf(dec_map, malicious_map);
+        CHECK(static_cast<bool>(ec_map));
+        CHECK(ec_map.ec == glz::error_code::unexpected_end);
+
+        // Legitimate map with > 4096 entries verifies chunked reservation functionality
+        std::unordered_map<std::uint32_t, std::uint32_t> large_map;
+        for (std::uint32_t i = 0; i < 4200; ++i) {
+            large_map[i] = i * 2;
+        }
+        std::string large_map_buf;
+        REQUIRE_FALSE(glz::write_etf(large_map, large_map_buf));
+        std::unordered_map<std::uint32_t, std::uint32_t> dec_large_map;
+        REQUIRE_FALSE(glz::read_etf(dec_large_map, large_map_buf));
+        CHECK(dec_large_map.size() == 4200);
+        CHECK(dec_large_map[4199] == 4199 * 2);
+
+        // Legitimate vector with > 4096 elements of large struct (sizeof > 64)
+        std::vector<test_etf_types::NestedStruct> large_vec;
+        large_vec.resize(4100);
+        for (std::size_t i = 0; i < 4100; ++i) {
+            large_vec[i].title = "item";
+            large_vec[i].sample.count = static_cast<std::uint32_t>(i);
+        }
+        std::string large_vec_buf;
+        REQUIRE_FALSE(glz::write_etf(large_vec, large_vec_buf));
+        std::vector<test_etf_types::NestedStruct> dec_large_vec;
+        REQUIRE_FALSE(glz::read_etf(dec_large_vec, large_vec_buf));
+        CHECK(dec_large_vec.size() == 4100);
+        CHECK(dec_large_vec[4099].sample.count == 4099);
+    }
+
+    SECTION("2. FUN_EXT and COMPRESSED skipping in skip_value") {
+        // COMPRESSED (tag 80): 4-byte BE uncompressed size + compressed bytes
+        std::string comp_buf;
+        comp_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        comp_buf.push_back(static_cast<char>(glz::etf::tag::COMPRESSED));
+        append_be32(comp_buf, 1024);
+        comp_buf.append("dummy_zlib_compressed_stream_data_payload");
+
+        glz::skip sk_comp{};
+        CHECK_FALSE(static_cast<bool>(glz::read_etf(sk_comp, comp_buf)));
+
+        // FUN_EXT (tag 117): NumFree (4 BE), Pid, Module, Index, Uniq, followed by NumFree terms
+        std::string fun_buf;
+        fun_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::FUN_EXT));
+        append_be32(fun_buf, 2); // NumFree = 2
+        // Pid (NEW_PID_EXT: tag, node atom, ID 4, Serial 4, Creation 4)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::NEW_PID_EXT));
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT));
+        fun_buf.push_back(4);
+        fun_buf.append("node");
+        fun_buf.append(12, '\x00'); // ID (4) + Serial (4) + Creation (4)
+        // Module (atom)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT));
+        fun_buf.push_back(3);
+        fun_buf.append("mod");
+        // Index (small int)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        fun_buf.push_back(1);
+        // Uniq (small int)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        fun_buf.push_back(2);
+        // Free var 1 (small int)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        fun_buf.push_back(10);
+        // Free var 2 (small int)
+        fun_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        fun_buf.push_back(20);
+
+        glz::skip sk_fun{};
+        CHECK_FALSE(static_cast<bool>(glz::read_etf(sk_fun, fun_buf)));
+    }
+
+    SECTION("3. 32-bit integer overflow protection in LARGE_BIG_EXT, LIST_EXT, and references") {
+        // LARGE_BIG_EXT with n = 0xFFFFFFFF
+        std::string large_big;
+        large_big.push_back(static_cast<char>(glz::etf::magic_version));
+        large_big.push_back(static_cast<char>(glz::etf::tag::LARGE_BIG_EXT));
+        append_be32(large_big, 0xFFFFFFFFU);
+        large_big.push_back(0); // sign
+
+        glz::skip sk_lb{};
+        auto ec_lb = glz::read_etf(sk_lb, large_big);
+        CHECK(static_cast<bool>(ec_lb));
+        CHECK(ec_lb.ec == glz::error_code::unexpected_end);
+
+        // LIST_EXT with len = 0xFFFFFFFF
+        std::string list_ovf;
+        list_ovf.push_back(static_cast<char>(glz::etf::magic_version));
+        list_ovf.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+        append_be32(list_ovf, 0xFFFFFFFFU);
+
+        glz::skip sk_lo{};
+        auto ec_lo = glz::read_etf(sk_lo, list_ovf);
+        CHECK(static_cast<bool>(ec_lo));
+        CHECK(ec_lo.ec == glz::error_code::unexpected_end);
+
+        // NEW_REFERENCE_EXT with n = 0xFFFF
+        std::string ref_ovf;
+        ref_ovf.push_back(static_cast<char>(glz::etf::magic_version));
+        ref_ovf.push_back(static_cast<char>(glz::etf::tag::NEW_REFERENCE_EXT));
+        append_be16(ref_ovf, 0xFFFFU);
+        // node atom
+        ref_ovf.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT));
+        ref_ovf.push_back(4);
+        ref_ovf.append("node");
+
+        glz::skip sk_ref{};
+        auto ec_ref = glz::read_etf(sk_ref, ref_ovf);
+        CHECK(static_cast<bool>(ec_ref));
+        CHECK(ec_ref.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("4. check_append_arrays(Opts) in SMALL_TUPLE_EXT and LARGE_TUPLE_EXT") {
+        // SMALL_TUPLE_EXT {3, 4}
+        std::string tup_small;
+        tup_small.push_back(static_cast<char>(glz::etf::magic_version));
+        tup_small.push_back(static_cast<char>(glz::etf::tag::SMALL_TUPLE_EXT));
+        tup_small.push_back(2);
+        tup_small.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        tup_small.push_back(3);
+        tup_small.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        tup_small.push_back(4);
+
+        // Without append_arrays: overwrites
+        std::vector<int> v_overwrite = {1, 2};
+        REQUIRE_FALSE(glz::read_etf(v_overwrite, tup_small));
+        CHECK(v_overwrite == std::vector<int>{3, 4});
+
+        // With append_arrays: appends
+        std::vector<int> v_append = {1, 2};
+        REQUIRE_FALSE(glz::read<glz::etf_opts_append_arrays>(v_append, tup_small));
+        CHECK(v_append == std::vector<int>{1, 2, 3, 4});
+
+        // LARGE_TUPLE_EXT {5, 6}
+        std::string tup_large;
+        tup_large.push_back(static_cast<char>(glz::etf::magic_version));
+        tup_large.push_back(static_cast<char>(glz::etf::tag::LARGE_TUPLE_EXT));
+        append_be32(tup_large, 2);
+        tup_large.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        tup_large.push_back(5);
+        tup_large.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        tup_large.push_back(6);
+
+        std::vector<int> v_large_append = {1, 2};
+        REQUIRE_FALSE(glz::read<glz::etf_opts_append_arrays>(v_large_append, tup_large));
+        CHECK(v_large_append == std::vector<int>{1, 2, 5, 6});
+    }
+
+    SECTION("5. std::chrono::system_clock::time_point numeric timestamps") {
+        // Discord millisecond timestamp below 10^11 but above 10^10: e.g. 50,000,000,000 ms (Aug 1971)
+        // With previous 10^11 threshold, 50,000,000,000 was misinterpreted as seconds!
+        // With 10^10 threshold, it is correctly identified as milliseconds.
+        std::int64_t ms_val = 50000000000LL;
+        std::string enc_ms;
+        REQUIRE_FALSE(glz::write_etf(ms_val, enc_ms));
+
+        std::chrono::system_clock::time_point tp{};
+        REQUIRE_FALSE(glz::read_etf(tp, enc_ms));
+        auto dur_ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+        CHECK(dur_ms == 50000000000LL);
+
+        // Explicit milliseconds duration type
+        using ms_time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>;
+        std::int64_t small_ms = 12345LL;
+        std::string enc_small_ms;
+        REQUIRE_FALSE(glz::write_etf(small_ms, enc_small_ms));
+
+        ms_time_point tp_ms{};
+        REQUIRE_FALSE(glz::read_etf(tp_ms, enc_small_ms));
+        CHECK(tp_ms.time_since_epoch().count() == 12345LL);
+
+        // Explicit seconds duration type
+        using sec_time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
+        std::int64_t sec_val = 1700000000LL;
+        std::string enc_sec;
+        REQUIRE_FALSE(glz::write_etf(sec_val, enc_sec));
+
+        sec_time_point tp_sec{};
+        REQUIRE_FALSE(glz::read_etf(tp_sec, enc_sec));
+        CHECK(tp_sec.time_since_epoch().count() == 1700000000LL);
+    }
+}
+

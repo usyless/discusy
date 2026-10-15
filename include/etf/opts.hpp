@@ -20,6 +20,7 @@ namespace glz
          bool quoted_num = false;
          bool string_as_number = false;
          bool raw_string = false;
+         bool append_arrays = false;
 
          [[nodiscard]] constexpr bool operator==(const etf_opts&) const noexcept = default;
       };
@@ -43,5 +44,12 @@ namespace glz
       .format = ETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
+   };
+
+   inline constexpr etf::etf_opts etf_opts_append_arrays{
+      .format = ETF,
+      .null_terminated = false,
+      .error_on_unknown_keys = false,
+      .append_arrays = true,
    };
 } // namespace glz

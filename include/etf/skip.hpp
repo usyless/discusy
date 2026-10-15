@@ -56,6 +56,20 @@ namespace glz
             it += 8;
             break;
          }
+         case etf::tag::COMPRESSED: {
+            if (end - it < 4) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const uint32_t uncompressed_size = read_be<uint32_t>(it);
+            it += 4;
+            if (uncompressed_size == 0) [[unlikely]] {
+               ctx.error = error_code::syntax_error;
+               return;
+            }
+            it = end;
+            break;
+         }
          case etf::tag::ATOM_UTF8_EXT:
          case etf::tag::ATOM_EXT:
          case etf::tag::STRING_EXT: {
@@ -120,11 +134,11 @@ namespace glz
                return;
             }
             const auto n = static_cast<uint8_t>(*it++);
-            if (static_cast<size_t>(end - it) < 1 + n) [[unlikely]] {
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
-            it += 1 + n; // sign + digits
+            it += 1 + static_cast<size_t>(n); // sign + digits
             break;
          }
          case etf::tag::LARGE_BIG_EXT: {
@@ -134,11 +148,11 @@ namespace glz
             }
             const uint32_t n = read_be<uint32_t>(it);
             it += 4;
-            if (static_cast<size_t>(end - it) <= n) [[unlikely]] {
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
-            it += static_cast<size_t>(n) + 1; // sign + digits
+            it += 1 + static_cast<size_t>(n); // sign + digits
             break;
          }
          case etf::tag::NIL_EXT: {
@@ -187,7 +201,7 @@ namespace glz
             }
             const uint32_t len = read_be<uint32_t>(it);
             it += 4;
-            if (static_cast<size_t>(end - it) <= len) [[unlikely]] {
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
@@ -247,11 +261,11 @@ namespace glz
             it += 2;
             op<Opts>(ctx, it, end); // node
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
-            if (static_cast<size_t>(end - it) < 1 + (n * 4)) [[unlikely]] {
+            if (static_cast<size_t>(end - it) < 1ULL + (static_cast<size_t>(n) * 4)) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
-            it += 1 + (n * 4); // Creation (1) + IDs (n*4)
+            it += 1 + (static_cast<size_t>(n) * 4); // Creation (1) + IDs (n*4)
             break;
          }
          case etf::tag::NEWER_REFERENCE_EXT: {
@@ -263,11 +277,11 @@ namespace glz
             it += 2;
             op<Opts>(ctx, it, end); // node
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
-            if (static_cast<size_t>(end - it) < 4 + (n * 4)) [[unlikely]] {
+            if (static_cast<size_t>(end - it) < 4ULL + (static_cast<size_t>(n) * 4)) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
-            it += 4 + (n * 4); // Creation (4) + IDs (n*4)
+            it += 4 + (static_cast<size_t>(n) * 4); // Creation (4) + IDs (n*4)
             break;
          }
          case etf::tag::PORT_EXT: {
@@ -345,6 +359,33 @@ namespace glz
                return;
             }
             it += rem;
+            break;
+         }
+         case etf::tag::FUN_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
+            if (end - it < 4) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const uint32_t num_free = read_be<uint32_t>(it);
+            it += 4;
+            op<Opts>(ctx, it, end); // Pid
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            op<Opts>(ctx, it, end); // Module
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            op<Opts>(ctx, it, end); // Index
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            op<Opts>(ctx, it, end); // Uniq
+            if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            if (num_free > static_cast<size_t>(end - it)) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            for (uint32_t i = 0; i < num_free; ++i) {
+               op<Opts>(ctx, it, end);
+               if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+            }
             break;
          }
          default:

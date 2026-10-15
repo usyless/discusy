@@ -483,7 +483,7 @@ namespace glz
             const uint32_t len = etf::detail::read_be<uint32_t>(it);
             it += 4;
 
-            if (static_cast<size_t>(end - it) <= len) [[unlikely]] {
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
             }
@@ -507,18 +507,61 @@ namespace glz
                if constexpr (check_append_arrays(Opts)) {
                   const auto orig_size = value.size();
                   if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
-                  value.resize(orig_size + len);
-                  for (size_t i = orig_size; i < orig_size + len; ++i) {
-                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                     if (bool(ctx.error)) [[unlikely]] return;
+                  if constexpr (sizeof(V) > 64) {
+                     if (len > 4096) {
+                        value.resize(orig_size + 4096);
+                        for (size_t i = 0; i < len; ++i) {
+                           if (orig_size + i >= value.size()) {
+                              value.resize(std::min<size_t>(orig_size + len, value.size() + 4096));
+                           }
+                           parse<EETF>::op<Opts>(value[orig_size + i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                     else {
+                        value.resize(orig_size + len);
+                        for (size_t i = orig_size; i < orig_size + len; ++i) {
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                  }
+                  else {
+                     value.resize(orig_size + len);
+                     for (size_t i = orig_size; i < orig_size + len; ++i) {
+                        parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                     }
                   }
                }
                else {
                   if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.resize(len);
-                  for (auto&& elem : value) {
-                     parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (bool(ctx.error)) [[unlikely]] return;
+                  if constexpr (sizeof(V) > 64) {
+                     if (len > 4096) {
+                        value.clear();
+                        value.resize(4096);
+                        for (size_t i = 0; i < len; ++i) {
+                           if (i >= value.size()) {
+                              value.resize(std::min<size_t>(len, value.size() + 4096));
+                           }
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                     else {
+                        value.resize(len);
+                        for (auto&& elem : value) {
+                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                  }
+                  else {
+                     value.resize(len);
+                     for (auto&& elem : value) {
+                        parse<EETF>::op<Opts>(elem, ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                     }
                   }
                }
             }
@@ -526,9 +569,14 @@ namespace glz
                if constexpr (check_append_arrays(Opts)) {
                   if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(value.size() + len);
+                     value.reserve(std::min<size_t>(value.size() + len, value.size() + 4096));
                   }
                   for (size_t i = 0; i < len; ++i) {
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        if (i > 0 && (i % 4096 == 0)) {
+                           value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
+                        }
+                     }
                      V elem{};
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
                      if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -540,9 +588,14 @@ namespace glz
                   if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
                   value.clear();
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(len);
+                     value.reserve(std::min<size_t>(len, 4096));
                   }
                   for (size_t i = 0; i < len; ++i) {
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        if (i > 0 && (i % 4096 == 0)) {
+                           value.reserve(std::min<size_t>(len, i + 4096));
+                        }
+                     }
                      V elem{};
                      parse<EETF>::op<Opts>(elem, ctx, it, end);
                      if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -552,12 +605,22 @@ namespace glz
                }
             }
             else if constexpr (set_like) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.clear();
+               if constexpr (check_append_arrays(Opts)) {
+                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
+               }
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  value.clear();
+               }
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(len);
+                  value.reserve(std::min<size_t>(len, 4096));
                }
                for (size_t i = 0; i < len; ++i) {
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     if (i > 0 && (i % 4096 == 0)) {
+                        value.reserve(std::min<size_t>(len, i + 4096));
+                     }
+                  }
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
                   if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -825,34 +888,123 @@ namespace glz
             }
 
             if constexpr (resizable<T>) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.resize(len);
-               for (size_t i = 0; i < len; ++i) {
-                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                  if (bool(ctx.error)) [[unlikely]] return;
+               if constexpr (check_append_arrays(Opts)) {
+                  const auto orig_size = value.size();
+                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                  if constexpr (sizeof(V) > 64) {
+                     if (len > 4096) {
+                        value.resize(orig_size + 4096);
+                        for (size_t i = 0; i < len; ++i) {
+                           if (orig_size + i >= value.size()) {
+                              value.resize(std::min<size_t>(orig_size + len, value.size() + 4096));
+                           }
+                           parse<EETF>::op<Opts>(value[orig_size + i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                     else {
+                        value.resize(orig_size + len);
+                        for (size_t i = orig_size; i < orig_size + len; ++i) {
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                  }
+                  else {
+                     value.resize(orig_size + len);
+                     for (size_t i = orig_size; i < orig_size + len; ++i) {
+                        parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                  }
+               }
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  if constexpr (sizeof(V) > 64) {
+                     if (len > 4096) {
+                        value.clear();
+                        value.resize(4096);
+                        for (size_t i = 0; i < len; ++i) {
+                           if (i >= value.size()) {
+                              value.resize(std::min<size_t>(len, value.size() + 4096));
+                           }
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                     else {
+                        value.resize(len);
+                        for (auto&& elem : value) {
+                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                     }
+                  }
+                  else {
+                     value.resize(len);
+                     for (auto&& elem : value) {
+                        parse<EETF>::op<Opts>(elem, ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                  }
                }
             }
             else if constexpr (emplace_backable<T>) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.clear();
-               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(len);
+               if constexpr (check_append_arrays(Opts)) {
+                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(std::min<size_t>(value.size() + len, value.size() + 4096));
+                  }
+                  for (size_t i = 0; i < len; ++i) {
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        if (i > 0 && (i % 4096 == 0)) {
+                           value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
+                        }
+                     }
+                     V elem{};
+                     parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if (parse_failed(ctx.error)) [[unlikely]] return;
+                     value.emplace_back(std::move(elem));
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
-               for (size_t i = 0; i < len; ++i) {
-                  V elem{};
-                  parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-                  value.emplace_back(std::move(elem));
-                  if (bool(ctx.error)) [[unlikely]] return;
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  value.clear();
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     value.reserve(std::min<size_t>(len, 4096));
+                  }
+                  for (size_t i = 0; i < len; ++i) {
+                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                        if (i > 0 && (i % 4096 == 0)) {
+                           value.reserve(std::min<size_t>(len, i + 4096));
+                        }
+                     }
+                     V elem{};
+                     parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if (parse_failed(ctx.error)) [[unlikely]] return;
+                     value.emplace_back(std::move(elem));
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
             }
             else if constexpr (set_like) {
-               if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-               value.clear();
+               if constexpr (check_append_arrays(Opts)) {
+                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
+               }
+               else {
+                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                  value.clear();
+               }
                if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(len);
+                  value.reserve(std::min<size_t>(len, 4096));
                }
                for (size_t i = 0; i < len; ++i) {
+                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                     if (i > 0 && (i % 4096 == 0)) {
+                        value.reserve(std::min<size_t>(len, i + 4096));
+                     }
+                  }
                   V elem{};
                   parse<EETF>::op<Opts>(elem, ctx, it, end);
                   if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -998,10 +1150,15 @@ namespace glz
 
          value.clear();
          if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-            value.reserve(arity);
+            value.reserve(std::min<size_t>(arity, 4096));
          }
          using Key = std::remove_cvref_t<T>::key_type;
          for (uint32_t i = 0; i < arity; ++i) {
+            if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+               if (i > 0 && (i % 4096 == 0)) {
+                  value.reserve(std::min<size_t>(arity, i + 4096));
+               }
+            }
             Key key{};
             parse<EETF>::op<Opts>(key, ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -1670,13 +1827,24 @@ namespace glz
             int64_t num{};
             if (etf::detail::read_number(ctx, it, end, num)) {
                using Duration = std::remove_cvref_t<T>::duration;
-               if (num > 100000000000LL) {
+               using Period = Duration::period;
+               if constexpr (std::ratio_equal_v<Period, std::milli>) {
                   value = std::chrono::time_point_cast<Duration>(
                      std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
                }
-               else {
+               else if constexpr (std::ratio_equal_v<Period, std::ratio<1>>) {
                   value = std::chrono::time_point_cast<Duration>(
                      std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+               }
+               else {
+                  if (num > 10000000000LL || num < -10000000000LL) {
+                     value = std::chrono::time_point_cast<Duration>(
+                        std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
+                  }
+                  else {
+                     value = std::chrono::time_point_cast<Duration>(
+                        std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+                  }
                }
                return;
             }
