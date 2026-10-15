@@ -31,11 +31,13 @@ public:
     stream_decompressor(stream_decompressor&&) = delete;
     stream_decompressor& operator=(stream_decompressor&&) = delete;
 
-    [[nodiscard]] std::string push(const std::string_view chunk) {
+    bool push(const std::string_view chunk, std::string& out) {
+        out.clear();
+        if (out.capacity() < chunk.size() * 4) {
+            out.reserve(chunk.size() * 4);
+        }
+
         ZSTD_inBuffer input{ .src=chunk.data(), .size=chunk.size(), .pos=0 };
-        std::string decompressed_payload;
-        
-        decompressed_payload.reserve(chunk.size() * 4);
 
         do {
             output_.pos = 0;
@@ -43,11 +45,11 @@ public:
             size_t remaining_hint = ZSTD_decompressStream(ptr_, &output_, &input);
 
             if (ZSTD_isError(remaining_hint) != 0U) {
-                throw std::runtime_error(ulp::str::concat_strings("ZSTD_decompressStream failed: ", ZSTD_getErrorName(remaining_hint)));
+                return false;
             }
 
             if (output_.pos > 0) {
-                decompressed_payload.append(reinterpret_cast<const char*>(tmp_.data()), output_.pos);
+                out.append(reinterpret_cast<const char*>(tmp_.data()), output_.pos);
             }
             
             if (input.pos == input.size && output_.pos < tmp_.size()) {
@@ -55,6 +57,12 @@ public:
             }
         } while (true);
 
+        return true;
+    }
+
+    [[nodiscard]] std::string push(const std::string_view chunk) {
+        std::string decompressed_payload;
+        push(chunk, decompressed_payload);
         return decompressed_payload;
     }
 

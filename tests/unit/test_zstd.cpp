@@ -27,6 +27,18 @@ TEST_CASE("Zstd: Stream decompressor handles compressed chunks and reset", "[zst
         CHECK(decompressed == original);
     }
 
+    SECTION("Decompress using caller-provided buffer with capacity reuse") {
+        std::string buf;
+        decompressor.push(chunk, buf);
+        CHECK(buf == original);
+
+        const auto cap_before = buf.capacity();
+        decompressor.reset();
+        decompressor.push(chunk, buf);
+        CHECK(buf == original);
+        CHECK(buf.capacity() == cap_before);
+    }
+
     SECTION("Stream reset allows reusing decompressor") {
         std::string first = decompressor.push(chunk);
         CHECK(first == original);

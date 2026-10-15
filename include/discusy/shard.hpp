@@ -170,6 +170,7 @@ private:
         }
         
         inflater_.reset();
+        decompressed_buffer_.clear();
 
         std::string_view connect_url = state_.gateway_url;
         if (try_resume_ && !resume_gateway_url_.empty()) {
@@ -278,10 +279,17 @@ private:
 
     void handle_ws_message(const std::string_view msg, bool) {
         try {
-            handle_gateway_payload(inflater_.push(msg));
+            if (inflater_.push(msg, decompressed_buffer_)) {
+                handle_gateway_payload(decompressed_buffer_);
+            }
+            // if (decompressed_buffer_.capacity() > 1UZ * 1024 * 1024) {
+            //     decompressed_buffer_.shrink_to_fit();
+            // }
         }
         catch ([[maybe_unused]]  std::bad_alloc& e) {
             inflater_.reset();
+            decompressed_buffer_.clear();
+            decompressed_buffer_.shrink_to_fit();
             #ifdef DISCUSY_LOGGING
             log("on_message bad_alloc: {}", e.what());
             #endif
@@ -366,7 +374,7 @@ private:
     }
 
     // NOLINTNEXTLINE(readability-function-size)
-    void handle_gateway_payload(std::string&& json_payload) {
+    void handle_gateway_payload(std::string& json_payload) {
         #ifdef DISCUSY_LOGGING
         log("Handle gateway payload: {}", json_payload);
         #endif
@@ -460,12 +468,12 @@ private:
                                 self->handle_##LOWER(p.d); \
                                 self->state_.gateway_callbacks.on_##LOWER.fire(std::move(p.d)); \
                             } else { \
-                                self->state_.gateway_callbacks.on_##LOWER.template fire_payload<recieve_event::payload<recieve_event::LOWER>>(std::forward<decltype(payload)>(payload)); \
+                                self->state_.gateway_callbacks.on_##LOWER.template fire_payload<recieve_event::payload<recieve_event::LOWER>>(payload); \
                             } \
                             if constexpr (requires { self->post_handle_##LOWER(); }) { \
                                 self->post_handle_##LOWER(); \
                             } \
-                        })(this, std::move(json_payload)); \
+                        })(this, json_payload); \
                         break; \
                     }
 
@@ -655,6 +663,7 @@ private:
     const config& cfg_;
 
     discusy::zstd::stream_decompressor inflater_;
+    std::string decompressed_buffer_;
     std::int64_t seq_{-1};
 
     ctx::io_context::strand_timer_t hb_timer_;

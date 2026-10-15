@@ -9,6 +9,8 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#include <string>
+#include <string_view>
 
 #include <boost/container/small_vector.hpp>
 
@@ -745,7 +747,7 @@ public:
     }
 
     template <typename W = T>
-    void fire_payload(std::string&& payload) {
+    void fire_payload(std::string_view payload) {
         if (!core_) return;
         const auto active_c = core_->active_count.load(std::memory_order_acquire);
         if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
@@ -755,14 +757,14 @@ public:
 
         try {
             if (!snap || snap->async_count == 0) {
-                io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable {
+                io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::string(payload)]() mutable {
                     W p{};
                     if (gateway_protocol::parse(p, payload)) return;
                     attach_bot(p.d, bot_ptr_);
                     fire_sync_internal(std::move(core), std::move(snap), p.d);
                 });
             } else {
-                io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable -> coro::awaitable<void> {
+                io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::string(payload)]() mutable -> coro::awaitable<void> {
                     W p{};
                     if (gateway_protocol::parse(p, payload)) co_return;
                     attach_bot(p.d, bot_ptr_);
@@ -778,10 +780,49 @@ public:
         }
     }
 
+    // template <typename W = T>
+    // void fire_payload(std::string&& payload) {
+    //     if (!core_) return;
+    //     const auto active_c = core_->active_count.load(std::memory_order_acquire);
+    //     if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
+
+    //     auto snap = core_->get_snapshot();
+    //     if ((!snap || snap->empty()) && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
+
+    //     try {
+    //         if (!snap || snap->async_count == 0) {
+    //             io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable {
+    //                 W p{};
+    //                 if (gateway_protocol::parse(p, payload)) return;
+    //                 attach_bot(p.d, bot_ptr_);
+    //                 fire_sync_internal(std::move(core), std::move(snap), p.d);
+    //             });
+    //         } else {
+    //             io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable -> coro::awaitable<void> {
+    //                 W p{};
+    //                 if (gateway_protocol::parse(p, payload)) co_return;
+    //                 attach_bot(p.d, bot_ptr_);
+    //                 co_await fire_async_internal(std::move(core), std::move(snap), std::move(p.d));
+    //                 co_return;
+    //             });
+    //         }
+    //     }
+    //     catch (...) {
+    //         #ifdef DISCUSY_LOGGING
+    //         log::Logger{}("Callback fire_payload unknown exception");
+    //         #endif
+    //     }
+    // }
+
     template <typename W = T>
-    void fire_json(std::string&& json) {
-        fire_payload<W>(std::move(json));
+    void fire_json(std::string_view json) {
+        fire_payload<W>(json);
     }
+
+    // template <typename W = T>
+    // void fire_json(std::string&& json) {
+    //     fire_payload<W>(std::move(json));
+    // }
 
     template <typename Predicate, typename Handler, typename Executor>
     struct when_node final : when_interface {
