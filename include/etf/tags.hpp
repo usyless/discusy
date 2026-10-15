@@ -357,6 +357,10 @@ namespace glz::etf
             it += len;
             return true;
          }
+         case tag::NIL_EXT: {
+            key = std::string_view{};
+            return true;
+         }
          default:
             ctx.error = error_code::syntax_error;
             return false;
@@ -802,7 +806,19 @@ namespace glz::etf
                }
             }
             else {
-               double d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               double d = 0.0;
+               if (n <= 8 && !overflow) {
+                  d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               }
+               else {
+                  const auto* digits = it - n;
+                  for (size_t i = n; i > 0; --i) {
+                     d = (d * 256.0) + static_cast<double>(static_cast<uint8_t>(digits[i - 1]));
+                  }
+                  if (sign) {
+                     d = -d;
+                  }
+               }
                num = static_cast<T>(d);
             }
             return true;
@@ -883,7 +899,19 @@ namespace glz::etf
                }
             }
             else {
-               double d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               double d = 0.0;
+               if (n <= 8 && !overflow) {
+                  d = sign ? -static_cast<double>(raw) : static_cast<double>(raw);
+               }
+               else {
+                  const auto* digits = it - n;
+                  for (size_t i = n; i > 0; --i) {
+                     d = (d * 256.0) + static_cast<double>(static_cast<uint8_t>(digits[i - 1]));
+                  }
+                  if (sign) {
+                     d = -d;
+                  }
+               }
                num = static_cast<T>(d);
             }
             return true;

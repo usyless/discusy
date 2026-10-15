@@ -710,7 +710,7 @@ namespace glz
          }
 
          if (tag == etf::tag::STRING_EXT) {
-            if constexpr (std::is_arithmetic_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) {
+            if constexpr (std::is_arithmetic_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte> || std::is_constructible_v<V, uint8_t>) {
                if (end - it < 2) [[unlikely]] {
                   ctx.error = error_code::unexpected_end;
                   return;
@@ -737,29 +737,34 @@ namespace glz
                   }
                }
 
+               const auto orig_size = check_append_arrays(Opts) ? value.size() : 0;
                if constexpr (sizeof(V) == 1) {
                   if constexpr (resizable<T>) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     resize_unfilled(value, len);
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                     resize_unfilled(value, orig_size + len);
                      if (len > 0) {
-                        std::memcpy(value.data(), it, len);
+                        std::memcpy(value.data() + orig_size, it, len);
                      }
                   }
                   else if constexpr (emplace_backable<T>) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     value.clear();
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                     if constexpr (!check_append_arrays(Opts)) {
+                        value.clear();
+                     }
                      if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        value.reserve(len);
+                        value.reserve(orig_size + len);
                      }
                      for (size_t i = 0; i < len; ++i) {
                         value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                      }
                   }
                   else if constexpr (set_like) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     value.clear();
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                     if constexpr (!check_append_arrays(Opts)) {
+                        value.clear();
+                     }
                      if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        value.reserve(len);
+                        value.reserve(orig_size + len);
                      }
                      for (size_t i = 0; i < len; ++i) {
                         value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
@@ -783,32 +788,36 @@ namespace glz
                }
                else {
                   if constexpr (resizable<T>) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
                      if constexpr (std::is_trivially_copyable_v<V>) {
-                        resize_unfilled(value, len);
+                        resize_unfilled(value, orig_size + len);
                      }
                      else {
-                        value.resize(len);
+                        value.resize(orig_size + len);
                      }
                      for (size_t i = 0; i < len; ++i) {
-                        value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                        value[orig_size + i] = static_cast<V>(static_cast<uint8_t>(it[i]));
                      }
                   }
                   else if constexpr (emplace_backable<T>) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     value.clear();
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                     if constexpr (!check_append_arrays(Opts)) {
+                        value.clear();
+                     }
                      if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        value.reserve(len);
+                        value.reserve(orig_size + len);
                      }
                      for (size_t i = 0; i < len; ++i) {
                         value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                      }
                   }
                   else if constexpr (set_like) {
-                     if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                     value.clear();
+                     if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                     if constexpr (!check_append_arrays(Opts)) {
+                        value.clear();
+                     }
                      if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        value.reserve(len);
+                        value.reserve(orig_size + len);
                      }
                      for (size_t i = 0; i < len; ++i) {
                         value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
@@ -864,28 +873,33 @@ namespace glz
                   }
                }
 
+               const auto orig_size = check_append_arrays(Opts) ? value.size() : 0;
                if constexpr (resizable<T>) {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  resize_unfilled(value, len);
+                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                  resize_unfilled(value, orig_size + len);
                   if (len > 0) {
-                     std::memcpy(value.data(), it, len);
+                     std::memcpy(value.data() + orig_size, it, len);
                   }
                }
                else if constexpr (emplace_backable<T>) {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
+                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                  if constexpr (!check_append_arrays(Opts)) {
+                     value.clear();
+                  }
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(len);
+                     value.reserve(orig_size + len);
                   }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace_back(static_cast<V>(static_cast<uint8_t>(it[i])));
                   }
                }
                else if constexpr (set_like) {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
+                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+                  if constexpr (!check_append_arrays(Opts)) {
+                     value.clear();
+                  }
                   if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(len);
+                     value.reserve(orig_size + len);
                   }
                   for (size_t i = 0; i < len; ++i) {
                      value.emplace(static_cast<V>(static_cast<uint8_t>(it[i])));
@@ -1246,8 +1260,15 @@ namespace glz
                }
             }
             Key key{};
-            parse<EETF>::op<Opts>(key, ctx, it, end);
-            if (parse_failed(ctx.error)) [[unlikely]] return;
+            if constexpr (str_t<Key>) {
+               std::string_view sv{};
+               if (!etf::detail::read_key(ctx, it, end, sv)) [[unlikely]] return;
+               key = Key(sv);
+            }
+            else {
+               parse<EETF>::op<Opts>(key, ctx, it, end);
+               if (parse_failed(ctx.error)) [[unlikely]] return;
+            }
             parse<EETF>::op<Opts>(value[std::move(key)], ctx, it, end);
             if (bool(ctx.error)) [[unlikely]] return;
          }
@@ -1286,6 +1307,7 @@ namespace glz
 
          static constexpr auto N = reflect<T>::size;
          [[maybe_unused]] size_t read_count{};
+         [[maybe_unused]] glz::bit_array<N> seen_fields{};
 
          [[maybe_unused]] auto fields = [&] {
             if constexpr (reflectable<T>) {
@@ -1335,6 +1357,10 @@ namespace glz
                   if (bool(ctx.error)) [[unlikely]] {
                      return;
                   }
+                  if constexpr (Opts.error_on_missing_keys || Opts.partial_read) {
+                     seen_fields[0] = true;
+                     read_count = 1;
+                  }
                   if constexpr (Opts.partial_read) {
                      if (ctx.depth == 1) {
                         ctx.error = error_code::partial_read_complete;
@@ -1380,7 +1406,15 @@ namespace glz
                         static constexpr auto Length = TargetKey.size();
                         if ((Length == key.size()) && compare<Length>(TargetKey.data(), key.data())) [[likely]] {
                            matched = true;
-                           ++read_count;
+                           if constexpr (Opts.error_on_missing_keys || Opts.partial_read) {
+                              if (!seen_fields[I]) {
+                                 seen_fields[I] = true;
+                                 ++read_count;
+                              }
+                           }
+                           else {
+                              ++read_count;
+                           }
                            if constexpr (skipped_by_meta<T, I, operation::parse>) {
                               skip_value<EETF>::op<Opts>(ctx, it, end);
                            }
@@ -1449,7 +1483,14 @@ namespace glz
          }
 
          if constexpr (Opts.error_on_missing_keys) {
-            if (read_count < N) {
+            static constexpr auto req_fields = required_fields<T, Opts>();
+            if ((req_fields & seen_fields) != req_fields) {
+               for (size_t i = 0; i < N; ++i) {
+                  if (not seen_fields[i] && req_fields[i]) {
+                     ctx.custom_error_message = reflect<T>::keys[i];
+                     break;
+                  }
+               }
                ctx.error = error_code::missing_key;
                return;
             }
@@ -1815,15 +1856,27 @@ namespace glz
          case etf::tag::INTEGER_EXT:
          case etf::tag::SMALL_BIG_EXT:
          case etf::tag::LARGE_BIG_EXT: {
+            const auto start = it;
+            const auto try_alternative = [&]<class V>(std::type_identity<V>) {
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+               it = start;
+               V v{};
+               if (!etf::detail::read_number(ctx, it, end, v)) return false;
+               value.data = v;
+               return true;
+            };
+
             if constexpr (Mode == num_mode::u64) {
-               uint64_t n{};
-               if (!etf::detail::read_number(ctx, it, end, n)) return;
-               value.data = n;
+               if (!try_alternative(std::type_identity<uint64_t>{}) &&
+                   !try_alternative(std::type_identity<int64_t>{})) {
+                  if (!try_alternative(std::type_identity<double>{})) return;
+               }
             }
             else if constexpr (Mode == num_mode::i64) {
-               int64_t n{};
-               if (!etf::detail::read_number(ctx, it, end, n)) return;
-               value.data = n;
+               if (!try_alternative(std::type_identity<int64_t>{})) {
+                  if (!try_alternative(std::type_identity<double>{})) return;
+               }
             }
             else {
                double d{};

@@ -248,6 +248,20 @@ struct MimicHolderStruct {
     bool operator==(const MimicHolderStruct&) const = default;
 };
 
+struct OptionalFieldStruct {
+    std::string name{"default_name"};
+    std::optional<int> age{std::nullopt};
+};
+
+struct TwoRequiredFieldsStruct {
+    std::string name{};
+    int id{0};
+};
+
+struct OnlyName {
+    std::string name{"present_name"};
+};
+
 }
 
 template <>
@@ -1809,6 +1823,181 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         auto ec = glz::read<glz::etf_opts_partial_read>(sub, enc);
         CHECK(ec.ec == glz::error_code::none);
         CHECK_FALSE(static_cast<bool>(ec));
+    }
+}
+
+TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing keys, string vectors", "[etf][fixes]") {
+    SECTION("readable_map_t accepts atom keys (SMALL_ATOM_UTF8_EXT and ATOM_EXT)") {
+        std::string payload;
+        payload.push_back(static_cast<char>(glz::etf::magic_version));
+        payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        uint32_t arity = glz::etf::detail::to_big_endian(2U);
+        payload.append(reinterpret_cast<const char*>(&arity), 4);
+
+        // Key 1: SMALL_ATOM_UTF8_EXT (tag 119) => "foo"
+        payload.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT));
+        payload.push_back(static_cast<char>(3));
+        payload.append("foo");
+        // Val 1: SMALL_INTEGER_EXT (tag 97) => 10
+        payload.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        payload.push_back(static_cast<char>(10));
+
+        // Key 2: ATOM_EXT (tag 100) => "bar"
+        payload.push_back(static_cast<char>(glz::etf::tag::ATOM_EXT));
+        uint16_t atom_len = glz::etf::detail::to_big_endian(static_cast<uint16_t>(3));
+        payload.append(reinterpret_cast<const char*>(&atom_len), 2);
+        payload.append("bar");
+        // Val 2: SMALL_INTEGER_EXT (tag 97) => 20
+        payload.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        payload.push_back(static_cast<char>(20));
+
+        std::map<std::string, int> map{};
+        REQUIRE_FALSE(glz::read_etf(map, payload));
+        CHECK(map.size() == 2);
+        CHECK(map["foo"] == 10);
+        CHECK(map["bar"] == 20);
+
+        std::unordered_map<std::string, int> umap{};
+        REQUIRE_FALSE(glz::read_etf(umap, payload));
+        CHECK(umap.size() == 2);
+        CHECK(umap["foo"] == 10);
+        CHECK(umap["bar"] == 20);
+    }
+
+    SECTION("glz::generic_u64 correctly handles negative integers") {
+        // INTEGER_EXT negative integer (-42)
+        std::string neg_int;
+        neg_int.push_back(static_cast<char>(glz::etf::magic_version));
+        neg_int.push_back(static_cast<char>(glz::etf::tag::INTEGER_EXT));
+        int32_t val = glz::etf::detail::to_big_endian(-42);
+        neg_int.append(reinterpret_cast<const char*>(&val), 4);
+
+        glz::generic_u64 gen_u64{};
+        REQUIRE_FALSE(glz::read_etf(gen_u64, neg_int));
+        REQUIRE(std::holds_alternative<int64_t>(gen_u64.data));
+        CHECK(std::get<int64_t>(gen_u64.data) == -42);
+
+        // SMALL_BIG_EXT negative integer (-1000)
+        std::string neg_big;
+        neg_big.push_back(static_cast<char>(glz::etf::magic_version));
+        neg_big.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        neg_big.push_back(static_cast<char>(2)); // 2 bytes
+        neg_big.push_back(static_cast<char>(1)); // sign = 1 (negative)
+        uint16_t mag = 1000;
+        neg_big.append(reinterpret_cast<const char*>(&mag), 2);
+
+        glz::generic_u64 gen_u64_big{};
+        REQUIRE_FALSE(glz::read_etf(gen_u64_big, neg_big));
+        REQUIRE(std::holds_alternative<int64_t>(gen_u64_big.data));
+        CHECK(std::get<int64_t>(gen_u64_big.data) == -1000);
+    }
+
+    SECTION("glz::generic_i64 correctly falls back to double on > INT64_MAX") {
+        uint64_t huge_u64 = 0xF000000000000000ULL;
+        std::string huge_etf;
+        REQUIRE_FALSE(glz::write_etf(huge_u64, huge_etf));
+
+        glz::generic_i64 gen_i64{};
+        REQUIRE_FALSE(glz::read_etf(gen_i64, huge_etf));
+        REQUIRE(std::holds_alternative<double>(gen_i64.data));
+        CHECK(std::get<double>(gen_i64.data) == static_cast<double>(huge_u64));
+    }
+
+    SECTION("Bignum with > 8 bytes into double evaluates without low 64-bit truncation") {
+        // SMALL_BIG_EXT with 9 bytes, sign = 0, digits 0..7 are 0, digit 8 is 1 => 256^8 = 18446744073709551616.0
+        std::string bignum_etf;
+        bignum_etf.push_back(static_cast<char>(glz::etf::magic_version));
+        bignum_etf.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        bignum_etf.push_back(static_cast<char>(9)); // n = 9
+        bignum_etf.push_back(static_cast<char>(0)); // sign = 0 (positive)
+        for (int i = 0; i < 8; ++i) {
+            bignum_etf.push_back(static_cast<char>(0x00));
+        }
+        bignum_etf.push_back(static_cast<char>(0x01)); // d_8 = 1
+
+        double d_val = 0.0;
+        REQUIRE_FALSE(glz::read_etf(d_val, bignum_etf));
+        // If truncated to low 64 bits (raw), d_val would be 0.0. With Horner's method:
+        CHECK(d_val == 18446744073709551616.0);
+    }
+
+    SECTION("error_on_missing_keys ignores std::optional fields") {
+        std::string enc_only_name;
+        REQUIRE_FALSE(glz::write_etf(OnlyName{}, enc_only_name));
+
+        test_etf_types::OptionalFieldStruct opt_s{};
+        auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(opt_s, enc_only_name);
+        CHECK(ec.ec == glz::error_code::none);
+        CHECK_FALSE(static_cast<bool>(ec));
+        CHECK(opt_s.name == "present_name");
+        CHECK_FALSE(opt_s.age.has_value());
+    }
+
+    SECTION("error_on_missing_keys cannot be bypassed by duplicate keys") {
+        // Map with 2 keys: "name" and "name" (duplicate), missing required "id"
+        std::string dup_etf;
+        dup_etf.push_back(static_cast<char>(glz::etf::magic_version));
+        dup_etf.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        uint32_t arity = glz::etf::detail::to_big_endian(2U);
+        dup_etf.append(reinterpret_cast<const char*>(&arity), 4);
+
+        std::string k = "name";
+        std::string k_etf;
+        REQUIRE_FALSE(glz::write_etf(k, k_etf));
+        std::string v1 = "first";
+        std::string v1_etf;
+        REQUIRE_FALSE(glz::write_etf(v1, v1_etf));
+        dup_etf.append(k_etf.data() + 1, k_etf.size() - 1);
+        dup_etf.append(v1_etf.data() + 1, v1_etf.size() - 1);
+
+        std::string v2 = "second";
+        std::string v2_etf;
+        REQUIRE_FALSE(glz::write_etf(v2, v2_etf));
+        dup_etf.append(k_etf.data() + 1, k_etf.size() - 1);
+        dup_etf.append(v2_etf.data() + 1, v2_etf.size() - 1);
+
+        test_etf_types::TwoRequiredFieldsStruct req_s{};
+        auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(req_s, dup_etf);
+        CHECK(static_cast<bool>(ec));
+        CHECK(ec.ec == glz::error_code::missing_key);
+    }
+
+    SECTION("STRING_EXT supports std::vector<discusy::snowflake>") {
+        std::string str_ext_buf;
+        str_ext_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        str_ext_buf.push_back(static_cast<char>(glz::etf::tag::STRING_EXT));
+        uint16_t len = glz::etf::detail::to_big_endian(static_cast<uint16_t>(3));
+        str_ext_buf.append(reinterpret_cast<const char*>(&len), 2);
+        str_ext_buf.push_back(static_cast<char>(10));
+        str_ext_buf.push_back(static_cast<char>(20));
+        str_ext_buf.push_back(static_cast<char>(30));
+
+        std::vector<discusy::snowflake> sf_vec{};
+        REQUIRE_FALSE(glz::read_etf(sf_vec, str_ext_buf));
+        REQUIRE(sf_vec.size() == 3);
+        CHECK(sf_vec[0] == discusy::snowflake{10});
+        CHECK(sf_vec[1] == discusy::snowflake{20});
+        CHECK(sf_vec[2] == discusy::snowflake{30});
+
+        // Test append_arrays preserves existing elements
+        auto ec_app = glz::read<glz::etf_opts_append_arrays>(sf_vec, str_ext_buf);
+        REQUIRE_FALSE(static_cast<bool>(ec_app));
+        CHECK(sf_vec.size() == 6);
+        CHECK(sf_vec[3] == discusy::snowflake{10});
+        CHECK(sf_vec[4] == discusy::snowflake{20});
+        CHECK(sf_vec[5] == discusy::snowflake{30});
+    }
+
+    SECTION("BINARY_EXT honors append_arrays") {
+        std::vector<uint8_t> byte_vec{1, 2};
+        std::string bin_buf;
+        std::vector<uint8_t> new_bytes{3, 4, 5};
+        REQUIRE_FALSE(glz::write_etf(new_bytes, bin_buf));
+
+        auto ec = glz::read<glz::etf_opts_append_arrays>(byte_vec, bin_buf);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        CHECK(byte_vec.size() == 5);
+        CHECK(byte_vec == std::vector<uint8_t>{1, 2, 3, 4, 5});
     }
 }
 

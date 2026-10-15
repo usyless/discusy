@@ -52,4 +52,11 @@ namespace glz
       .error_on_unknown_keys = false,
       .append_arrays = true,
    };
+
+   inline constexpr etf::etf_opts etf_opts_error_on_missing_keys{
+      .format = ETF,
+      .null_terminated = false,
+      .error_on_unknown_keys = false,
+      .error_on_missing_keys = true,
+   };
 } // namespace glz
