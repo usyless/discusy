@@ -581,7 +581,7 @@ namespace glz
             for (auto&& item : value) {
                to<EETF, item_t>::template no_header<Opts>(item, ctx, b, ix);
             }
-            etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
+            etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
          }
       }
    };
