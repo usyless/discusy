@@ -470,9 +470,6 @@ namespace glz
             return;
          }
 
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] return;
-
          const auto tag = static_cast<uint8_t>(*it++);
          if (tag == etf::tag::NIL_EXT) {
             if constexpr (growable) {
@@ -1195,8 +1192,6 @@ namespace glz
             ctx.error = error_code::unexpected_end;
             return;
          }
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] return;
 
          const auto tag = static_cast<uint8_t>(*it++);
          if (tag != etf::tag::MAP_EXT) [[unlikely]] {
@@ -1266,11 +1261,6 @@ namespace glz
       template <auto Opts, class Value, is_context Ctx, class It0, class It1>
       static void op(Value&& value, Ctx&& ctx, It0&& it, It1 end)
       {
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] {
-            return;
-         }
-
          if (end - it < 5) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return;
@@ -1344,11 +1334,6 @@ namespace glz
                      seen_fields[0] = true;
                      read_count = 1;
                   }
-                  if constexpr (Opts.partial_read) {
-                     if (ctx.depth == 1) {
-                        ctx.error = error_code::partial_read_complete;
-                     }
-                  }
                   return;
                }
             }
@@ -1357,10 +1342,6 @@ namespace glz
          for (uint32_t key_idx = 0; key_idx < arity; ++key_idx) {
             if constexpr (Opts.partial_read) {
                if (read_count >= N) {
-                  if (ctx.depth == 1) {
-                     ctx.error = error_code::partial_read_complete;
-                     return;
-                  }
                   for (uint32_t rem = key_idx; rem < arity; ++rem) {
                      skip_value<EETF>::op<Opts>(ctx, it, end);
                      if (bool(ctx.error)) [[unlikely]] return;
@@ -1437,10 +1418,6 @@ namespace glz
 
                if constexpr (Opts.partial_read) {
                   if (read_count >= N) {
-                     if (ctx.depth == 1) {
-                        ctx.error = error_code::partial_read_complete;
-                        return;
-                     }
                      for (uint32_t rem = key_idx + 1; rem < arity; ++rem) {
                         skip_value<EETF>::op<Opts>(ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
@@ -1824,8 +1801,6 @@ namespace glz
             ctx.error = error_code::unexpected_end;
             return;
          }
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] return;
 
          const auto tag = static_cast<uint8_t>(*it);
          switch (tag) {

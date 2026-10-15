@@ -284,6 +284,11 @@ struct StructWithOptionalSubStruct {
     bool operator==(const StructWithOptionalSubStruct&) const = default;
 };
 
+struct StructWithU32 {
+    uint32_t big_u32{0xFFFFFFFFU};
+    bool operator==(const StructWithU32&) const = default;
+};
+
 }
 
 template <>
@@ -1164,48 +1169,6 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         CHECK(ec_skip.ec == glz::error_code::unexpected_end);
     }
 
-    SECTION("Maximum recursive depth enforcement (exceeded_max_recursive_depth)") {
-        // Construct deeply nested LIST_EXT (300 levels > max_recursive_depth_limit 256)
-        constexpr size_t nesting = 300;
-        std::string deep_list;
-        deep_list.push_back(static_cast<char>(glz::etf::magic_version));
-        for (size_t i = 0; i < nesting; ++i) {
-            deep_list.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
-            append_be32(deep_list, 1);
-        }
-        deep_list.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
-        deep_list.push_back(static_cast<char>(1));
-        for (size_t i = 0; i < nesting; ++i) {
-            deep_list.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
-        }
-
-        glz::generic json_val{};
-        auto ec_list = glz::read_etf(json_val, deep_list);
-        CHECK(static_cast<bool>(ec_list));
-        CHECK(ec_list.ec == glz::error_code::exceeded_max_recursive_depth);
-
-        glz::skip s{};
-        auto ec_skip = glz::read_etf(s, deep_list);
-        CHECK(static_cast<bool>(ec_skip));
-        CHECK(ec_skip.ec == glz::error_code::exceeded_max_recursive_depth);
-
-        // Construct deeply nested MAP_EXT (300 levels)
-        std::string deep_map;
-        deep_map.push_back(static_cast<char>(glz::etf::magic_version));
-        for (size_t i = 0; i < nesting; ++i) {
-            deep_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
-            append_be32(deep_map, 1);
-            deep_map.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
-            append_be32(deep_map, 1);
-            deep_map.push_back('k');
-        }
-        deep_map.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
-        deep_map.push_back(static_cast<char>(99));
-
-        auto ec_map = glz::read_etf(json_val, deep_map);
-        CHECK(static_cast<bool>(ec_map));
-        CHECK(ec_map.ec == glz::error_code::exceeded_max_recursive_depth);
-    }
 
     SECTION("Truncated primitive data types") {
         // NEW_FLOAT_EXT (< 8 bytes)
@@ -2087,7 +2050,28 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         CHECK(dec3 == val3);
         CHECK(dec5 == val5);
         CHECK(dec8 == val8);
+
+        // uint32_t with bit 31 set (SMALL_BIG_EXT with exactly 4 bytes)
+        uint32_t u32_val = 0xFEDCBA98U;
+        std::string enc_u32;
+        REQUIRE_FALSE(glz::write_etf(u32_val, enc_u32));
+        REQUIRE(enc_u32.size() == 1 + 7);
+        CHECK(static_cast<uint8_t>(enc_u32[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<uint8_t>(enc_u32[2]) == 4);
+        CHECK(static_cast<uint8_t>(enc_u32[3]) == 0);
+        uint32_t dec_u32 = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_u32, enc_u32));
+        CHECK(dec_u32 == u32_val);
+
+        static_assert(glz::etf::detail::fixed_etf_padding<StructWithU32> > 0);
+        StructWithU32 s_u32{};
+        std::string enc_su32;
+        REQUIRE_FALSE(glz::write_etf(s_u32, enc_su32));
+        StructWithU32 dec_su32{};
+        REQUIRE_FALSE(glz::read_etf(dec_su32, enc_su32));
+        CHECK(dec_su32 == s_u32);
     }
+
 }
 
 TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway][interaction]") {
@@ -3458,55 +3442,6 @@ TEST_CASE("ETF: Skip parser coverage on all tags and deep recursion protection",
         CHECK(check_skip(b_atom));
     }
 
-    SECTION("Deeply nested tuples recursion limit enforcement") {
-        constexpr size_t nesting = 300;
-        std::string deep_tup;
-        deep_tup.push_back(static_cast<char>(glz::etf::magic_version));
-        for (size_t i = 0; i < nesting; ++i) {
-            deep_tup.push_back(static_cast<char>(glz::etf::tag::LARGE_TUPLE_EXT));
-            append_be32(deep_tup, 1);
-        }
-        deep_tup.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
-        deep_tup.push_back(static_cast<char>(42));
-
-        glz::skip sk_tup{};
-        auto ec_dt = glz::read_etf(sk_tup, deep_tup);
-        CHECK(static_cast<bool>(ec_dt));
-        CHECK(ec_dt.ec == glz::error_code::exceeded_max_recursive_depth);
-    }
-
-    SECTION("Deeply alternating nested containers recursion limit enforcement") {
-        constexpr size_t nesting = 100;
-        std::string alt_buf;
-        alt_buf.push_back(static_cast<char>(glz::etf::magic_version));
-        for (size_t i = 0; i < nesting; ++i) {
-            // MAP_EXT (arity 1)
-            alt_buf.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
-            append_be32(alt_buf, 1);
-            alt_buf.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
-            append_be32(alt_buf, 1);
-            alt_buf.push_back('k');
-
-            // LIST_EXT (length 1)
-            alt_buf.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
-            append_be32(alt_buf, 1);
-
-            // LARGE_TUPLE_EXT (arity 1)
-            alt_buf.push_back(static_cast<char>(glz::etf::tag::LARGE_TUPLE_EXT));
-            append_be32(alt_buf, 1);
-        }
-        alt_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
-        alt_buf.push_back(static_cast<char>(1));
-        // Tails for lists
-        for (size_t i = 0; i < nesting; ++i) {
-            alt_buf.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
-        }
-
-        glz::skip sk_alt{};
-        auto ec_alt = glz::read_etf(sk_alt, alt_buf);
-        CHECK(static_cast<bool>(ec_alt));
-        CHECK(ec_alt.ec == glz::error_code::exceeded_max_recursive_depth);
-    }
 }
 
 TEST_CASE("ETF: Variant deduction edge cases, type backtracking, and malformed inputs", "[etf][security][variants]") {

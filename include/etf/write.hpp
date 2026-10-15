@@ -434,6 +434,21 @@ namespace glz
                      etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
                   }
                }
+               else if constexpr (sizeof(U) <= 4) {
+                  // uint32_t > 2147483647 always has bit 31 set -> n is always 4 (7 bytes total)
+                  if constexpr (!check_write_unchecked(Opts)) {
+                     etf::detail::ensure_space(b, ix + 7);
+                  }
+                  b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
+                  b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(4);
+                  b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0);
+                  auto raw = static_cast<uint32_t>(value);
+                  if constexpr (std::endian::native == std::endian::big) {
+                     raw = std::byteswap(raw);
+                  }
+                  std::memcpy(&b[ix + 3], &raw, 4);
+                  ix += 7;
+               }
                else {
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (stripped little-endian bytes)
                   const auto uval = static_cast<uint64_t>(value);
