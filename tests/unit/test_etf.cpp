@@ -78,6 +78,35 @@ struct FullPayload {
     std::vector<int> extra_list{1, 2, 3, 4, 5};
 };
 
+struct NestedFullPayload {
+    FullPayload payload{};
+    std::string after{"after_payload"};
+};
+
+struct NestedSubsetPayload {
+    SubsetStruct payload{};
+    std::string after{};
+};
+
+struct SingleFieldFull {
+    std::string name{"single_name"};
+    std::string extra{"single_extra"};
+};
+
+struct SingleFieldSubset {
+    std::string name{};
+};
+
+struct OuterSingleFieldFull {
+    SingleFieldFull single{};
+    int trailing{999};
+};
+
+struct OuterSingleFieldSubset {
+    SingleFieldSubset single{};
+    int trailing{0};
+};
+
 struct ErlangSortedGatewayEvent {
     std::string d{"massive_data_first"};
     discusy::Opcode op{discusy::Opcode::Dispatch};
@@ -1691,7 +1720,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         CHECK(dec[1].name == "test_name");
     }
 
-    SECTION("Vector of structs under partial_read short-circuits after first element") {
+    SECTION("Vector of structs under partial_read deserializes all elements") {
         std::vector<test_etf_types::FullPayload> list{
             test_etf_types::FullPayload{},
             test_etf_types::FullPayload{},
@@ -1704,7 +1733,71 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(dec.size() == 2);
         CHECK(dec[0].name == "test_name");
-        CHECK(dec[1].name == "");
+        CHECK(dec[0].count == 42);
+        CHECK(dec[1].name == "test_name");
+        CHECK(dec[1].count == 42);
+    }
+
+    SECTION("Nested struct under partial_read maintains stream synchronization") {
+        test_etf_types::NestedFullPayload full{};
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(full, enc));
+
+        test_etf_types::NestedSubsetPayload dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        CHECK(dec.payload.name == "test_name");
+        CHECK(dec.payload.count == 42);
+        CHECK(dec.after == "after_payload");
+    }
+
+    SECTION("Vector of variants containing structs under partial_read") {
+        using Var = std::variant<int, test_etf_types::SubsetStruct>;
+        std::vector<test_etf_types::FullPayload> list{
+            test_etf_types::FullPayload{},
+            test_etf_types::FullPayload{},
+        };
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(list, enc));
+
+        std::vector<Var> dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        REQUIRE(dec.size() == 2);
+        REQUIRE(std::holds_alternative<test_etf_types::SubsetStruct>(dec[0]));
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec[0]).name == "test_name");
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec[0]).count == 42);
+        REQUIRE(std::holds_alternative<test_etf_types::SubsetStruct>(dec[1]));
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec[1]).name == "test_name");
+        CHECK(std::get<test_etf_types::SubsetStruct>(dec[1]).count == 42);
+    }
+
+    SECTION("Single field struct nested inside another struct under partial_read") {
+        test_etf_types::OuterSingleFieldFull full{};
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(full, enc));
+
+        test_etf_types::OuterSingleFieldSubset dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        CHECK(dec.single.name == "single_name");
+        CHECK(dec.trailing == 999);
+    }
+
+    SECTION("Vector of single-field structs under partial_read") {
+        std::vector<test_etf_types::SingleFieldFull> list{
+            test_etf_types::SingleFieldFull{},
+            test_etf_types::SingleFieldFull{},
+        };
+        std::string enc;
+        REQUIRE_FALSE(glz::write_etf(list, enc));
+
+        std::vector<test_etf_types::SingleFieldSubset> dec{};
+        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        REQUIRE_FALSE(static_cast<bool>(ec));
+        REQUIRE(dec.size() == 2);
+        CHECK(dec[0].name == "single_name");
+        CHECK(dec[1].name == "single_name");
     }
 
     SECTION("Partial read does not leak partial_read_complete as an error") {

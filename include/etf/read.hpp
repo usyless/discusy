@@ -1336,7 +1336,9 @@ namespace glz
                      return;
                   }
                   if constexpr (Opts.partial_read) {
-                     ctx.error = error_code::partial_read_complete;
+                     if (ctx.depth == 1) {
+                        ctx.error = error_code::partial_read_complete;
+                     }
                   }
                   return;
                }
@@ -1346,7 +1348,16 @@ namespace glz
          for (uint32_t key_idx = 0; key_idx < arity; ++key_idx) {
             if constexpr (Opts.partial_read) {
                if (read_count >= N) {
-                  ctx.error = error_code::partial_read_complete;
+                  if (ctx.depth == 1) {
+                     ctx.error = error_code::partial_read_complete;
+                     return;
+                  }
+                  for (uint32_t rem = key_idx; rem < arity; ++rem) {
+                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                   return;
                }
             }
@@ -1409,7 +1420,16 @@ namespace glz
 
                if constexpr (Opts.partial_read) {
                   if (read_count >= N) {
-                     ctx.error = error_code::partial_read_complete;
+                     if (ctx.depth == 1) {
+                        ctx.error = error_code::partial_read_complete;
+                        return;
+                     }
+                     for (uint32_t rem = key_idx + 1; rem < arity; ++rem) {
+                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                        if (bool(ctx.error)) [[unlikely]] return;
+                     }
                      return;
                   }
                }
