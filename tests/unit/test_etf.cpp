@@ -262,7 +262,35 @@ struct OnlyName {
     std::string name{"present_name"};
 };
 
+enum class TestReflectedEnum {
+    FOO,
+    BAR
+};
+
+struct StructWithEnum {
+    TestReflectedEnum val{TestReflectedEnum::FOO};
+    int num{123};
+    bool operator==(const StructWithEnum&) const = default;
+};
+
+struct FixedPoint2D {
+    int x{10};
+    int y{20};
+    bool operator==(const FixedPoint2D&) const = default;
+};
+
+struct StructWithOptionalSubStruct {
+    std::optional<FixedPoint2D> pt{std::nullopt};
+    bool operator==(const StructWithOptionalSubStruct&) const = default;
+};
+
 }
+
+template <>
+struct glz::meta<test_etf_types::TestReflectedEnum> {
+    using enum test_etf_types::TestReflectedEnum;
+    static constexpr auto value = enumerate("FOO", FOO, "BAR", BAR);
+};
 
 template <>
 struct glz::meta<test_etf_types::GlobalMetaValueWrapper> {
@@ -1998,6 +2026,67 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         REQUIRE_FALSE(static_cast<bool>(ec));
         CHECK(byte_vec.size() == 5);
         CHECK(byte_vec == std::vector<uint8_t>{1, 2, 3, 4, 5});
+    }
+
+    SECTION("fixed_etf_padding is enabled for reflected enums and optional sub-structs") {
+        static_assert(glz::etf::detail::fixed_etf_padding<test_etf_types::StructWithEnum> > 0);
+        static_assert(glz::etf::detail::fixed_etf_padding<test_etf_types::StructWithOptionalSubStruct> > 0);
+
+        test_etf_types::StructWithEnum s_enum{
+            .val = test_etf_types::TestReflectedEnum::BAR,
+            .num = 456
+        };
+        std::string enc_enum;
+        REQUIRE_FALSE(glz::write_etf(s_enum, enc_enum));
+
+        test_etf_types::StructWithEnum dec_enum{};
+        REQUIRE_FALSE(glz::read_etf(dec_enum, enc_enum));
+        CHECK(dec_enum == s_enum);
+
+        test_etf_types::StructWithOptionalSubStruct s_sub{
+            .pt = test_etf_types::FixedPoint2D{.x = 100, .y = 200}
+        };
+        std::string enc_sub;
+        REQUIRE_FALSE(glz::write_etf(s_sub, enc_sub));
+
+        test_etf_types::StructWithOptionalSubStruct dec_sub{};
+        REQUIRE_FALSE(glz::read_etf(dec_sub, enc_sub));
+        CHECK(dec_sub == s_sub);
+
+        // Test optional substruct when nullopt
+        s_sub.pt = std::nullopt;
+        std::string enc_sub_null;
+        REQUIRE_FALSE(glz::write_etf(s_sub, enc_sub_null));
+
+        test_etf_types::StructWithOptionalSubStruct dec_sub_null{};
+        REQUIRE_FALSE(glz::read_etf(dec_sub_null, enc_sub_null));
+        CHECK(dec_sub_null == s_sub);
+        CHECK_FALSE(dec_sub_null.pt.has_value());
+    }
+
+    SECTION("Branchless 8-byte SMALL_BIG_EXT store and load") {
+        // Values with varying byte widths (1..8 bytes)
+        uint64_t val1 = 0x12ULL;                                // 1 byte
+        uint64_t val3 = 0x123456ULL;                            // 3 bytes
+        uint64_t val5 = 0x123456789aULL;                        // 5 bytes
+        uint64_t val8 = 0x123456789abcdef0ULL;                  // 8 bytes (Snowflake range)
+
+        std::string enc1, enc3, enc5, enc8;
+        REQUIRE_FALSE(glz::write_etf(val1, enc1));
+        REQUIRE_FALSE(glz::write_etf(val3, enc3));
+        REQUIRE_FALSE(glz::write_etf(val5, enc5));
+        REQUIRE_FALSE(glz::write_etf(val8, enc8));
+
+        uint64_t dec1 = 0, dec3 = 0, dec5 = 0, dec8 = 0;
+        REQUIRE_FALSE(glz::read_etf(dec1, enc1));
+        REQUIRE_FALSE(glz::read_etf(dec3, enc3));
+        REQUIRE_FALSE(glz::read_etf(dec5, enc5));
+        REQUIRE_FALSE(glz::read_etf(dec8, enc8));
+
+        CHECK(dec1 == val1);
+        CHECK(dec3 == val3);
+        CHECK(dec5 == val5);
+        CHECK(dec8 == val8);
     }
 }
 

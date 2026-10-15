@@ -134,6 +134,9 @@ namespace glz
       }
 
       template <class T>
+      constexpr size_t max_etf_val_size();
+
+      template <class T>
       constexpr size_t max_scalar_etf_val_size()
       {
          using V = std::decay_t<T>;
@@ -168,9 +171,22 @@ namespace glz
                return 11; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 8 = 11 bytes
             }
          }
-         else if constexpr (std::is_enum_v<V> && !glaze_enum_t<V> && !meta_keys<V>) {
+         else if constexpr (std::is_enum_v<V>) {
             using U = std::underlying_type_t<V>;
-            return max_scalar_etf_val_size<U>();
+            constexpr size_t num_max = max_scalar_etf_val_size<U>();
+            if constexpr (glaze_enum_t<V> || meta_keys<V>) {
+               constexpr size_t str_max = [] {
+                  size_t m = 0;
+                  for (const auto& k : reflect<V>::keys) {
+                     m = (std::max)(m, size_t{5} + k.size());
+                  }
+                  return m;
+               }();
+               return (std::max)(num_max, str_max);
+            }
+            else {
+               return num_max;
+            }
          }
          else if constexpr (is_opts_wrapper<V>) {
             return max_scalar_etf_val_size<typename V::value_type>();
@@ -181,7 +197,7 @@ namespace glz
          }
          else if constexpr (nullable_like<V>) {
             using inner_t = std::decay_t<decltype(*std::declval<V>())>;
-            constexpr size_t inner_max = max_scalar_etf_val_size<inner_t>();
+            constexpr size_t inner_max = max_etf_val_size<inner_t>();
             if constexpr (inner_max > 0) {
                return (std::max)(size_t{5}, inner_max);
             }
@@ -191,7 +207,7 @@ namespace glz
          }
          else if constexpr (nullable_value_t<V>) {
             using inner_t = std::decay_t<decltype(std::declval<V>().value())>;
-            constexpr size_t inner_max = max_scalar_etf_val_size<inner_t>();
+            constexpr size_t inner_max = max_etf_val_size<inner_t>();
             if constexpr (inner_max > 0) {
                return (std::max)(size_t{5}, inner_max);
             }
@@ -203,9 +219,6 @@ namespace glz
             return 0;
          }
       }
-
-      template <class T>
-      constexpr size_t max_etf_val_size();
 
       template <class T>
       inline constexpr size_t fixed_etf_padding = [] {
@@ -425,9 +438,8 @@ namespace glz
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (stripped little-endian bytes)
                   const auto uval = static_cast<uint64_t>(value);
                   const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
-                  const size_t needed = 3 + n;
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + needed);
+                     etf::detail::ensure_space(b, ix + 11);
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
@@ -436,8 +448,8 @@ namespace glz
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
-                  std::memcpy(&b[ix + 3], &raw, n);
-                  ix += needed;
+                  std::memcpy(&b[ix + 3], &raw, 8);
+                  ix += 3 + n;
                }
             }
             else { // signed integer
@@ -462,9 +474,8 @@ namespace glz
                   const bool is_negative = value < 0;
                   const uint64_t uval = is_negative ? (0ULL - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
                   const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
-                  const size_t needed = 3 + n;
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + needed);
+                     etf::detail::ensure_space(b, ix + 11);
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
@@ -473,8 +484,8 @@ namespace glz
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
-                  std::memcpy(&b[ix + 3], &raw, n);
-                  ix += needed;
+                  std::memcpy(&b[ix + 3], &raw, 8);
+                  ix += 3 + n;
                }
             }
          }
@@ -491,7 +502,12 @@ namespace glz
       {
          const auto sv = str_view<T>(value);
          const auto len = static_cast<uint32_t>(sv.size());
-         etf::detail::dump_binary(sv.data(), len, b, ix);
+         if constexpr (check_write_unchecked(Opts)) {
+            etf::detail::dump_binary_unchecked(sv.data(), len, b, ix);
+         }
+         else {
+            etf::detail::dump_binary(sv.data(), len, b, ix);
+         }
       }
    };
 
@@ -504,7 +520,12 @@ namespace glz
       GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&, auto& b, auto& ix) noexcept
       {
          const auto len = static_cast<uint32_t>(value.size());
-         etf::detail::dump_binary(value.data(), len, b, ix);
+         if constexpr (check_write_unchecked(Opts)) {
+            etf::detail::dump_binary_unchecked(value.data(), len, b, ix);
+         }
+         else {
+            etf::detail::dump_binary(value.data(), len, b, ix);
+         }
       }
    };
 
@@ -768,18 +789,30 @@ namespace glz
                static constexpr auto key = reflect<T>::keys[I];
                constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
 
-               if constexpr (not fixed_max_size) {
-                  etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
-               }
-
-               static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
-               etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
-
-               if constexpr (val_max > 0) {
-                  to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+               if constexpr (str_t<val_t>) {
+                  const auto sv = str_view<val_t>(member_val);
+                  const auto len = static_cast<uint32_t>(sv.size());
+                  if constexpr (not fixed_max_size) {
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len);
+                  }
+                  static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+                  etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+                  etf::detail::dump_binary_unchecked(sv.data(), len, b, ix);
                }
                else {
-                  to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                  if constexpr (not fixed_max_size) {
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+                  }
+
+                  static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+                  etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+
+                  if constexpr (val_max > 0) {
+                     to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+                  }
+                  else {
+                     to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                  }
                }
                ++pair_count;
             });
@@ -809,18 +842,30 @@ namespace glz
                static constexpr auto key = reflect<T>::keys[I];
                constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
 
-               if constexpr (not fixed_max_size) {
-                  etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
-               }
-
-               static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
-               etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
-
-               if constexpr (val_max > 0) {
-                  to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+               if constexpr (str_t<val_t>) {
+                  const auto sv = str_view<val_t>(member_val);
+                  const auto len = static_cast<uint32_t>(sv.size());
+                  if constexpr (not fixed_max_size) {
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len);
+                  }
+                  static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+                  etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+                  etf::detail::dump_binary_unchecked(sv.data(), len, b, ix);
                }
                else {
-                  to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                  if constexpr (not fixed_max_size) {
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+                  }
+
+                  static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
+                  etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
+
+                  if constexpr (val_max > 0) {
+                     to<EETF, val_t>::template no_header<write_unchecked_on<Opts>()>(member_val, ctx, b, ix);
+                  }
+                  else {
+                     to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                  }
                }
             });
          }
@@ -957,16 +1002,12 @@ namespace glz
    template <write_supported<EETF> T, output_buffer Buffer>
    [[nodiscard]] inline error_ctx write_etf(T&& value, Buffer& buffer)
    {
-      constexpr size_t min_sz = etf::detail::min_etf_size<std::decay_t<T>>;
-      etf::detail::ensure_space(buffer, min_sz);
       return write<etf_opts>(std::forward<T>(value), buffer);
    }
 
    template <write_supported<EETF> T, output_buffer Buffer>
    [[nodiscard]] inline error_ctx write_etf(T&& value, Buffer& buffer, is_context auto&& ctx)
    {
-      constexpr size_t min_sz = etf::detail::min_etf_size<std::decay_t<T>>;
-      etf::detail::ensure_space(buffer, min_sz);
       return write<etf_opts>(std::forward<T>(value), buffer, ctx);
    }
 
@@ -974,8 +1015,6 @@ namespace glz
    [[nodiscard]] inline expected<std::string, error_ctx> write_etf(T&& value)
    {
       std::string buffer;
-      constexpr size_t min_sz = etf::detail::min_etf_size<std::decay_t<T>>;
-      etf::detail::ensure_space(buffer, min_sz);
       const auto ec = write<etf_opts>(std::forward<T>(value), buffer);
       if (static_cast<bool>(ec)) {
          return unexpected(ec);

@@ -745,8 +745,17 @@ namespace glz::etf
                }
             }
             else if (n < 8) {
-               if constexpr (std::endian::native == std::endian::little) {
-                  std::memcpy(&raw, it, n);
+               if (n == 0) [[unlikely]] {
+                  raw = 0;
+               }
+               else if constexpr (std::endian::native == std::endian::little) {
+                  if (end - it >= 8) {
+                     std::memcpy(&raw, it, 8);
+                     raw &= (~0ULL >> ((8 - n) * 8));
+                  }
+                  else {
+                     std::memcpy(&raw, it, n);
+                  }
                }
                else {
                   for (uint8_t i = 0; i < n; ++i) {
@@ -838,8 +847,17 @@ namespace glz::etf
                }
             }
             else if (n < 8) {
-               if constexpr (std::endian::native == std::endian::little) {
-                  std::memcpy(&raw, it, n);
+               if (n == 0) [[unlikely]] {
+                  raw = 0;
+               }
+               else if constexpr (std::endian::native == std::endian::little) {
+                  if (end - it >= 8) {
+                     std::memcpy(&raw, it, 8);
+                     raw &= (~0ULL >> ((8 - n) * 8));
+                  }
+                  else {
+                     std::memcpy(&raw, it, n);
+                  }
                }
                else {
                   for (uint32_t i = 0; i < n; ++i) {

@@ -232,23 +232,6 @@ namespace glz
       template <auto Opts>
       GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto& ctx, auto& it, auto end) noexcept
       {
-         if constexpr (check_quoted_num(Opts)) {
-            if (end - it >= 5 && static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[likely]] {
-               const uint32_t len = etf::detail::read_be<uint32_t>(it + 1);
-               if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
-               std::string_view sv{reinterpret_cast<const char*>(it + 5), len};
-               it += 5 + len;
-               if (!etf::detail::parse_number_from_string(sv, value)) [[unlikely]] {
-                  ctx.error = error_code::parse_number_failure;
-                  return;
-               }
-               return;
-            }
-            if (it >= end || static_cast<uint8_t>(*it) == etf::tag::BINARY_EXT) [[unlikely]] {
-               ctx.error = error_code::unexpected_end;
-               return;
-            }
-         }
          if (!etf::detail::read_number(ctx, it, end, value)) [[unlikely]] return;
       }
    };
@@ -1843,12 +1826,6 @@ namespace glz
          }
          depth_guard guard{ctx};
          if (!guard) [[unlikely]] return;
-
-         if (etf::detail::is_nil(it, end)) {
-            etf::detail::skip_nil(it, end);
-            value.data = nullptr;
-            return;
-         }
 
          const auto tag = static_cast<uint8_t>(*it);
          switch (tag) {
