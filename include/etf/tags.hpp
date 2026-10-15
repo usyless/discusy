@@ -297,19 +297,8 @@ namespace glz::etf
          const auto tag = static_cast<uint8_t>(*it++);
          switch (tag) {
          case tag::BINARY_EXT: {
-            if (end - it < 4) [[unlikely]] {
-               ctx.error = error_code::unexpected_end;
-               return false;
-            }
-            const uint32_t len = read_be<uint32_t>(it);
-            it += 4;
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] {
-               ctx.error = error_code::unexpected_end;
-               return false;
-            }
-            key = std::string_view{reinterpret_cast<const char*>(it), len};
-            it += len;
-            return true;
+            ctx.error = error_code::unexpected_end;
+            return false;
          }
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] {
@@ -452,13 +441,8 @@ namespace glz::etf
          const auto tag = static_cast<uint8_t>(*it++);
          switch (tag) {
          case tag::BINARY_EXT: {
-            if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint32_t len = read_be<uint32_t>(it);
-            it += 4;
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            sv = std::string_view{reinterpret_cast<const char*>(it), len};
-            it += len;
-            return true;
+            ctx.error = error_code::unexpected_end;
+            return false;
          }
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
@@ -975,41 +959,36 @@ namespace glz::etf
                return true;
             }
          }
-         case tag::BINARY_EXT: {
-            if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint32_t len = read_be<uint32_t>(it);
-            it += 4;
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            std::string_view sv{reinterpret_cast<const char*>(it), len};
-            it += len;
-            if (!parse_number_from_string(sv, num)) [[unlikely]] {
-               ctx.error = error_code::parse_number_failure;
-               return false;
-            }
-            return true;
-         }
+         case tag::BINARY_EXT:
          case tag::STRING_EXT:
          case tag::ATOM_UTF8_EXT:
-         case tag::ATOM_EXT: {
-            if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint16_t len = read_be<uint16_t>(it);
-            it += 2;
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            std::string_view sv{reinterpret_cast<const char*>(it), len};
-            it += len;
-            if (!parse_number_from_string(sv, num)) [[unlikely]] {
-               ctx.error = error_code::parse_number_failure;
-               return false;
-            }
-            return true;
-         }
+         case tag::ATOM_EXT:
          case tag::SMALL_ATOM_UTF8_EXT:
          case tag::SMALL_ATOM_EXT: {
-            if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const auto len = static_cast<uint8_t>(*it++);
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            std::string_view sv{reinterpret_cast<const char*>(it), len};
-            it += len;
+            std::string_view sv{};
+            if (tag == tag::BINARY_EXT) [[likely]] {
+               if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               const uint32_t len = read_be<uint32_t>(it);
+               it += 4;
+               if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               sv = std::string_view{reinterpret_cast<const char*>(it), len};
+               it += len;
+            }
+            else if (tag == tag::SMALL_ATOM_UTF8_EXT || tag == tag::SMALL_ATOM_EXT) {
+               if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               const auto len = static_cast<uint8_t>(*it++);
+               if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               sv = std::string_view{reinterpret_cast<const char*>(it), len};
+               it += len;
+            }
+            else {
+               if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               const uint16_t len = read_be<uint16_t>(it);
+               it += 2;
+               if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+               sv = std::string_view{reinterpret_cast<const char*>(it), len};
+               it += len;
+            }
             if (!parse_number_from_string(sv, num)) [[unlikely]] {
                ctx.error = error_code::parse_number_failure;
                return false;

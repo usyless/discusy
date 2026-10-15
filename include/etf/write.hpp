@@ -215,6 +215,13 @@ namespace glz
                return 0;
             }
          }
+         else if constexpr (is_system_time_point<V>) {
+            using Period = V::duration::period;
+            return 5 + chrono_detail::iso_time_point_max_size<Period>;
+         }
+         else if constexpr (is_year_month_day<V>) {
+            return 5 + chrono_detail::iso_date_max_size;
+         }
          else {
             return 0;
          }
@@ -957,7 +964,9 @@ namespace glz
       {
          using Period = std::remove_cvref_t<decltype(value)>::duration::period;
          constexpr auto max_ts_len = chrono_detail::iso_time_point_max_size<Period>;
-         etf::detail::ensure_space(b, ix + 5 + max_ts_len);
+         if constexpr (!check_write_unchecked(Opts)) {
+            etf::detail::ensure_space(b, ix + 5 + max_ts_len);
+         }
          const auto start_ix = ix;
          ix += 5;
          chrono_detail::write_iso_time_point<false>(value, ctx, b, ix);
@@ -977,7 +986,9 @@ namespace glz
       template <auto Opts>
       static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
       {
-         etf::detail::ensure_space(b, ix + 5 + chrono_detail::iso_date_max_size);
+         if constexpr (!check_write_unchecked(Opts)) {
+            etf::detail::ensure_space(b, ix + 5 + chrono_detail::iso_date_max_size);
+         }
          const auto start_ix = ix;
          ix += 5;
          const int yr = static_cast<int>(value.year());

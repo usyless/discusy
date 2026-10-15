@@ -1804,8 +1804,47 @@ namespace glz
 
          const auto tag = static_cast<uint8_t>(*it);
          switch (tag) {
-         case etf::tag::SMALL_INTEGER_EXT:
-         case etf::tag::INTEGER_EXT:
+         case etf::tag::SMALL_INTEGER_EXT: {
+            if (end - it < 2) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const auto n = static_cast<uint8_t>(*(it + 1));
+            it += 2;
+            if constexpr (Mode == num_mode::u64) {
+               value.data = static_cast<uint64_t>(n);
+            }
+            else if constexpr (Mode == num_mode::i64) {
+               value.data = static_cast<int64_t>(n);
+            }
+            else {
+               value.data = static_cast<double>(n);
+            }
+            break;
+         }
+         case etf::tag::INTEGER_EXT: {
+            if (end - it < 5) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+            const auto val = static_cast<int32_t>(etf::detail::read_be<uint32_t>(it + 1));
+            it += 5;
+            if constexpr (Mode == num_mode::u64) {
+               if (val >= 0) {
+                  value.data = static_cast<uint64_t>(val);
+               }
+               else {
+                  value.data = static_cast<int64_t>(val);
+               }
+            }
+            else if constexpr (Mode == num_mode::i64) {
+               value.data = static_cast<int64_t>(val);
+            }
+            else {
+               value.data = static_cast<double>(val);
+            }
+            break;
+         }
          case etf::tag::SMALL_BIG_EXT:
          case etf::tag::LARGE_BIG_EXT: {
             const auto start = it;
