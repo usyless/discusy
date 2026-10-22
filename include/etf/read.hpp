@@ -1883,6 +1883,110 @@ namespace glz
          }
       }();
 
+      template <class V>
+      inline constexpr bool variant_is_integer_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || bool_t<X> || mimics_bool_t<X> || custom_bool_t<X> || always_null_t<X>) {
+            return false;
+         }
+         else if constexpr (std::floating_point<X>) {
+            return false;
+         }
+         else if constexpr (int_t<X>) {
+            return true;
+         }
+         else if constexpr (has_mimic<X>) {
+            return int_t<mimic_type<X>>;
+         }
+         else if constexpr (has_custom_meta_v<X>) {
+            return custom_num_t<X> && !std::floating_point<custom_read_input_t<X>>;
+         }
+         else {
+            return false;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_float_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || bool_t<X> || mimics_bool_t<X> || custom_bool_t<X> || always_null_t<X>) {
+            return false;
+         }
+         else if constexpr (std::floating_point<X>) {
+            return true;
+         }
+         else if constexpr (has_mimic<X>) {
+            return std::floating_point<mimic_type<X>>;
+         }
+         else if constexpr (has_custom_meta_v<X>) {
+            return custom_num_t<X> && std::floating_point<custom_read_input_t<X>>;
+         }
+         else {
+            return false;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_bool_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || always_null_t<X>) {
+            return false;
+         }
+         else {
+            return bool_t<X> || mimics_bool_t<X> || custom_bool_t<X>;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_str_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || bool_t<X> || mimics_bool_t<X> || custom_bool_t<X> || always_null_t<X>) {
+            return false;
+         }
+         else {
+            return str_t<X> || glaze_enum_t<X> || std::is_enum_v<X> || mimics_str_t<X> || custom_str_t<X>;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_null_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X>) {
+            return false;
+         }
+         else {
+            return null_t<X> || always_null_t<X> || std::same_as<X, std::nullptr_t>;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_array_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || str_t<X> || readable_map_t<X> || writable_map_t<X> || pair_t<X> || glaze_object_t<X> || reflectable<X> || is_memory_object<X>) {
+            return false;
+         }
+         else {
+            return array_t<X> || readable_array_t<X> || glaze_array_t<X>;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_tuple_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         if constexpr (is_variant<X> || str_t<X>) {
+            return false;
+         }
+         else {
+            return tuple_t<X> || is_std_tuple<X> || pair_t<X>;
+         }
+      }();
+
+      template <class V>
+      inline constexpr bool variant_is_enum_alt = [] {
+         using X = remove_meta_wrapper_t<std::decay_t<V>>;
+         return std::is_enum_v<X> && !custom_read<X>;
+      }();
+
       template <class T, class IdType, bool IsEnum = std::is_enum_v<IdType>, bool IsIntegral = std::integral<IdType>>
       struct variant_id_resolver;
 
@@ -1929,6 +2033,134 @@ namespace glz
    {
       static constexpr size_t variant_size = std::variant_size_v<T>;
 
+      static constexpr size_t n_int = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_integer_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_int_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_integer_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_float = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_float_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_float_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_float_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_bool = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_bool_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_bool_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_bool_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_str = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_str_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_str_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_str_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_null = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_null_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_null_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_null_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_array = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_array_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_array_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_array_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_tuple = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_tuple_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_tuple_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_tuple_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
+      static constexpr size_t n_enum = []<size_t... I>(std::index_sequence<I...>) {
+         return (size_t(etf::detail::variant_is_enum_alt<std::variant_alternative_t<I, T>>) + ... + 0);
+      }(std::make_index_sequence<variant_size>{});
+
+      static constexpr size_t unique_enum_idx = [] {
+         size_t r = 0;
+         size_t cnt = 0;
+         for_each<variant_size>([&]<size_t I>() {
+            if constexpr (etf::detail::variant_is_enum_alt<std::variant_alternative_t<I, T>>) {
+               r = I;
+               ++cnt;
+            }
+         });
+         return (cnt == 1) ? r : 0;
+      }();
+
       template <auto Opts>
       static void op(auto& value, is_context auto& ctx, auto& it, auto end) noexcept
       {
@@ -1949,21 +2181,20 @@ namespace glz
             if constexpr (n_obj > 0) {
                if constexpr (n_obj == 1 && tag_v<T>.empty()) {
                   constexpr size_t target_idx = [] {
-                     size_t r = variant_size;
-                     [&]<size_t... J>(std::index_sequence<J...>) {
-                        ((etf::detail::variant_is_object_alt<std::variant_alternative_t<J, T>> && r == variant_size
-                             ? (void)(r = J)
-                             : (void)0),
-                         ...);
-                     }(std::make_index_sequence<variant_size>{});
+                     size_t r = 0;
+                     for_each<variant_size>([&]<size_t J>() {
+                        if constexpr (etf::detail::variant_is_object_alt<std::variant_alternative_t<J, T>>) {
+                           r = J;
+                        }
+                     });
                      return r;
                   }();
 
-                  using V = std::variant_alternative_t<target_idx, T>;
-                  V v{};
-                  parse<EETF>::template op<Opts>(v, ctx, it, end);
+                  if (value.index() != target_idx) {
+                     value.template emplace<target_idx>();
+                  }
+                  parse<EETF>::template op<Opts>(std::get<target_idx>(value), ctx, it, end);
                   if (!parse_failed(ctx.error)) {
-                     value.template emplace<target_idx>(std::move(v));
                      return;
                   }
                   it = start;
@@ -2129,11 +2360,11 @@ namespace glz
                      bool deduced_matched = false;
                      etf::detail::direct_visit<variant_size>(
                         [&]<size_t I>() {
-                           using V = std::variant_alternative_t<I, T>;
-                           V v{};
-                           parse<EETF>::template op<Opts>(v, ctx, it, end);
+                           if (value.index() != I) {
+                              value.template emplace<I>();
+                           }
+                           parse<EETF>::template op<Opts>(std::get<I>(value), ctx, it, end);
                            if (!parse_failed(ctx.error)) {
-                              value.template emplace<I>(std::move(v));
                               deduced_matched = true;
                            }
                         },
@@ -2172,6 +2403,648 @@ namespace glz
          }
 
          bool matched = false;
+         const auto tag = static_cast<uint8_t>(*it);
+
+         switch (tag) {
+         case etf::tag::SMALL_INTEGER_EXT:
+         case etf::tag::INTEGER_EXT:
+         case etf::tag::SMALL_BIG_EXT:
+         case etf::tag::LARGE_BIG_EXT: {
+            if constexpr (n_int == 1) {
+               if (value.index() != unique_int_idx) {
+                  value.template emplace<unique_int_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_int_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_int > 1) {
+               for_each<variant_size>([&]<size_t I>() {
+                  if (matched) return;
+                  using V = std::variant_alternative_t<I, T>;
+                  if constexpr (etf::detail::variant_is_integer_alt<V>) {
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                     V v{};
+                     parse<EETF>::template op<Opts>(v, ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        value.template emplace<I>(std::move(v));
+                        matched = true;
+                     }
+                  }
+               });
+               if (matched) return;
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            if constexpr (n_enum > 0) {
+               if constexpr (n_enum == 1) {
+                  if (value.index() != unique_enum_idx) {
+                     value.template emplace<unique_enum_idx>();
+                  }
+                  parse<EETF>::template op<Opts>(std::get<unique_enum_idx>(value), ctx, it, end);
+                  if (!parse_failed(ctx.error)) {
+                     return;
+                  }
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+               else {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_enum_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+            }
+            if constexpr (n_float > 0) {
+               if constexpr (n_float == 1) {
+                  if (value.index() != unique_float_idx) {
+                     value.template emplace<unique_float_idx>();
+                  }
+                  parse<EETF>::template op<Opts>(std::get<unique_float_idx>(value), ctx, it, end);
+                  if (!parse_failed(ctx.error)) {
+                     return;
+                  }
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+               else {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_float_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+            }
+            break;
+         }
+         case etf::tag::NEW_FLOAT_EXT:
+         case etf::tag::FLOAT_EXT: {
+            if constexpr (n_float == 1) {
+               if (value.index() != unique_float_idx) {
+                  value.template emplace<unique_float_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_float_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_float > 1) {
+               for_each<variant_size>([&]<size_t I>() {
+                  if (matched) return;
+                  using V = std::variant_alternative_t<I, T>;
+                  if constexpr (etf::detail::variant_is_float_alt<V>) {
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                     V v{};
+                     parse<EETF>::template op<Opts>(v, ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        value.template emplace<I>(std::move(v));
+                        matched = true;
+                     }
+                  }
+               });
+               if (matched) return;
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            break;
+         }
+         case etf::tag::SMALL_ATOM_UTF8_EXT:
+         case etf::tag::ATOM_UTF8_EXT:
+         case etf::tag::SMALL_ATOM_EXT:
+         case etf::tag::ATOM_EXT: {
+            auto scan = it;
+            std::string_view atom_view{};
+            if (etf::detail::read_atom_or_str(ctx, scan, end, atom_view)) {
+               ctx.error = error_code::none;
+               if (atom_view == "true" || atom_view == "false") {
+                  if constexpr (n_bool == 1) {
+                     if (value.index() != unique_bool_idx) {
+                        value.template emplace<unique_bool_idx>();
+                     }
+                     parse<EETF>::template op<Opts>(std::get<unique_bool_idx>(value), ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        return;
+                     }
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                  }
+                  else if constexpr (n_bool > 1) {
+                     for_each<variant_size>([&]<size_t I>() {
+                        if (matched) return;
+                        using V = std::variant_alternative_t<I, T>;
+                        if constexpr (etf::detail::variant_is_bool_alt<V>) {
+                           it = start;
+                           ctx.depth = depth;
+                           ctx.error = error_code::none;
+                           ctx.custom_error_message = {};
+                           V v{};
+                           parse<EETF>::template op<Opts>(v, ctx, it, end);
+                           if (!parse_failed(ctx.error)) {
+                              value.template emplace<I>(std::move(v));
+                              matched = true;
+                           }
+                        }
+                     });
+                     if (matched) return;
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                  }
+               }
+               else if (atom_view == "nil" || atom_view == "null" || atom_view == "undefined") {
+                  if constexpr (n_null == 1) {
+                     if (value.index() != unique_null_idx) {
+                        value.template emplace<unique_null_idx>();
+                     }
+                     parse<EETF>::template op<Opts>(std::get<unique_null_idx>(value), ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        return;
+                     }
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                  }
+                  else if constexpr (n_null > 1) {
+                     for_each<variant_size>([&]<size_t I>() {
+                        if (matched) return;
+                        using V = std::variant_alternative_t<I, T>;
+                        if constexpr (etf::detail::variant_is_null_alt<V>) {
+                           it = start;
+                           ctx.depth = depth;
+                           ctx.error = error_code::none;
+                           ctx.custom_error_message = {};
+                           V v{};
+                           parse<EETF>::template op<Opts>(v, ctx, it, end);
+                           if (!parse_failed(ctx.error)) {
+                              value.template emplace<I>(std::move(v));
+                              matched = true;
+                           }
+                        }
+                     });
+                     if (matched) return;
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                  }
+               }
+               else {
+                  if constexpr (n_enum > 0) {
+                     if constexpr (n_enum == 1) {
+                        if (value.index() != unique_enum_idx) {
+                           value.template emplace<unique_enum_idx>();
+                        }
+                        parse<EETF>::template op<Opts>(std::get<unique_enum_idx>(value), ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           return;
+                        }
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                     }
+                     else {
+                        for_each<variant_size>([&]<size_t I>() {
+                           if (matched) return;
+                           using V = std::variant_alternative_t<I, T>;
+                           if constexpr (etf::detail::variant_is_enum_alt<V>) {
+                              it = start;
+                              ctx.depth = depth;
+                              ctx.error = error_code::none;
+                              ctx.custom_error_message = {};
+                              V v{};
+                              parse<EETF>::template op<Opts>(v, ctx, it, end);
+                              if (!parse_failed(ctx.error)) {
+                                 value.template emplace<I>(std::move(v));
+                                 matched = true;
+                              }
+                           }
+                        });
+                        if (matched) return;
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                     }
+                  }
+                  if constexpr (n_str > 0) {
+                     if constexpr (n_str == 1) {
+                        if (value.index() != unique_str_idx) {
+                           value.template emplace<unique_str_idx>();
+                        }
+                        parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           return;
+                        }
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                     }
+                     else {
+                        for_each<variant_size>([&]<size_t I>() {
+                           if (matched) return;
+                           using V = std::variant_alternative_t<I, T>;
+                           if constexpr (etf::detail::variant_is_str_alt<V>) {
+                              it = start;
+                              ctx.depth = depth;
+                              ctx.error = error_code::none;
+                              ctx.custom_error_message = {};
+                              V v{};
+                              parse<EETF>::template op<Opts>(v, ctx, it, end);
+                              if (!parse_failed(ctx.error)) {
+                                 value.template emplace<I>(std::move(v));
+                                 matched = true;
+                              }
+                           }
+                        });
+                        if (matched) return;
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                     }
+                  }
+               }
+            }
+            else {
+               ctx.error = error_code::none;
+            }
+            break;
+         }
+         case etf::tag::BINARY_EXT: {
+            if constexpr (n_str == 1 && n_array == 0) {
+               if (value.index() != unique_str_idx) {
+                  value.template emplace<unique_str_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_str == 0 && n_array == 1) {
+               if (value.index() != unique_array_idx) {
+                  value.template emplace<unique_array_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_str > 0 || n_array > 0) {
+               if constexpr (n_str > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_str_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+               if constexpr (n_array > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_array_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+            }
+            break;
+         }
+         case etf::tag::STRING_EXT: {
+            if constexpr (n_str == 1 && n_array == 0) {
+               if (value.index() != unique_str_idx) {
+                  value.template emplace<unique_str_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_str == 0 && n_array == 1) {
+               if (value.index() != unique_array_idx) {
+                  value.template emplace<unique_array_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_str > 0 || n_array > 0) {
+               if constexpr (n_str > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_str_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+               if constexpr (n_array > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_array_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+            }
+            break;
+         }
+         case etf::tag::LIST_EXT: {
+            if constexpr (n_array == 1) {
+               if (value.index() != unique_array_idx) {
+                  value.template emplace<unique_array_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_array > 1) {
+               for_each<variant_size>([&]<size_t I>() {
+                  if (matched) return;
+                  using V = std::variant_alternative_t<I, T>;
+                  if constexpr (etf::detail::variant_is_array_alt<V>) {
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                     V v{};
+                     parse<EETF>::template op<Opts>(v, ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        value.template emplace<I>(std::move(v));
+                        matched = true;
+                     }
+                  }
+               });
+               if (matched) return;
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            break;
+         }
+         case etf::tag::NIL_EXT: {
+            if constexpr (n_null == 1 && n_array == 0) {
+               if (value.index() != unique_null_idx) {
+                  value.template emplace<unique_null_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_null_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_array == 1 && n_null == 0) {
+               if (value.index() != unique_array_idx) {
+                  value.template emplace<unique_array_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_null > 0 || n_array > 0) {
+               if constexpr (n_null > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_null_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+               if constexpr (n_array > 0) {
+                  for_each<variant_size>([&]<size_t I>() {
+                     if (matched) return;
+                     using V = std::variant_alternative_t<I, T>;
+                     if constexpr (etf::detail::variant_is_array_alt<V>) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = error_code::none;
+                        ctx.custom_error_message = {};
+                        V v{};
+                        parse<EETF>::template op<Opts>(v, ctx, it, end);
+                        if (!parse_failed(ctx.error)) {
+                           value.template emplace<I>(std::move(v));
+                           matched = true;
+                        }
+                     }
+                  });
+                  if (matched) return;
+                  it = start;
+                  ctx.depth = depth;
+                  ctx.error = error_code::none;
+                  ctx.custom_error_message = {};
+               }
+            }
+            break;
+         }
+         case etf::tag::SMALL_TUPLE_EXT:
+         case etf::tag::LARGE_TUPLE_EXT: {
+            if constexpr (n_tuple == 1) {
+               if (value.index() != unique_tuple_idx) {
+                  value.template emplace<unique_tuple_idx>();
+               }
+               parse<EETF>::template op<Opts>(std::get<unique_tuple_idx>(value), ctx, it, end);
+               if (!parse_failed(ctx.error)) {
+                  return;
+               }
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            else if constexpr (n_tuple > 1) {
+               for_each<variant_size>([&]<size_t I>() {
+                  if (matched) return;
+                  using V = std::variant_alternative_t<I, T>;
+                  if constexpr (etf::detail::variant_is_tuple_alt<V>) {
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = error_code::none;
+                     ctx.custom_error_message = {};
+                     V v{};
+                     parse<EETF>::template op<Opts>(v, ctx, it, end);
+                     if (!parse_failed(ctx.error)) {
+                        value.template emplace<I>(std::move(v));
+                        matched = true;
+                     }
+                  }
+               });
+               if (matched) return;
+               it = start;
+               ctx.depth = depth;
+               ctx.error = error_code::none;
+               ctx.custom_error_message = {};
+            }
+            break;
+         }
+         default:
+            break;
+         }
 
          // Pass 1: Try all non-skip alternatives first
          for_each<variant_size>([&]<size_t I>() {

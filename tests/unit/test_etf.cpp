@@ -5541,5 +5541,95 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         auto ec_neg = glz::read_etf(dec_neg, neg_buf);
         CHECK(static_cast<bool>(ec_neg));
     }
+
+    SECTION("2.3 std::variant O(1) tag dispatch and in-place emplace") {
+        using SlashOptionVal = std::variant<std::string, discusy::integer, double, bool>;
+
+        // 1. String alternative (BINARY_EXT)
+        SlashOptionVal v_str = std::string{"hello_etf_variant"};
+        std::string enc_str;
+        REQUIRE_FALSE(glz::write_etf(v_str, enc_str));
+        SlashOptionVal dec_str{};
+        REQUIRE_FALSE(glz::read_etf(dec_str, enc_str));
+        REQUIRE(std::holds_alternative<std::string>(dec_str));
+        CHECK(std::get<std::string>(dec_str) == "hello_etf_variant");
+
+        // 2. Integer alternative (INTEGER_EXT / SMALL_BIG_EXT)
+        SlashOptionVal v_int = discusy::integer{9876543210LL};
+        std::string enc_int;
+        REQUIRE_FALSE(glz::write_etf(v_int, enc_int));
+        SlashOptionVal dec_int{};
+        REQUIRE_FALSE(glz::read_etf(dec_int, enc_int));
+        REQUIRE(std::holds_alternative<discusy::integer>(dec_int));
+        CHECK(std::get<discusy::integer>(dec_int) == 9876543210LL);
+
+        // 3. Double alternative (NEW_FLOAT_EXT)
+        SlashOptionVal v_dbl = double{3.141592653589793};
+        std::string enc_dbl;
+        REQUIRE_FALSE(glz::write_etf(v_dbl, enc_dbl));
+        SlashOptionVal dec_dbl{};
+        REQUIRE_FALSE(glz::read_etf(dec_dbl, enc_dbl));
+        REQUIRE(std::holds_alternative<double>(dec_dbl));
+        CHECK(std::get<double>(dec_dbl) == 3.141592653589793);
+
+        // 4. Bool alternative (ATOM "true" / "false")
+        SlashOptionVal v_bool_t = true;
+        std::string enc_bool_t;
+        REQUIRE_FALSE(glz::write_etf(v_bool_t, enc_bool_t));
+        SlashOptionVal dec_bool_t{};
+        REQUIRE_FALSE(glz::read_etf(dec_bool_t, enc_bool_t));
+        REQUIRE(std::holds_alternative<bool>(dec_bool_t));
+        CHECK(std::get<bool>(dec_bool_t) == true);
+
+        SlashOptionVal v_bool_f = false;
+        std::string enc_bool_f;
+        REQUIRE_FALSE(glz::write_etf(v_bool_f, enc_bool_f));
+        SlashOptionVal dec_bool_f{};
+        REQUIRE_FALSE(glz::read_etf(dec_bool_f, enc_bool_f));
+        REQUIRE(std::holds_alternative<bool>(dec_bool_f));
+        CHECK(std::get<bool>(dec_bool_f) == false);
+
+        // 5. In-place string buffer reuse across deserialization
+        SlashOptionVal v_reuse = std::string{"very_long_string_to_force_heap_allocation_over_sso_buffer_1234567890"};
+        const auto* initial_ptr = std::get<std::string>(v_reuse).data();
+        const auto initial_cap = std::get<std::string>(v_reuse).capacity();
+
+        SlashOptionVal v_shorter = std::string{"short"};
+        std::string enc_shorter;
+        REQUIRE_FALSE(glz::write_etf(v_shorter, enc_shorter));
+        REQUIRE_FALSE(glz::read_etf(v_reuse, enc_shorter));
+        REQUIRE(std::holds_alternative<std::string>(v_reuse));
+        CHECK(std::get<std::string>(v_reuse) == "short");
+        CHECK(std::get<std::string>(v_reuse).capacity() == initial_cap);
+        CHECK(std::get<std::string>(v_reuse).data() == initial_ptr);
+
+        // 6. In-place object reuse with uniquely deduced object alternative
+        using StructVariant = std::variant<test_etf_types::SampleStruct, int>;
+        StructVariant sv_obj = test_etf_types::SampleStruct{
+            .id = discusy::snowflake{111},
+            .name = "long_string_forcing_heap_alloc_1234567890_abcdef",
+            .description = std::nullopt,
+            .count = 1,
+            .enabled = true
+        };
+        const auto* name_ptr = std::get<test_etf_types::SampleStruct>(sv_obj).name.data();
+        const auto name_cap = std::get<test_etf_types::SampleStruct>(sv_obj).name.capacity();
+
+        StructVariant sv_new = test_etf_types::SampleStruct{
+            .id = discusy::snowflake{222},
+            .name = "short",
+            .description = std::nullopt,
+            .count = 2,
+            .enabled = false
+        };
+        std::string enc_struct;
+        REQUIRE_FALSE(glz::write_etf(sv_new, enc_struct));
+        REQUIRE_FALSE(glz::read_etf(sv_obj, enc_struct));
+        REQUIRE(std::holds_alternative<test_etf_types::SampleStruct>(sv_obj));
+        CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).id.value == 222);
+        CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).name == "short");
+        CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).name.capacity() == name_cap);
+        CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).name.data() == name_ptr);
+    }
 }
 
