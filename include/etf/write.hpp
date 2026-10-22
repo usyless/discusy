@@ -74,7 +74,10 @@ namespace glz
       constexpr size_t min_etf_val_size()
       {
          using V = std::decay_t<T>;
-         if constexpr (std::is_void_v<V>) {
+         if constexpr (custom_write<V> || has_custom_meta_v<V>) {
+            return 1;
+         }
+         else if constexpr (std::is_void_v<V>) {
             return 0;
          }
          else if constexpr (std::is_pointer_v<V>) {
@@ -122,7 +125,7 @@ namespace glz
             return min_etf_val_size<typename V::value_type>();
          }
          else if constexpr (glaze_value_t<V>) {
-            using M = std::decay_t<decltype(get_member(std::declval<V>(), meta_wrapper_v<V>))>;
+            using M = std::decay_t<decltype(get_member(std::declval<V&>(), meta_wrapper_v<V>))>;
             return min_etf_val_size<M>();
          }
          else if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
@@ -140,7 +143,10 @@ namespace glz
       constexpr size_t max_scalar_etf_val_size()
       {
          using V = std::decay_t<T>;
-         if constexpr (std::is_void_v<V>) {
+         if constexpr (custom_write<V> || has_custom_meta_v<V>) {
+            return 0;
+         }
+         else if constexpr (std::is_void_v<V>) {
             return 0;
          }
          else if constexpr (std::same_as<V, std::nullptr_t> || always_null_t<V>) {
@@ -192,7 +198,7 @@ namespace glz
             return max_scalar_etf_val_size<typename V::value_type>();
          }
          else if constexpr (glaze_value_t<V>) {
-            using M = std::decay_t<decltype(get_member(std::declval<V>(), meta_wrapper_v<V>))>;
+            using M = std::decay_t<decltype(get_member(std::declval<V&>(), meta_wrapper_v<V>))>;
             return max_scalar_etf_val_size<M>();
          }
          else if constexpr (nullable_like<V>) {
@@ -917,6 +923,25 @@ namespace glz
          using V = std::decay_t<decltype(get_member(std::declval<Value>(), meta_wrapper_v<T>))>;
          to<EETF, V>::template no_header<Opts>(get_member(std::forward<Value>(value), meta_wrapper_v<T>),
                                                std::forward<Ctx>(ctx), std::forward<B>(b), ix);
+      }
+   };
+
+   // Custom write specialization (types with static constexpr bool custom_write = true in glz::meta)
+   template <custom_write T>
+   struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
+   {
+      template <auto Opts>
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
+      {
+         using V = std::decay_t<T>;
+         if constexpr (glaze_value_t<V>) {
+            using M = std::decay_t<decltype(get_member(value, meta_wrapper_v<V>))>;
+            to<EETF, M>::template no_header<Opts>(get_member(value, meta_wrapper_v<V>), ctx, b, ix);
+         }
+         else if constexpr (requires { to<EETF, meta_t<V>>::template no_header<Opts>(std::forward<decltype(value)>(value), ctx, b, ix); }) {
+            to<EETF, meta_t<V>>::template no_header<Opts>(
+               std::forward<decltype(value)>(value), ctx, b, ix);
+         }
       }
    };
 

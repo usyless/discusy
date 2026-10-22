@@ -177,6 +177,28 @@ struct HexColorWrapper {
     bool operator==(const HexColorWrapper&) const = default;
 };
 
+struct HexColorContainer {
+    std::string name{"theme"};
+    HexColorWrapper single{};
+    std::vector<HexColorWrapper> list{};
+    std::optional<HexColorWrapper> opt{};
+    std::variant<int, HexColorWrapper> var{};
+    std::map<std::string, HexColorWrapper> map{};
+    bool operator==(const HexColorContainer&) const = default;
+};
+
+struct CustomWriteScalarType {
+    uint32_t id{42};
+    bool operator==(const CustomWriteScalarType&) const = default;
+};
+
+struct NestedCustomWrite {
+    std::string header{"label"};
+    CustomWriteScalarType item{999};
+    std::vector<CustomWriteScalarType> items{CustomWriteScalarType{1}, CustomWriteScalarType{2}};
+    bool operator==(const NestedCustomWrite&) const = default;
+};
+
 using number_perms_t = discusy::flags_t<discusy::permissions::permissions, discusy::flags_type::number>;
 
 struct RolePermissionsTest {
@@ -317,6 +339,22 @@ struct glz::meta<test_etf_types::HexColorWrapper> {
         return "#" + hex;
     };
     static constexpr auto value = glz::custom<read_hex, write_hex>;
+};
+
+template <>
+struct glz::meta<test_etf_types::CustomWriteScalarType> {
+    static constexpr bool custom_write = true;
+    static constexpr bool custom_read = true;
+    static constexpr auto write_fn = [](const test_etf_types::CustomWriteScalarType& obj) -> std::string {
+        return "custom_id_" + std::to_string(obj.id);
+    };
+    static constexpr auto read_fn = [](test_etf_types::CustomWriteScalarType& obj, std::string_view sv) {
+        if (sv.starts_with("custom_id_")) {
+            sv.remove_prefix(10);
+            obj.id = std::stoul(std::string(sv));
+        }
+    };
+    static constexpr auto value = glz::custom<read_fn, write_fn>;
 };
 
 template <>
@@ -4054,6 +4092,63 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
         CHECK(dec_json.rgb == 0xFF00AA);
         CHECK(dec_json == orig);
+    }
+
+    SECTION("HexColorWrapper inside containers (struct, vector, optional, variant, map)") {
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<HexColorWrapper>() == 0);
+
+        HexColorContainer orig{
+            .name = "dark_mode",
+            .single = HexColorWrapper{0x123456},
+            .list = {HexColorWrapper{0x111111}, HexColorWrapper{0x222222}},
+            .opt = HexColorWrapper{0x333333},
+            .var = HexColorWrapper{0x444444},
+            .map = {{"accent", HexColorWrapper{0x555555}}},
+        };
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        HexColorContainer dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf == orig);
+
+        // JSON
+        std::string enc_json;
+        REQUIRE_FALSE(glz::write_json(orig, enc_json));
+        CHECK(enc_json.contains("\"#123456\""));
+        CHECK(enc_json.contains("\"#333333\""));
+        CHECK(enc_json.contains("\"#555555\""));
+        HexColorContainer dec_json{};
+        REQUIRE_FALSE(glz::read_json(dec_json, enc_json));
+        CHECK(dec_json == orig);
+    }
+
+    SECTION("Type with custom_write in glz::meta") {
+        static_assert(glz::custom_write<CustomWriteScalarType>);
+        static_assert(glz::custom_read<CustomWriteScalarType>);
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<CustomWriteScalarType>() == 0);
+        static_assert(glz::etf::detail::min_etf_val_size<CustomWriteScalarType>() == 1);
+
+        CustomWriteScalarType orig{12345};
+
+        // ETF
+        std::string enc_etf;
+        REQUIRE_FALSE(glz::write_etf(orig, enc_etf));
+        CHECK(static_cast<uint8_t>(enc_etf[1]) == glz::etf::tag::BINARY_EXT);
+
+        CustomWriteScalarType dec_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_etf, enc_etf));
+        CHECK(dec_etf.id == 12345);
+        CHECK(dec_etf == orig);
+
+        // Inside a struct
+        NestedCustomWrite nested_orig{};
+        std::string enc_nested_etf;
+        REQUIRE_FALSE(glz::write_etf(nested_orig, enc_nested_etf));
+        NestedCustomWrite dec_nested_etf{};
+        REQUIRE_FALSE(glz::read_etf(dec_nested_etf, enc_nested_etf));
+        CHECK(dec_nested_etf == nested_orig);
     }
 
     SECTION("Standalone discusy::permissions_t (string-backed glz::custom)") {

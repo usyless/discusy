@@ -1472,6 +1472,25 @@ namespace glz
       }
    };
 
+   // Custom read specialization (types with static constexpr bool custom_read = true in glz::meta)
+   template <custom_read T>
+   struct from<EETF, T> final
+   {
+      template <auto Opts, class Value, is_context Ctx, class It0, class It1>
+      GLZ_ALWAYS_INLINE static void op(Value&& value, Ctx&& ctx, It0&& it, It1 end)
+      {
+         using V = std::decay_t<T>;
+         if constexpr (glaze_value_t<V>) {
+            using M = std::decay_t<decltype(get_member(value, meta_wrapper_v<V>))>;
+            from<EETF, M>::template op<Opts>(get_member(value, meta_wrapper_v<V>), ctx, it, end);
+         }
+         else if constexpr (requires { from<EETF, meta_t<V>>::template op<Opts>(std::forward<Value>(value), ctx, it, end); }) {
+            from<EETF, meta_t<V>>::template op<Opts>(
+               std::forward<Value>(value), ctx, it, end);
+         }
+      }
+   };
+
    namespace etf::detail
    {
       template <class V>
