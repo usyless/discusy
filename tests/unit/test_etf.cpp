@@ -5423,5 +5423,74 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(glz::etf_opts_append_arrays.format == glz::EETF);
         CHECK(glz::etf_opts_error_on_missing_keys.format == glz::EETF);
     }
+
+    SECTION("2.1 Vector and array primitive unrolling, fast-path wire decoding, and snowflake handling") {
+        // 1. Vector of snowflakes with various counts (0, 1, 3, 4, 7, 16, 25, 100)
+        for (size_t count : {0, 1, 3, 4, 7, 16, 25, 100}) {
+            std::vector<discusy::snowflake> sfs;
+            sfs.reserve(count);
+            for (size_t i = 0; i < count; ++i) {
+                sfs.emplace_back(100000000000000000ULL + i);
+            }
+            std::string buf;
+            REQUIRE_FALSE(glz::write_etf(sfs, buf));
+
+            std::vector<discusy::snowflake> dec_sfs;
+            REQUIRE_FALSE(glz::read_etf(dec_sfs, buf));
+            CHECK(dec_sfs == sfs);
+        }
+
+        // 2. Vector of 32-bit integers with various counts (multiples and non-multiples of 4)
+        for (size_t count : {0, 1, 3, 4, 9, 32, 65}) {
+            std::vector<std::int32_t> ints;
+            ints.reserve(count);
+            for (size_t i = 0; i < count; ++i) {
+                ints.push_back(static_cast<std::int32_t>(100000 + i));
+            }
+            std::string buf;
+            REQUIRE_FALSE(glz::write_etf(ints, buf));
+
+            std::vector<std::int32_t> dec_ints;
+            REQUIRE_FALSE(glz::read_etf(dec_ints, buf));
+            CHECK(dec_ints == ints);
+        }
+
+        // 3. Vector of uint8_t
+        std::vector<std::uint8_t> bytes = {0, 1, 42, 100, 200, 255, 7, 8, 9};
+        std::string bytes_buf;
+        REQUIRE_FALSE(glz::write_etf(bytes, bytes_buf));
+        std::vector<std::uint8_t> dec_bytes;
+        REQUIRE_FALSE(glz::read_etf(dec_bytes, bytes_buf));
+        CHECK(dec_bytes == bytes);
+
+        // 4. Vector of doubles (NEW_FLOAT_EXT)
+        std::vector<double> doubles = {1.23, 4.56, 7.89, 10.11, 12.13, 14.15};
+        std::string d_buf;
+        REQUIRE_FALSE(glz::write_etf(doubles, d_buf));
+        std::vector<double> dec_doubles;
+        REQUIRE_FALSE(glz::read_etf(dec_doubles, d_buf));
+        REQUIRE(dec_doubles.size() == doubles.size());
+        for (size_t i = 0; i < doubles.size(); ++i) {
+            CHECK(std::abs(dec_doubles[i] - doubles[i]) < 1e-9);
+        }
+
+        // 5. Fixed size std::array
+        std::array<std::int32_t, 6> arr = {10, 20, 30, 40, 50, 60};
+        std::string arr_buf;
+        REQUIRE_FALSE(glz::write_etf(arr, arr_buf));
+        std::array<std::int32_t, 6> dec_arr{};
+        REQUIRE_FALSE(glz::read_etf(dec_arr, arr_buf));
+        CHECK(dec_arr == arr);
+
+        std::array<discusy::snowflake, 4> sf_arr = {
+            discusy::snowflake{111ULL}, discusy::snowflake{222ULL},
+            discusy::snowflake{333ULL}, discusy::snowflake{444ULL}
+        };
+        std::string sf_arr_buf;
+        REQUIRE_FALSE(glz::write_etf(sf_arr, sf_arr_buf));
+        std::array<discusy::snowflake, 4> dec_sf_arr{};
+        REQUIRE_FALSE(glz::read_etf(dec_sf_arr, sf_arr_buf));
+        CHECK(dec_sf_arr == sf_arr);
+    }
 }
 

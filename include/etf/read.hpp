@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <chrono>
 #include <vector>
+#include <bit>
 
 #include <glaze/core/context.hpp>
 #include <glaze/core/opts.hpp>
@@ -34,7 +35,13 @@ namespace glz
    struct decode_hash_with_size<EETF, T, HashInfo, Type> : decode_hash_with_size<JSON, T, HashInfo, Type>
    {};
 
-   // Fast-path unfilled resize for std::vector with trivially copyable elements
+   // Fast-path unfilled resize for std::vector with trivially copyable elements.
+   // On libc++, __resize_default_init(n) skips zero-initialization.
+   // Custom vector types with resize_uninitialized(n) or resize_and_overwrite are also supported.
+   // On standard MSVC STL and GCC libstdc++, std::vector lacks an uninitialized resize API in C++23;
+   // attempting to manipulate private members (_M_finish / _Mylast) breaks iterator debugging and triggers
+   // AddressSanitizer poison traps (_ASAN_VECTOR_EXTEND_GUARD), so b.resize(n) is the conforming fallback.
+   // Deserialization speed across all compilers is recovered through unrolled wire decoding in decode_etf_elements.
    template <class Item, class Alloc>
       requires(std::is_trivially_copyable_v<Item>)
    GLZ_ALWAYS_INLINE void resize_unfilled(std::vector<Item, Alloc>& b, const size_t n)
@@ -478,6 +485,288 @@ namespace glz
       }
    };
 
+   namespace etf::detail
+   {
+      template <class T>
+      struct is_numeric_like {
+         using U = std::decay_t<T>;
+         static constexpr bool value =
+            (std::integral<U> && !std::same_as<U, bool> && !wide_char_t<U>) || std::floating_point<U>;
+      };
+
+      template <class T>
+         requires(is_opts_wrapper<std::decay_t<T>>)
+      struct is_numeric_like<T> {
+         using member_t = std::decay_t<T>::value_type;
+         static constexpr bool value = is_numeric_like<member_t>::value;
+      };
+
+      template <class T>
+         requires(glaze_value_t<std::decay_t<T>> && !custom_read<std::decay_t<T>> && !is_opts_wrapper<std::decay_t<T>>)
+      struct is_numeric_like<T> {
+         using member_t = std::decay_t<decltype(get_member(std::declval<T&>(), meta_wrapper_v<std::decay_t<T>>))>;
+         static constexpr bool value = is_numeric_like<member_t>::value;
+      };
+
+      template <class T>
+      inline constexpr bool is_numeric_like_v = is_numeric_like<T>::value;
+
+      template <class T>
+      GLZ_ALWAYS_INLINE decltype(auto) get_numeric_ref(T& val) noexcept
+      {
+         using D = std::decay_t<T>;
+         if constexpr (is_opts_wrapper<D>) {
+            return get_numeric_ref(val.val);
+         }
+         else if constexpr (glaze_value_t<D> && !custom_read<D>) {
+            decltype(auto) m = get_member(val, meta_wrapper_v<D>);
+            return get_numeric_ref(m);
+         }
+         else {
+            return val;
+         }
+      }
+
+      template <auto Opts, class V>
+      GLZ_ALWAYS_INLINE void decode_etf_elements(V* data, size_t count, is_context auto& ctx, auto& it, auto end)
+      {
+         if constexpr (is_numeric_like_v<V>) {
+            using RawNum = std::decay_t<decltype(get_numeric_ref(std::declval<V&>()))>;
+            size_t i = 0;
+
+            // 4-way unrolled loop
+            for (; i + 3 < count; i += 4) {
+               // Fast path for 64-bit unsigned integers / snowflakes (SMALL_BIG_EXT with n=8, sign=0)
+               if constexpr (sizeof(RawNum) == 8 && std::is_integral_v<RawNum> && std::is_unsigned_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 44 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::SMALL_BIG_EXT && static_cast<uint8_t>(it[1]) == 8 && static_cast<uint8_t>(it[2]) == 0 &&
+                      static_cast<uint8_t>(it[11]) == etf::tag::SMALL_BIG_EXT && static_cast<uint8_t>(it[12]) == 8 && static_cast<uint8_t>(it[13]) == 0 &&
+                      static_cast<uint8_t>(it[22]) == etf::tag::SMALL_BIG_EXT && static_cast<uint8_t>(it[23]) == 8 && static_cast<uint8_t>(it[24]) == 0 &&
+                      static_cast<uint8_t>(it[33]) == etf::tag::SMALL_BIG_EXT && static_cast<uint8_t>(it[34]) == 8 && static_cast<uint8_t>(it[35]) == 0) [[likely]]
+                  {
+                     uint64_t v0; // NOLINT(cppcoreguidelines-init-variables)
+                     uint64_t v1; // NOLINT(cppcoreguidelines-init-variables)
+                     uint64_t v2; // NOLINT(cppcoreguidelines-init-variables)
+                     uint64_t v3; // NOLINT(cppcoreguidelines-init-variables)
+                     std::memcpy(&v0, it + 3, 8);
+                     std::memcpy(&v1, it + 14, 8);
+                     std::memcpy(&v2, it + 25, 8);
+                     std::memcpy(&v3, it + 36, 8);
+                     if constexpr (std::endian::native == std::endian::big) {
+                        v0 = std::byteswap(v0);
+                        v1 = std::byteswap(v1);
+                        v2 = std::byteswap(v2);
+                        v3 = std::byteswap(v3);
+                     }
+                     get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
+                     get_numeric_ref(data[i + 1]) = static_cast<RawNum>(v1);
+                     get_numeric_ref(data[i + 2]) = static_cast<RawNum>(v2);
+                     get_numeric_ref(data[i + 3]) = static_cast<RawNum>(v3);
+                     it += 44;
+                     continue;
+                  }
+               }
+
+               // Fast path for 32-bit / 64-bit integers (INTEGER_EXT)
+               if constexpr (sizeof(RawNum) >= 4 && std::is_integral_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 20 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::INTEGER_EXT &&
+                      static_cast<uint8_t>(it[5]) == etf::tag::INTEGER_EXT &&
+                      static_cast<uint8_t>(it[10]) == etf::tag::INTEGER_EXT &&
+                      static_cast<uint8_t>(it[15]) == etf::tag::INTEGER_EXT) [[likely]]
+                  {
+                     const int32_t v0 = etf::detail::read_be<int32_t>(it + 1);
+                     const int32_t v1 = etf::detail::read_be<int32_t>(it + 6);
+                     const int32_t v2 = etf::detail::read_be<int32_t>(it + 11);
+                     const int32_t v3 = etf::detail::read_be<int32_t>(it + 16);
+                     if constexpr (std::is_unsigned_v<RawNum>) {
+                        if (v0 >= 0 && v1 >= 0 && v2 >= 0 && v3 >= 0) [[likely]] {
+                           get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
+                           get_numeric_ref(data[i + 1]) = static_cast<RawNum>(v1);
+                           get_numeric_ref(data[i + 2]) = static_cast<RawNum>(v2);
+                           get_numeric_ref(data[i + 3]) = static_cast<RawNum>(v3);
+                           it += 20;
+                           continue;
+                        }
+                     }
+                     else {
+                        get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
+                        get_numeric_ref(data[i + 1]) = static_cast<RawNum>(v1);
+                        get_numeric_ref(data[i + 2]) = static_cast<RawNum>(v2);
+                        get_numeric_ref(data[i + 3]) = static_cast<RawNum>(v3);
+                        it += 20;
+                        continue;
+                     }
+                  }
+               }
+
+               // Fast path for 8-bit / 16-bit / 32-bit / 64-bit integers (SMALL_INTEGER_EXT)
+               if constexpr (std::is_integral_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 8 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::SMALL_INTEGER_EXT &&
+                      static_cast<uint8_t>(it[2]) == etf::tag::SMALL_INTEGER_EXT &&
+                      static_cast<uint8_t>(it[4]) == etf::tag::SMALL_INTEGER_EXT &&
+                      static_cast<uint8_t>(it[6]) == etf::tag::SMALL_INTEGER_EXT) [[likely]]
+                  {
+                     const auto v0 = static_cast<uint8_t>(it[1]);
+                     const auto v1 = static_cast<uint8_t>(it[3]);
+                     const auto v2 = static_cast<uint8_t>(it[5]);
+                     const auto v3 = static_cast<uint8_t>(it[7]);
+                     if constexpr (std::is_signed_v<RawNum> && sizeof(RawNum) == 1) {
+                        if (v0 <= 127 && v1 <= 127 && v2 <= 127 && v3 <= 127) [[likely]] {
+                           get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
+                           get_numeric_ref(data[i + 1]) = static_cast<RawNum>(v1);
+                           get_numeric_ref(data[i + 2]) = static_cast<RawNum>(v2);
+                           get_numeric_ref(data[i + 3]) = static_cast<RawNum>(v3);
+                           it += 8;
+                           continue;
+                        }
+                     }
+                     else {
+                        get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
+                        get_numeric_ref(data[i + 1]) = static_cast<RawNum>(v1);
+                        get_numeric_ref(data[i + 2]) = static_cast<RawNum>(v2);
+                        get_numeric_ref(data[i + 3]) = static_cast<RawNum>(v3);
+                        it += 8;
+                        continue;
+                     }
+                  }
+               }
+
+               // Fast path for 64-bit IEEE-754 doubles (NEW_FLOAT_EXT)
+               if constexpr (std::floating_point<RawNum> && sizeof(RawNum) == 8) {
+                  if (static_cast<size_t>(end - it) >= 36 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::NEW_FLOAT_EXT &&
+                      static_cast<uint8_t>(it[9]) == etf::tag::NEW_FLOAT_EXT &&
+                      static_cast<uint8_t>(it[18]) == etf::tag::NEW_FLOAT_EXT &&
+                      static_cast<uint8_t>(it[27]) == etf::tag::NEW_FLOAT_EXT) [[likely]]
+                  {
+                     const uint64_t b0 = read_be<uint64_t>(it + 1);
+                     const uint64_t b1 = read_be<uint64_t>(it + 10);
+                     const uint64_t b2 = read_be<uint64_t>(it + 19);
+                     const uint64_t b3 = read_be<uint64_t>(it + 28);
+                     double d0; // NOLINT(cppcoreguidelines-init-variables)
+                     double d1; // NOLINT(cppcoreguidelines-init-variables)
+                     double d2; // NOLINT(cppcoreguidelines-init-variables)
+                     double d3; // NOLINT(cppcoreguidelines-init-variables)
+                     std::memcpy(&d0, &b0, 8);
+                     std::memcpy(&d1, &b1, 8);
+                     std::memcpy(&d2, &b2, 8);
+                     std::memcpy(&d3, &b3, 8);
+                     get_numeric_ref(data[i]) = static_cast<RawNum>(d0);
+                     get_numeric_ref(data[i + 1]) = static_cast<RawNum>(d1);
+                     get_numeric_ref(data[i + 2]) = static_cast<RawNum>(d2);
+                     get_numeric_ref(data[i + 3]) = static_cast<RawNum>(d3);
+                     it += 36;
+                     continue;
+                  }
+               }
+
+               // Fallback 4-way scalar parse
+               parse<EETF>::op<Opts>(data[i], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 1], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 2], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 3], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+
+            // Remainder loop
+            for (; i < count; ++i) {
+               if constexpr (sizeof(RawNum) == 8 && std::is_integral_v<RawNum> && std::is_unsigned_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 11 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::SMALL_BIG_EXT &&
+                      static_cast<uint8_t>(it[1]) == 8 &&
+                      static_cast<uint8_t>(it[2]) == 0) [[likely]]
+                  {
+                     uint64_t v; // NOLINT(cppcoreguidelines-init-variables)
+                     std::memcpy(&v, it + 3, 8);
+                     if constexpr (std::endian::native == std::endian::big) {
+                        v = std::byteswap(v);
+                     }
+                     get_numeric_ref(data[i]) = static_cast<RawNum>(v);
+                     it += 11;
+                     continue;
+                  }
+               }
+               if constexpr (sizeof(RawNum) >= 4 && std::is_integral_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 5 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::INTEGER_EXT) [[likely]]
+                  {
+                     const int32_t v = etf::detail::read_be<int32_t>(it + 1);
+                     if constexpr (std::is_unsigned_v<RawNum>) {
+                        if (v >= 0) [[likely]] {
+                           get_numeric_ref(data[i]) = static_cast<RawNum>(v);
+                           it += 5;
+                           continue;
+                        }
+                     }
+                     else {
+                        get_numeric_ref(data[i]) = static_cast<RawNum>(v);
+                        it += 5;
+                        continue;
+                     }
+                  }
+               }
+               if constexpr (std::is_integral_v<RawNum>) {
+                  if (static_cast<size_t>(end - it) >= 2 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::SMALL_INTEGER_EXT) [[likely]]
+                  {
+                     const auto v = static_cast<uint8_t>(it[1]);
+                     if constexpr (std::is_signed_v<RawNum> && sizeof(RawNum) == 1) {
+                        if (v <= 127) [[likely]] {
+                           get_numeric_ref(data[i]) = static_cast<RawNum>(v);
+                           it += 2;
+                           continue;
+                        }
+                     }
+                     else {
+                        get_numeric_ref(data[i]) = static_cast<RawNum>(v);
+                        it += 2;
+                        continue;
+                     }
+                  }
+               }
+               if constexpr (std::floating_point<RawNum> && sizeof(RawNum) == 8) {
+                  if (static_cast<size_t>(end - it) >= 9 &&
+                      static_cast<uint8_t>(it[0]) == etf::tag::NEW_FLOAT_EXT) [[likely]]
+                  {
+                     const uint64_t b = read_be<uint64_t>(it + 1);
+                     double d; // NOLINT(cppcoreguidelines-init-variables)
+                     std::memcpy(&d, &b, 8);
+                     get_numeric_ref(data[i]) = static_cast<RawNum>(d);
+                     it += 9;
+                     continue;
+                  }
+               }
+
+               parse<EETF>::op<Opts>(data[i], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+         }
+         else {
+            // Non-numeric elements: 4-way unrolled loop
+            size_t i = 0;
+            for (; i + 3 < count; i += 4) {
+               parse<EETF>::op<Opts>(data[i], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 1], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 2], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+               parse<EETF>::op<Opts>(data[i + 3], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+            for (; i < count; ++i) {
+               parse<EETF>::op<Opts>(data[i], ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+         }
+      }
+   }
+
    // Arrays (std::vector, std::deque, std::span, etc.)
    template <readable_array_t T>
    struct from<EETF, T> final
@@ -554,9 +843,15 @@ namespace glz
                         else {
                            value.resize(orig_size + len);
                         }
-                        for (size_t i = orig_size; i < orig_size + len; ++i) {
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                        if constexpr (requires { value.data(); }) {
+                           etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                        else {
+                           for (size_t i = orig_size; i < orig_size + len; ++i) {
+                              parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                              if (bool(ctx.error)) [[unlikely]] return;
+                           }
                         }
                      }
                   }
@@ -567,9 +862,15 @@ namespace glz
                      else {
                         value.resize(orig_size + len);
                      }
-                     for (size_t i = orig_size; i < orig_size + len; ++i) {
-                        parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                     if constexpr (requires { value.data(); }) {
+                        etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                     else {
+                        for (size_t i = orig_size; i < orig_size + len; ++i) {
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
                      }
                   }
                }
@@ -594,9 +895,15 @@ namespace glz
                         else {
                            value.resize(len);
                         }
-                        for (auto&& elem : value) {
-                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                        if constexpr (requires { value.data(); }) {
+                           etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                        else {
+                           for (auto&& elem : value) {
+                              parse<EETF>::op<Opts>(elem, ctx, it, end);
+                              if (bool(ctx.error)) [[unlikely]] return;
+                           }
                         }
                      }
                   }
@@ -607,9 +914,15 @@ namespace glz
                      else {
                         value.resize(len);
                      }
-                     for (auto&& elem : value) {
-                        parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if constexpr (requires { value.data(); }) {
+                        etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                     else {
+                        for (auto&& elem : value) {
+                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
                      }
                   }
                }
@@ -693,9 +1006,15 @@ namespace glz
                   }
                }
                const size_t parse_len = (len < value.size()) ? len : value.size();
-               for (size_t i = 0; i < parse_len; ++i) {
-                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
+               if constexpr (requires { value.data(); }) {
+                  etf::detail::decode_etf_elements<Opts>(value.data(), parse_len, ctx, it, end);
                   if (bool(ctx.error)) [[unlikely]] return;
+               }
+               else {
+                  for (size_t i = 0; i < parse_len; ++i) {
+                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
                for (size_t i = parse_len; i < len; ++i) {
                   skip_value<EETF>::op<Opts>(ctx, it, end);
@@ -985,9 +1304,15 @@ namespace glz
                         else {
                            value.resize(orig_size + len);
                         }
-                        for (size_t i = orig_size; i < orig_size + len; ++i) {
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                        if constexpr (requires { value.data(); }) {
+                           etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                        else {
+                           for (size_t i = orig_size; i < orig_size + len; ++i) {
+                              parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                              if (bool(ctx.error)) [[unlikely]] return;
+                           }
                         }
                      }
                   }
@@ -998,9 +1323,15 @@ namespace glz
                      else {
                         value.resize(orig_size + len);
                      }
-                     for (size_t i = orig_size; i < orig_size + len; ++i) {
-                        parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                     if constexpr (requires { value.data(); }) {
+                        etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                     else {
+                        for (size_t i = orig_size; i < orig_size + len; ++i) {
+                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
                      }
                   }
                }
@@ -1025,9 +1356,15 @@ namespace glz
                         else {
                            value.resize(len);
                         }
-                        for (auto&& elem : value) {
-                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                        if constexpr (requires { value.data(); }) {
+                           etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
                            if (bool(ctx.error)) [[unlikely]] return;
+                        }
+                        else {
+                           for (auto&& elem : value) {
+                              parse<EETF>::op<Opts>(elem, ctx, it, end);
+                              if (bool(ctx.error)) [[unlikely]] return;
+                           }
                         }
                      }
                   }
@@ -1038,9 +1375,15 @@ namespace glz
                      else {
                         value.resize(len);
                      }
-                     for (auto&& elem : value) {
-                        parse<EETF>::op<Opts>(elem, ctx, it, end);
+                     if constexpr (requires { value.data(); }) {
+                        etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
+                     }
+                     else {
+                        for (auto&& elem : value) {
+                           parse<EETF>::op<Opts>(elem, ctx, it, end);
+                           if (bool(ctx.error)) [[unlikely]] return;
+                        }
                      }
                   }
                }
@@ -1124,9 +1467,15 @@ namespace glz
                   }
                }
                const size_t parse_len = (len < value.size()) ? len : value.size();
-               for (size_t i = 0; i < parse_len; ++i) {
-                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
+               if constexpr (requires { value.data(); }) {
+                  etf::detail::decode_etf_elements<Opts>(value.data(), parse_len, ctx, it, end);
                   if (bool(ctx.error)) [[unlikely]] return;
+               }
+               else {
+                  for (size_t i = 0; i < parse_len; ++i) {
+                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] return;
+                  }
                }
                for (size_t i = parse_len; i < len; ++i) {
                   skip_value<EETF>::op<Opts>(ctx, it, end);
