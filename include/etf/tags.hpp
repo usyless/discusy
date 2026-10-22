@@ -651,6 +651,22 @@ namespace glz::etf
       template <typename T, is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_number(Ctx& ctx, It0& it, It1 end, T& num) noexcept
       {
+         if constexpr (std::is_unsigned_v<T> && sizeof(T) == 8) {
+            if (end - it >= 11 &&
+                static_cast<uint8_t>(it[0]) == tag::SMALL_BIG_EXT &&
+                static_cast<uint8_t>(it[1]) == 8 &&
+                static_cast<uint8_t>(it[2]) == 0) [[likely]] {
+               uint64_t raw; // NOLINT(cppcoreguidelines-init-variables)
+               std::memcpy(&raw, it + 3, 8);
+               if constexpr (std::endian::native == std::endian::big) {
+                  raw = std::byteswap(raw);
+               }
+               num = static_cast<T>(raw);
+               it += 11;
+               return true;
+            }
+         }
+
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return false;

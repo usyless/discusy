@@ -5492,5 +5492,54 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         REQUIRE_FALSE(glz::read_etf(dec_sf_arr, sf_arr_buf));
         CHECK(dec_sf_arr == sf_arr);
     }
+
+    SECTION("2.2 Single-instruction 64-bit snowflake/uint64 fast-path in read_number") {
+        // Construct SMALL_BIG_EXT: tag 110, length 8, sign 0, followed by 8 LE bytes
+        std::uint64_t target_val = 112233445566778899ULL;
+        std::string raw_buf;
+        raw_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        raw_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        raw_buf.push_back(8);
+        raw_buf.push_back(0);
+        uint64_t le_val = target_val;
+        if constexpr (std::endian::native == std::endian::big) {
+            le_val = std::byteswap(le_val);
+        }
+        raw_buf.append(reinterpret_cast<const char*>(&le_val), 8);
+
+        // 1. Direct uint64_t deserialization through read_number fast-path
+        std::uint64_t dec_u64 = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_u64, raw_buf));
+        CHECK(dec_u64 == target_val);
+
+        // 2. Direct discusy::snowflake deserialization
+        discusy::snowflake dec_sf{};
+        REQUIRE_FALSE(glz::read_etf(dec_sf, raw_buf));
+        CHECK(dec_sf.value == target_val);
+
+        // 3. Fallthrough cases:
+        // 3a. Small integer in uint64_t (SMALL_INTEGER_EXT) falls through to switch
+        std::uint64_t small_u64 = 42;
+        std::string small_buf;
+        REQUIRE_FALSE(glz::write_etf(small_u64, small_buf));
+        std::uint64_t dec_small = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_small, small_buf));
+        CHECK(dec_small == 42);
+
+        // 3b. 32-bit integer in uint64_t (INTEGER_EXT) falls through to switch
+        std::uint64_t med_u64 = 100000;
+        std::string med_buf;
+        REQUIRE_FALSE(glz::write_etf(med_u64, med_buf));
+        std::uint64_t dec_med = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_med, med_buf));
+        CHECK(dec_med == 100000);
+
+        // 3c. Negative sign in SMALL_BIG_EXT (sign != 0) falls through to switch and fails validation
+        std::string neg_buf = raw_buf;
+        neg_buf[3] = 1; // sign = 1 (negative)
+        std::uint64_t dec_neg = 0;
+        auto ec_neg = glz::read_etf(dec_neg, neg_buf);
+        CHECK(static_cast<bool>(ec_neg));
+    }
 }
 
