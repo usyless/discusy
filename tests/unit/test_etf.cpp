@@ -5631,5 +5631,81 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).name.capacity() == name_cap);
         CHECK(std::get<test_etf_types::SampleStruct>(sv_obj).name.data() == name_ptr);
     }
+
+    SECTION("2.5 & 2.6 Serialization bounded run coalescing and 64-bit snowflake fast path") {
+        // 1. Test 64-bit snowflake fast path
+        const uint64_t large_sf = 112233445566778899ULL; // > 1ULL << 56
+        std::string enc_sf;
+        REQUIRE_FALSE(glz::write_etf(large_sf, enc_sf));
+        // Wire format: 1 (version) + 1 (SMALL_BIG_EXT) + 1 (n=8) + 1 (sign=0) + 8 (le bytes) = 12 bytes
+        REQUIRE(enc_sf.size() == 12);
+        CHECK(static_cast<uint8_t>(enc_sf[0]) == glz::etf::magic_version);
+        CHECK(static_cast<uint8_t>(enc_sf[1]) == glz::etf::tag::SMALL_BIG_EXT);
+        CHECK(static_cast<uint8_t>(enc_sf[2]) == 8);
+        CHECK(static_cast<uint8_t>(enc_sf[3]) == 0);
+
+        uint64_t dec_sf = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_sf, enc_sf));
+        CHECK(dec_sf == large_sf);
+
+        // Boundary check: exactly (1ULL << 56)
+        const uint64_t boundary_sf = 1ULL << 56;
+        std::string enc_boundary;
+        REQUIRE_FALSE(glz::write_etf(boundary_sf, enc_boundary));
+        REQUIRE(enc_boundary.size() == 12);
+        CHECK(static_cast<uint8_t>(enc_boundary[2]) == 8);
+        uint64_t dec_boundary = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_boundary, enc_boundary));
+        CHECK(dec_boundary == boundary_sf);
+
+        // Sub-boundary check: (1ULL << 56) - 1 (takes 7 bytes in SMALL_BIG_EXT)
+        const uint64_t sub_sf = (1ULL << 56) - 1;
+        std::string enc_sub;
+        REQUIRE_FALSE(glz::write_etf(sub_sf, enc_sub));
+        REQUIRE(enc_sub.size() == 11); // 1 + 1 + 1 + 1 + 7
+        CHECK(static_cast<uint8_t>(enc_sub[2]) == 7);
+        uint64_t dec_sub = 0;
+        REQUIRE_FALSE(glz::read_etf(dec_sub, enc_sub));
+        CHECK(dec_sub == sub_sf);
+
+        // 2. Hybrid struct bounded run coalescing
+        test_etf_types::SampleStruct hybrid{
+            .id = discusy::snowflake{99887766554433ULL},
+            .name = "hybrid_test_name",
+            .description = "hybrid_description",
+            .count = 1234,
+            .enabled = true
+        };
+        std::string enc_hybrid;
+        REQUIRE_FALSE(glz::write_etf(hybrid, enc_hybrid));
+
+        test_etf_types::SampleStruct dec_hybrid{};
+        REQUIRE_FALSE(glz::read_etf(dec_hybrid, enc_hybrid));
+        CHECK(dec_hybrid.id.value == hybrid.id.value);
+        CHECK(dec_hybrid.name == hybrid.name);
+        REQUIRE(dec_hybrid.description.has_value());
+        CHECK(*dec_hybrid.description == *hybrid.description);
+        CHECK(dec_hybrid.count == hybrid.count);
+        CHECK(dec_hybrid.enabled == hybrid.enabled);
+
+        // Hybrid struct with null optional (skipping unbounded/bounded field)
+        test_etf_types::SampleStruct hybrid_null{
+            .id = discusy::snowflake{555555555555ULL},
+            .name = "null_opt_test",
+            .description = std::nullopt,
+            .count = 4321,
+            .enabled = false
+        };
+        std::string enc_null;
+        REQUIRE_FALSE(glz::write_etf(hybrid_null, enc_null));
+
+        test_etf_types::SampleStruct dec_null{};
+        REQUIRE_FALSE(glz::read_etf(dec_null, enc_null));
+        CHECK(dec_null.id.value == hybrid_null.id.value);
+        CHECK(dec_null.name == hybrid_null.name);
+        CHECK_FALSE(dec_null.description.has_value());
+        CHECK(dec_null.count == hybrid_null.count);
+        CHECK(dec_null.enabled == hybrid_null.enabled);
+    }
 }
 

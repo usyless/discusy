@@ -291,6 +291,43 @@ namespace glz
          }
       }
 
+      template <auto Opts, class T, size_t Start>
+      consteval size_t bounded_run_size()
+      {
+         using V = std::decay_t<T>;
+         if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
+            constexpr auto N = reflect<V>::size;
+            if constexpr (Start >= N) {
+               return 0;
+            }
+            else {
+               size_t total = 0;
+               for_each_short_circuit<N - Start>([&]<auto J>() -> bool {
+                  constexpr size_t I = Start + J;
+                  if constexpr (skipped_on_write<Opts, V, I>) {
+                     return false; // skip field
+                  }
+                  else {
+                     using field_val_t = std::decay_t<field_t<V, I>>;
+                     constexpr size_t val_max = max_etf_val_size<field_val_t>();
+                     if constexpr (val_max > 0) {
+                        constexpr auto key = glz::get<I>(reflect<V>::keys);
+                        total += 5 + key.size() + val_max;
+                        return false; // continue run
+                     }
+                     else {
+                        return true; // abort run on unbounded field
+                     }
+                  }
+               });
+               return total;
+            }
+         }
+         else {
+            return 0;
+         }
+      }
+
       template <class T>
       inline constexpr size_t min_etf_size = [] {
          using V = std::decay_t<T>;
@@ -431,6 +468,23 @@ namespace glz
          else if constexpr (std::integral<std::decay_t<T>>) {
             using U = std::decay_t<T>;
             if constexpr (std::is_unsigned_v<U>) {
+               if constexpr (sizeof(U) == 8) {
+                  if (value >= (1ULL << 56)) [[likely]] { // 8-byte Snowflake fast path (no countl_zero needed)
+                     if constexpr (!check_write_unchecked(Opts)) {
+                        etf::detail::ensure_space(b, ix + 11);
+                     }
+                     b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
+                     b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
+                     b[ix + 2] = static_cast<std::decay_t<decltype(b)>::value_type>(0);
+                     uint64_t raw = value;
+                     if constexpr (std::endian::native == std::endian::big) {
+                        raw = std::byteswap(raw);
+                     }
+                     std::memcpy(&b[ix + 3], &raw, 8);
+                     ix += 11;
+                     return;
+                  }
+               }
                if (value <= 255) {
                   if constexpr (check_write_unchecked(Opts)) {
                      etf::detail::dump_tag_be_unchecked<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
@@ -755,8 +809,11 @@ namespace glz
             }
          }
          else {
+            constexpr size_t initial_run = 5 + etf::detail::bounded_run_size<Opts, T, 0>();
             constexpr size_t struct_min = etf::detail::min_etf_struct_size<std::decay_t<T>>();
-            etf::detail::ensure_space(b, ix + struct_min);
+            if constexpr (!check_write_unchecked(Opts)) {
+               etf::detail::ensure_space(b, ix + (std::max)(initial_run, struct_min));
+            }
          }
 
          [[maybe_unused]] decltype(auto) t = [&]() -> decltype(auto) {
@@ -790,55 +847,72 @@ namespace glz
                }();
                using val_t = std::decay_t<decltype(member_val)>;
 
+               static constexpr auto key = reflect<T>::keys[I];
+               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
+
+               auto on_skipped = [&] {
+                  if constexpr (not fixed_max_size && val_max == 0) {
+                     constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
+                     if constexpr (next_run > 0) {
+                        etf::detail::ensure_space(b, ix + next_run);
+                     }
+                  }
+               };
+
                if constexpr (meta_has_skip_if<T>) {
                   static constexpr auto skip_if_key = glz::get<I>(reflect<T>::keys);
                   static constexpr meta_context mctx{.op = operation::serialize};
                   if (meta<T>::skip_if(member_val, skip_if_key, mctx)) {
+                     on_skipped();
                      return;
                   }
                }
 
                if constexpr (Opts.skip_null_members) {
                   if constexpr (always_null_t<val_t>) {
+                     on_skipped();
                      return;
                   }
                   else if constexpr (null_t<val_t> || nullable_like<val_t>) {
                      if constexpr (nullable_wrapper<val_t>) {
                         if (!bool(member_val.val)) {
+                           on_skipped();
                            return;
                         }
                      }
                      else if constexpr (nullable_value_t<val_t>) {
                         if (!member_val.has_value()) {
+                           on_skipped();
                            return;
                         }
                      }
                      else if constexpr (requires { bool(member_val); }) {
                         if (!bool(member_val)) {
+                           on_skipped();
                            return;
                         }
                      }
                   }
                   else if constexpr (is_specialization_v<val_t, custom_t> && custom_getter_returns_nullable<val_t>()) {
                      if (is_custom_field_null<T, I>(value, t, ctx)) {
+                        on_skipped();
                         return;
                      }
                   }
                   else if constexpr (glaze_value_is_nullable<val_t>()) {
                      if (is_glaze_value_field_null<T, I>(value, t)) {
+                        on_skipped();
                         return;
                      }
                   }
                }
 
-               static constexpr auto key = reflect<T>::keys[I];
-               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
-
                if constexpr (str_t<val_t>) {
                   const auto sv = str_view<val_t>(member_val);
                   const auto len = static_cast<uint32_t>(sv.size());
                   if constexpr (not fixed_max_size) {
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len);
+                     constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len + next_run);
                   }
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
                   etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
@@ -846,7 +920,9 @@ namespace glz
                }
                else {
                   if constexpr (not fixed_max_size) {
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+                     if constexpr (val_max == 0) {
+                        etf::detail::ensure_space(b, ix + 5 + key.size());
+                     }
                   }
 
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
@@ -857,6 +933,12 @@ namespace glz
                   }
                   else {
                      to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                     if constexpr (not fixed_max_size) {
+                        constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
+                        if constexpr (next_run > 0) {
+                           etf::detail::ensure_space(b, ix + next_run);
+                        }
+                     }
                   }
                }
                ++pair_count;
@@ -891,7 +973,8 @@ namespace glz
                   const auto sv = str_view<val_t>(member_val);
                   const auto len = static_cast<uint32_t>(sv.size());
                   if constexpr (not fixed_max_size) {
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len);
+                     constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
+                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len + next_run);
                   }
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
                   etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
@@ -899,7 +982,9 @@ namespace glz
                }
                else {
                   if constexpr (not fixed_max_size) {
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + val_max);
+                     if constexpr (val_max == 0) {
+                        etf::detail::ensure_space(b, ix + 5 + key.size());
+                     }
                   }
 
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
@@ -910,6 +995,12 @@ namespace glz
                   }
                   else {
                      to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
+                     if constexpr (not fixed_max_size) {
+                        constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
+                        if constexpr (next_run > 0) {
+                           etf::detail::ensure_space(b, ix + next_run);
+                        }
+                     }
                   }
                }
             });
