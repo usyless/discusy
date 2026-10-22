@@ -34,30 +34,4 @@ namespace glz
          serialize<EETF>::no_header<opt_true<Opts, T::opts_member>>(value.val, ctx, args...);
       }
    };
-
-   template <class T, size_t MaxLen>
-   struct from<EETF, max_length_t<T, MaxLen>>
-   {
-      template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& wrapper, is_context auto&& ctx, auto&& it, auto end)
-      {
-         from<EETF, T>::template op<Opts>(wrapper.val, ctx, it, end);
-      }
-   };
-
-   template <class T, size_t MaxLen>
-   struct to<EETF, max_length_t<T, MaxLen>>
-   {
-      template <auto Opts>
-      GLZ_ALWAYS_INLINE static void op(auto&& wrapper, is_context auto&& ctx, auto&&... args)
-      {
-         to<EETF, T>::template op<Opts>(wrapper.val, ctx, args...);
-      }
-
-      template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& wrapper, is_context auto&& ctx, auto&&... args)
-      {
-         to<EETF, T>::template no_header<Opts>(wrapper.val, ctx, args...);
-      }
-   };
 } // namespace glz

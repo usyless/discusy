@@ -208,6 +208,48 @@ struct RolePermissionsTest {
     bool operator==(const RolePermissionsTest&) const = default;
 };
 
+struct Signed8Struct {
+    int8_t a{-128};
+    int8_t b{-1};
+    int8_t c{127};
+    bool operator==(const Signed8Struct&) const = default;
+};
+
+template <typename T>
+struct CustomNullableValue {
+    std::optional<T> opt{};
+    constexpr bool has_value() const noexcept { return opt.has_value(); }
+    constexpr const T& value() const& { return opt.value(); }
+    constexpr T& value() & { return opt.value(); }
+    constexpr void reset() noexcept { opt.reset(); }
+    template <typename... Args>
+    constexpr decltype(auto) emplace(Args&&... args) { return opt.emplace(std::forward<Args>(args)...); }
+    bool operator==(const CustomNullableValue&) const = default;
+};
+
+struct NullableValueHolder {
+    std::string name{"test"};
+    CustomNullableValue<int> count{};
+    CustomNullableValue<std::string> desc{};
+    bool operator==(const NullableValueHolder&) const = default;
+};
+
+enum class VariantEnumId : uint8_t { Alpha = 10, Beta = 20 };
+
+struct EnumVariantAlpha {
+    VariantEnumId type{VariantEnumId::Alpha};
+    std::string msg{"hello"};
+    bool operator==(const EnumVariantAlpha&) const = default;
+};
+
+struct EnumVariantBeta {
+    VariantEnumId type{VariantEnumId::Beta};
+    int count{99};
+    bool operator==(const EnumVariantBeta&) const = default;
+};
+
+using EnumTaggedVariant = std::variant<EnumVariantAlpha, EnumVariantBeta>;
+
 struct TriStateTestStruct {
     std::string name{"item"};
     discusy::opt<discusy::explicit_null<std::string>> description{};
@@ -367,6 +409,31 @@ template <>
 struct glz::meta<test_etf_types::GlobalMimicString> {
     using mimic = std::string;
     static constexpr auto value = &test_etf_types::GlobalMimicString::val;
+};
+
+template <>
+struct glz::meta<test_etf_types::EnumVariantAlpha> {
+    using T = test_etf_types::EnumVariantAlpha;
+    static constexpr auto value = object(&T::type, &T::msg);
+};
+
+template <>
+struct glz::meta<test_etf_types::EnumVariantBeta> {
+    using T = test_etf_types::EnumVariantBeta;
+    static constexpr auto value = object(&T::type, &T::count);
+};
+
+template <>
+struct glz::meta<test_etf_types::EnumTaggedVariant> {
+    using T = test_etf_types::EnumTaggedVariant;
+    static constexpr std::string_view tag = "type";
+    static constexpr auto ids = std::array{test_etf_types::VariantEnumId::Alpha, test_etf_types::VariantEnumId::Beta};
+};
+
+template <>
+inline constexpr auto glz::ids_v<test_etf_types::EnumTaggedVariant> = std::array{
+    test_etf_types::VariantEnumId::Alpha,
+    test_etf_types::VariantEnumId::Beta
 };
 
 using namespace test_etf_types;
@@ -5178,6 +5245,183 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
         sec_time_point tp_sec{};
         REQUIRE_FALSE(glz::read_etf(tp_sec, enc_sec));
         CHECK(tp_sec.time_since_epoch().count() == 1700000000LL);
+    }
+}
+
+TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
+    auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+    auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24) & 0xFF));
+        s.push_back(static_cast<char>((val >> 16) & 0xFF));
+        s.push_back(static_cast<char>((val >> 8) & 0xFF));
+        s.push_back(static_cast<char>(val & 0xFF));
+    };
+
+    SECTION("1.1 Negative int8_t and signed char bounds") {
+        // Unsigned int8 takes at most 2 bytes, but signed int8 can take 5 bytes for negative values
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<std::uint8_t>() == 2);
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<std::int8_t>() == 5);
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<signed char>() == 5);
+
+        std::vector<std::int8_t> vec{-128, -42, -1, 0, 1, 42, 127};
+        std::string buf;
+        REQUIRE_FALSE(glz::write_etf(vec, buf));
+
+        std::vector<std::int8_t> dec_vec;
+        REQUIRE_FALSE(glz::read_etf(dec_vec, buf));
+        CHECK(dec_vec == vec);
+
+        Signed8Struct s{-128, -1, 127};
+        std::string s_buf;
+        REQUIRE_FALSE(glz::write_etf(s, s_buf));
+
+        Signed8Struct dec_s{};
+        REQUIRE_FALSE(glz::read_etf(dec_s, s_buf));
+        CHECK(dec_s == s);
+    }
+
+    SECTION("1.2 nullable_value_t support without operator bool or operator*") {
+        static_assert(glz::nullable_value_t<CustomNullableValue<int>>);
+        static_assert(!glz::nullable_like<CustomNullableValue<int>>);
+        static_assert(glz::etf::detail::max_scalar_etf_val_size<CustomNullableValue<int>>() == 5);
+
+        NullableValueHolder populated{
+            .name = "active",
+            .count = CustomNullableValue<int>{12345},
+            .desc = CustomNullableValue<std::string>{"description text"}
+        };
+        std::string pop_buf;
+        REQUIRE_FALSE(glz::write_etf(populated, pop_buf));
+
+        NullableValueHolder dec_pop{};
+        REQUIRE_FALSE(glz::read_etf(dec_pop, pop_buf));
+        CHECK(dec_pop == populated);
+
+        NullableValueHolder empty_h{
+            .name = "empty",
+            .count = {},
+            .desc = {}
+        };
+        std::string empty_buf;
+        REQUIRE_FALSE(glz::write_etf(empty_h, empty_buf));
+
+        NullableValueHolder dec_empty{};
+        REQUIRE_FALSE(glz::read_etf(dec_empty, empty_buf));
+        CHECK(dec_empty == empty_h);
+        CHECK_FALSE(dec_empty.count.has_value());
+        CHECK_FALSE(dec_empty.desc.has_value());
+    }
+
+    SECTION("1.3 SMALL_BIG_EXT exact-sized writes") {
+        std::uint64_t u64 = 0x0000000012345678ULL;
+        std::string u64_buf;
+        REQUIRE_FALSE(glz::write_etf(u64, u64_buf));
+
+        std::uint64_t dec_u64{};
+        REQUIRE_FALSE(glz::read_etf(dec_u64, u64_buf));
+        CHECK(dec_u64 == u64);
+
+        std::int64_t s64 = -0x0000000012345678LL;
+        std::string s64_buf;
+        REQUIRE_FALSE(glz::write_etf(s64, s64_buf));
+
+        std::int64_t dec_s64{};
+        REQUIRE_FALSE(glz::read_etf(dec_s64, s64_buf));
+        CHECK(dec_s64 == s64);
+    }
+
+    SECTION("1.4 Tagged variant with enum IDs in ids_v") {
+        EnumTaggedVariant v_alpha = EnumVariantAlpha{.type = VariantEnumId::Alpha, .msg = "payload_a"};
+        std::string buf_alpha;
+        REQUIRE_FALSE(glz::write_etf(v_alpha, buf_alpha));
+
+        EnumTaggedVariant dec_alpha;
+        REQUIRE_FALSE(glz::read_etf(dec_alpha, buf_alpha));
+        REQUIRE(std::holds_alternative<EnumVariantAlpha>(dec_alpha));
+        CHECK(std::get<EnumVariantAlpha>(dec_alpha) == std::get<EnumVariantAlpha>(v_alpha));
+
+        EnumTaggedVariant v_beta = EnumVariantBeta{.type = VariantEnumId::Beta, .count = 888};
+        std::string buf_beta;
+        REQUIRE_FALSE(glz::write_etf(v_beta, buf_beta));
+
+        EnumTaggedVariant dec_beta;
+        REQUIRE_FALSE(glz::read_etf(dec_beta, buf_beta));
+        REQUIRE(std::holds_alternative<EnumVariantBeta>(dec_beta));
+        CHECK(std::get<EnumVariantBeta>(dec_beta) == std::get<EnumVariantBeta>(v_beta));
+    }
+
+    SECTION("1.5 read_str decodes atom strings transparently") {
+        // Construct SMALL_ATOM_UTF8_EXT "online"
+        std::string atom_buf;
+        atom_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        atom_buf.push_back(static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT));
+        atom_buf.push_back(6);
+        atom_buf.append("online");
+
+        std::string str_val;
+        REQUIRE_FALSE(glz::read_etf(str_val, atom_buf));
+        CHECK(str_val == "online");
+
+        // Construct ATOM_UTF8_EXT "dnd"
+        std::string atom_large_buf;
+        atom_large_buf.push_back(static_cast<char>(glz::etf::magic_version));
+        atom_large_buf.push_back(static_cast<char>(glz::etf::tag::ATOM_UTF8_EXT));
+        append_be16(atom_large_buf, 3);
+        atom_large_buf.append("dnd");
+
+        std::string str_large_val;
+        REQUIRE_FALSE(glz::read_etf(str_large_val, atom_large_buf));
+        CHECK(str_large_val == "dnd");
+    }
+
+    SECTION("1.7 FLOAT_EXT trailing garbage rejection and COMPRESSED skip") {
+        // FLOAT_EXT with trailing corrupt non-null garbage
+        std::string corrupt_float;
+        corrupt_float.push_back(static_cast<char>(glz::etf::magic_version));
+        corrupt_float.push_back(static_cast<char>(glz::etf::tag::FLOAT_EXT));
+        corrupt_float.append("3.14corrupt_garbage_trail_bytes"); // 31 bytes
+        corrupt_float.resize(33, '\0');
+
+        double d{};
+        auto ec_float = glz::read_etf(d, corrupt_float);
+        CHECK(static_cast<bool>(ec_float));
+        CHECK(ec_float.ec == glz::error_code::parse_number_failure);
+
+        // Valid null-padded FLOAT_EXT
+        std::string valid_float;
+        valid_float.push_back(static_cast<char>(glz::etf::magic_version));
+        valid_float.push_back(static_cast<char>(glz::etf::tag::FLOAT_EXT));
+        std::string f_str = "3.14000000000000000000e+00";
+        valid_float.append(f_str);
+        valid_float.append(31 - f_str.size(), '\0');
+
+        double d_valid{};
+        REQUIRE_FALSE(glz::read_etf(d_valid, valid_float));
+        CHECK(std::abs(d_valid - 3.14) < 1e-9);
+
+        // COMPRESSED with < 6 bytes
+        std::string short_comp;
+        short_comp.push_back(static_cast<char>(glz::etf::magic_version));
+        short_comp.push_back(static_cast<char>(glz::etf::tag::COMPRESSED));
+        append_be32(short_comp, 100);
+        short_comp.append("123"); // only 3 bytes < 6
+
+        glz::skip sk_comp{};
+        auto ec_comp = glz::read_etf(sk_comp, short_comp);
+        CHECK(static_cast<bool>(ec_comp));
+        CHECK(ec_comp.ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("1.9 ETF == EETF constant unification") {
+        CHECK(glz::ETF == glz::EETF);
+        CHECK(glz::etf_opts.format == glz::EETF);
+        CHECK(glz::etf_opts_partial_read.format == glz::EETF);
+        CHECK(glz::etf_opts_not_null_term.format == glz::EETF);
+        CHECK(glz::etf_opts_append_arrays.format == glz::EETF);
+        CHECK(glz::etf_opts_error_on_missing_keys.format == glz::EETF);
     }
 }
 

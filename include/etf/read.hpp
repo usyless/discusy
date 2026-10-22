@@ -407,8 +407,9 @@ namespace glz
       }
    };
 
-   // Nullable types (std::optional, std::unique_ptr, std::shared_ptr)
-   template <nullable_like T>
+   // Nullable types (std::optional, std::unique_ptr, std::shared_ptr, nullable_value_t)
+   template <class T>
+      requires(nullable_like<T> || nullable_value_t<T>)
    struct from<EETF, T> final
    {
       template <auto Opts>
@@ -426,14 +427,29 @@ namespace glz
             else if constexpr (is_specialization_v<T, std::unique_ptr> || is_specialization_v<T, std::shared_ptr>) {
                value = nullptr;
             }
+            else if constexpr (requires { value.reset(); }) {
+               value.reset();
+            }
             else {
                value = {};
             }
             return;
          }
 
-         if (!value) {
+         const bool has_val = [&] {
+            if constexpr (nullable_like<std::decay_t<T>>) {
+               return bool(value);
+            }
+            else {
+               return value.has_value();
+            }
+         }();
+
+         if (!has_val) {
             if constexpr (is_specialization_v<T, std::optional>) {
+               value.emplace();
+            }
+            else if constexpr (requires { value.emplace(); }) {
                value.emplace();
             }
             else if constexpr (is_specialization_v<T, std::unique_ptr>) {
@@ -450,7 +466,15 @@ namespace glz
                return;
             }
          }
-         parse<EETF>::op<Opts>(*value, ctx, it, end);
+         decltype(auto) val = [&]() -> decltype(auto) {
+            if constexpr (nullable_like<std::decay_t<T>>) {
+               return *value;
+            }
+            else {
+               return value.value();
+            }
+         }();
+         parse<EETF>::op<Opts>(val, ctx, it, end);
       }
    };
 
@@ -1509,6 +1533,44 @@ namespace glz
             return readable_map_t<X> || pair_t<X>;
          }
       }();
+
+      template <class T, class IdType, bool IsEnum = std::is_enum_v<IdType>, bool IsIntegral = std::integral<IdType>>
+      struct variant_id_resolver;
+
+      // Specialization for Enums: searches ids_v<T> linearly without ever instantiating variant_id_to_index
+      template <class T, class IdType, bool IsIntegral>
+      struct variant_id_resolver<T, IdType, true, IsIntegral>
+      {
+         GLZ_ALWAYS_INLINE static size_t resolve(IdType id) noexcept
+         {
+            for (size_t i = 0; i < ids_v<T>.size(); ++i) {
+               if (ids_v<T>[i] == id) {
+                  return i;
+               }
+            }
+            return ids_v<T>.size();
+         }
+      };
+
+      // Specialization for Integrals
+      template <class T, class IdType>
+      struct variant_id_resolver<T, IdType, false, true>
+      {
+         GLZ_ALWAYS_INLINE static size_t resolve(IdType id) noexcept
+         {
+            return variant_id_to_index<T>::op(id);
+         }
+      };
+
+      // Specialization for Strings (neither enum nor integral)
+      template <class T, class IdType>
+      struct variant_id_resolver<T, IdType, false, false>
+      {
+         GLZ_ALWAYS_INLINE static size_t resolve(std::string_view id_view) noexcept
+         {
+            return variant_id_to_index<T>::op(id_view.data(), id_view.data() + id_view.size(), id_view.size());
+         }
+      };
    }
 
    // Variants
@@ -1613,13 +1675,13 @@ namespace glz
                         static constexpr auto Tag = tag_v<T>;
                         if (key.size() == Tag.size() && compare<Tag.size()>(key.data(), Tag.data())) {
                            using id_type = std::decay_t<decltype(ids_v<T>[0])>;
-                           if constexpr (std::integral<id_type>) {
+                           if constexpr (std::integral<id_type> || std::is_enum_v<id_type>) {
                               id_type id{};
                               parse<EETF>::template op<Opts>(id, ctx, scan, end);
                               if (parse_failed(ctx.error)) [[unlikely]] {
                                  return;
                               }
-                              tag_index = variant_id_to_index<T>::op(id);
+                              tag_index = etf::detail::variant_id_resolver<T, id_type>::resolve(id);
                               tag_decoded = true;
                            }
                            else {
@@ -1627,8 +1689,7 @@ namespace glz
                               if (!etf::detail::read_atom_or_str(ctx, scan, end, id_view)) [[unlikely]] {
                                  return;
                               }
-                              tag_index = variant_id_to_index<T>::op(
-                                 id_view.data(), id_view.data() + id_view.size(), id_view.size());
+                              tag_index = etf::detail::variant_id_resolver<T, id_type>::resolve(id_view);
                               tag_decoded = true;
                            }
                            break;

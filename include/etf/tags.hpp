@@ -21,7 +21,7 @@
 
 namespace glz
 {
-   inline constexpr std::uint32_t ETF = 20000;
+   inline constexpr std::uint32_t ETF = EETF;
 }
 
 namespace glz::etf
@@ -425,45 +425,6 @@ namespace glz::etf
       }
 
       template <is_context Ctx, typename It0, typename It1>
-      GLZ_ALWAYS_INLINE bool read_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
-      {
-         if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
-            const uint32_t len = read_be<uint32_t>(it + 1);
-            if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            sv = std::string_view{reinterpret_cast<const char*>(it + 5), len};
-            it += 5 + len;
-            return true;
-         }
-         if (it >= end) [[unlikely]] {
-            ctx.error = error_code::unexpected_end;
-            return false;
-         }
-         const auto tag = static_cast<uint8_t>(*it++);
-         switch (tag) {
-         case tag::BINARY_EXT: {
-            ctx.error = error_code::unexpected_end;
-            return false;
-         }
-         case tag::STRING_EXT: {
-            if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint16_t len = read_be<uint16_t>(it);
-            it += 2;
-            if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            sv = std::string_view{reinterpret_cast<const char*>(it), len};
-            it += len;
-            return true;
-         }
-         case tag::NIL_EXT: {
-            sv = std::string_view{};
-            return true;
-         }
-         default:
-            ctx.error = error_code::syntax_error;
-            return false;
-         }
-      }
-
-      template <is_context Ctx, typename It0, typename It1>
       GLZ_ALWAYS_INLINE bool read_atom_or_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
       {
          if (it >= end) [[unlikely]] {
@@ -509,6 +470,31 @@ namespace glz::etf
             ctx.error = error_code::syntax_error;
             return false;
          }
+      }
+
+      template <is_context Ctx, typename It0, typename It1>
+      GLZ_ALWAYS_INLINE bool read_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
+      {
+         if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
+            const uint32_t len = read_be<uint32_t>(it + 1);
+            if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
+            sv = std::string_view{reinterpret_cast<const char*>(it + 5), len};
+            it += 5 + len;
+            return true;
+         }
+         auto save_it = it;
+         if (!read_atom_or_str(ctx, it, end, sv)) {
+            return false;
+         }
+         if (static_cast<uint8_t>(*save_it) != tag::BINARY_EXT && static_cast<uint8_t>(*save_it) != tag::STRING_EXT && static_cast<uint8_t>(*save_it) != tag::NIL_EXT) {
+            // It was an atom tag! Reject boolean and nil atoms (in ETF these represent bool/null, not strings)
+            if (sv == "true" || sv == "false" || sv == "nil" || sv == "null" || sv == "undefined") [[unlikely]] {
+               it = save_it;
+               ctx.error = error_code::syntax_error;
+               return false;
+            }
+         }
+         return true;
       }
 
       template <typename T>
@@ -942,18 +928,31 @@ namespace glz::etf
                if (end - it < 31) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
                const char* p_it = reinterpret_cast<const char*>(it);
                it += 31;
+               while (p_it < it && *p_it == ' ') ++p_it;
                if constexpr (glz::fast_float::is_supported_float_type<T>::value) {
-                  auto [p, ec] = glz::from_chars<false>(p_it, p_it + 31, num);
-                  if (ec != std::errc{}) [[unlikely]] {
+                  auto [p, ec] = glz::from_chars<false>(p_it, it, num);
+                  if (ec != std::errc{} || p == p_it) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
+                  while (p < it) {
+                     if (*p++ != '\0') [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
+                  }
                }
                else {
-                  auto [p, ec] = std::from_chars(p_it, p_it + 31, num);
-                  if (ec != std::errc{}) [[unlikely]] {
+                  auto [p, ec] = std::from_chars(p_it, it, num);
+                  if (ec != std::errc{} || p == p_it) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
+                  }
+                  while (p < it) {
+                     if (*p++ != '\0') [[unlikely]] {
+                        ctx.error = error_code::parse_number_failure;
+                        return false;
+                     }
                   }
                }
                return true;

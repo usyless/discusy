@@ -30,10 +30,10 @@ namespace glz
    namespace etf::detail
    {
       template <class T>
-      constexpr size_t min_etf_val_size();
+      consteval size_t min_etf_val_size();
 
       template <class V, size_t I>
-      constexpr size_t min_field_etf_size()
+      consteval size_t min_field_etf_size()
       {
          if constexpr (skipped_by_meta<V, I, operation::serialize>) {
             return 0;
@@ -51,7 +51,7 @@ namespace glz
       }
 
       template <class T>
-      constexpr size_t min_etf_struct_size()
+      consteval size_t min_etf_struct_size()
       {
          using V = std::decay_t<T>;
          if constexpr ((glaze_object_t<V> || reflectable<V>) && !custom_write<V>) {
@@ -71,7 +71,7 @@ namespace glz
       }
 
       template <class T>
-      constexpr size_t min_etf_val_size()
+      consteval size_t min_etf_val_size()
       {
          using V = std::decay_t<T>;
          if constexpr (custom_write<V> || has_custom_meta_v<V>) {
@@ -109,7 +109,7 @@ namespace glz
          else if constexpr (contiguous_byte_range<V>) {
             return 5; // BINARY_EXT + 4-byte len (empty binary)
          }
-         else if constexpr (nullable_like<V>) {
+         else if constexpr (nullable_like<V> || nullable_value_t<V>) {
             return 5; // \x77\x03nil
          }
          else if constexpr (readable_array_t<V>) {
@@ -160,7 +160,7 @@ namespace glz
                return 9; // NEW_FLOAT_EXT + 8 bytes
             }
             else if constexpr (sizeof(V) <= 1) {
-               return 2; // SMALL_INTEGER_EXT + 1 byte
+               return std::is_signed_v<V> ? 5 : 2; // negative int8_t uses INTEGER_EXT (5 bytes)
             }
             else if constexpr (sizeof(V) <= 2) {
                return 5; // INTEGER_EXT + 4 bytes
@@ -476,7 +476,7 @@ namespace glz
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
-                  std::memcpy(&b[ix + 3], &raw, 8);
+                  std::memcpy(&b[ix + 3], &raw, n);
                   ix += 3 + n;
                }
             }
@@ -512,7 +512,7 @@ namespace glz
                   if constexpr (std::endian::native == std::endian::big) {
                      raw = std::byteswap(raw);
                   }
-                  std::memcpy(&b[ix + 3], &raw, 8);
+                  std::memcpy(&b[ix + 3], &raw, n);
                   ix += 3 + n;
                }
             }
@@ -577,15 +577,32 @@ namespace glz
       }
    };
 
-   // Nullable types (std::optional, std::unique_ptr, std::shared_ptr)
-   template <nullable_like T>
+   // Nullable types (std::optional, std::unique_ptr, std::shared_ptr, nullable_value_t)
+   template <class T>
+      requires(nullable_like<T> || nullable_value_t<T>)
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
       GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         if (value) {
-            to<EETF, std::decay_t<decltype(*value)>>::template no_header<Opts>(*value, ctx, b, ix);
+         const bool has_val = [&] {
+            if constexpr (nullable_like<std::decay_t<T>>) {
+               return bool(value);
+            }
+            else {
+               return value.has_value();
+            }
+         }();
+         if (has_val) {
+            decltype(auto) val = [&]() -> decltype(auto) {
+               if constexpr (nullable_like<std::decay_t<T>>) {
+                  return *value;
+               }
+               else {
+                  return value.value();
+               }
+            }();
+            to<EETF, std::decay_t<decltype(val)>>::template no_header<Opts>(val, ctx, b, ix);
          }
          else {
             to<EETF, std::nullptr_t>::template no_header<Opts>(nullptr, ctx, b, ix);

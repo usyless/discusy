@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <glaze/core/opts.hpp>
-#include "tags.hpp"
 
 namespace glz
 {
@@ -10,7 +9,7 @@ namespace glz
    {
       struct etf_opts
       {
-         uint32_t format = ETF;
+         uint32_t format = EETF;
          uint32_t internal{};
          bool null_terminated = false;
          bool error_on_unknown_keys = false;
@@ -28,33 +27,33 @@ namespace glz
 
    // ETF Options Presets
    inline constexpr etf::etf_opts etf_opts{
-      .format = ETF,
+      .format = EETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
    };
 
    inline constexpr etf::etf_opts etf_opts_partial_read{
-      .format = ETF,
+      .format = EETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
       .partial_read = true,
    };
 
    inline constexpr etf::etf_opts etf_opts_not_null_term{
-      .format = ETF,
+      .format = EETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
    };
 
    inline constexpr etf::etf_opts etf_opts_append_arrays{
-      .format = ETF,
+      .format = EETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
       .append_arrays = true,
    };
 
    inline constexpr etf::etf_opts etf_opts_error_on_missing_keys{
-      .format = ETF,
+      .format = EETF,
       .null_terminated = false,
       .error_on_unknown_keys = false,
       .error_on_missing_keys = true,
