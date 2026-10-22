@@ -506,6 +506,15 @@ namespace message {
             self.embeds->emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
         }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back(std::forward<Args_>(args_)...);
+        }
         decltype(auto) set_allowed_mentions(this auto&& self, opt<allowed_mentions_obj> am) { self.allowed_mentions = std::move(am); return std::forward<decltype(self)>(self); }
         decltype(auto) set_message_reference(this auto&& self, opt<discusy::message::message_reference> mr) noexcept { self.message_reference = mr; return std::forward<decltype(self)>(self); }
         decltype(auto) set_components(this auto&& self, opt<std::vector<discusy::components::component>> comps) {
@@ -778,6 +787,15 @@ namespace message {
             if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
             (**self.embeds).emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back(std::forward<Args_>(args_)...);
         }
         decltype(auto) set_flags(this auto&& self, opt<explicit_null<flags_t<discusy::message::message_flags>>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, flags_t<discusy::message::message_flags> f) noexcept { self.flags = explicit_null<flags_t<discusy::message::message_flags>>{f}; return std::forward<decltype(self)>(self); }
@@ -1190,6 +1208,15 @@ namespace channels {
             if (!self.embeds) self.embeds.emplace();
             self.embeds->emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back(std::forward<Args_>(args_)...);
         }
         decltype(auto) set_allowed_mentions(this auto&& self, opt<message::allowed_mentions_obj> am) { self.allowed_mentions = std::move(am); return std::forward<decltype(self)>(self); }
         decltype(auto) set_components(this auto&& self, opt<std::vector<discusy::components::component>> comps) {
@@ -2025,6 +2052,15 @@ namespace webhook {
             (**self.embeds).emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
         }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back(std::forward<Args_>(args_)...);
+        }
         decltype(auto) set_flags(this auto&& self, opt<explicit_null<flags_t<discusy::message::message_flags>>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, flags_t<discusy::message::message_flags> f) noexcept { self.flags = explicit_null<flags_t<discusy::message::message_flags>>{f}; return std::forward<decltype(self)>(self); }
         decltype(auto) add_flags(this auto&& self, discusy::message::message_flags f) noexcept {
@@ -2162,6 +2198,15 @@ namespace webhook {
             if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
             (**self.embeds).emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds || !self.embeds->has_value()) self.embeds.emplace().emplace();
+            return (**self.embeds).emplace_back(std::forward<Args_>(args_)...);
         }
         decltype(auto) set_allowed_mentions(this auto&& self, opt<explicit_null<message::allowed_mentions_obj>> am) { self.allowed_mentions = std::move(am); return std::forward<decltype(self)>(self); }
         decltype(auto) set_allowed_mentions(this auto&& self, message::allowed_mentions_obj am) { self.allowed_mentions = explicit_null<message::allowed_mentions_obj>{std::move(am)}; return std::forward<decltype(self)>(self); }
@@ -2327,6 +2372,15 @@ namespace interaction {
             if (!self.embeds) self.embeds.emplace();
             self.embeds->emplace_back(std::move(emb));
             return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_embed(this auto&& self) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) {
+            if (!self.embeds) self.embeds.emplace();
+            return self.embeds->emplace_back(std::forward<Args_>(args_)...);
         }
         decltype(auto) set_allowed_mentions(this auto&& self, opt<message::allowed_mentions_obj> am) { self.allowed_mentions = std::move(am); return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<discusy::message::message_flags>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }

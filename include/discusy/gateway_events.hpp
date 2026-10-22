@@ -495,6 +495,9 @@ namespace presence {
         decltype(auto) set_activities(this auto&& self, std::vector<activity> acts) { self.activities = std::move(acts); return std::forward<decltype(self)>(self); }
         DISCUSY_VARIADIC_SETTER(set_activities, activity)
         decltype(auto) add_activity(this auto&& self, activity act) { self.activities.emplace_back(std::move(act)); return std::forward<decltype(self)>(self); }
+        decltype(auto) add_activity(this auto&& self) { return self.activities.emplace_back(); }
+        template <typename... Args_>
+        decltype(auto) emplace_activity(this auto&& self, Args_&&... args_) { return self.activities.emplace_back(std::forward<Args_>(args_)...); }
         decltype(auto) set_client_status(this auto&& self, discusy::recieve_event::presence::client_status cs) { self.client_status = std::move(cs); return std::forward<decltype(self)>(self); }
     };
 
@@ -992,6 +995,9 @@ struct update_presence {
     decltype(auto) set_activities(this auto&& self, std::vector<recieve_event::presence::activity> acts) { self.activities = std::move(acts); return std::forward<decltype(self)>(self); }
     DISCUSY_VARIADIC_SETTER(set_activities, recieve_event::presence::activity)
     decltype(auto) add_activity(this auto&& self, recieve_event::presence::activity act) { self.activities.emplace_back(std::move(act)); return std::forward<decltype(self)>(self); }
+    decltype(auto) add_activity(this auto&& self) { return self.activities.emplace_back(); }
+    template <typename... Args_>
+    decltype(auto) emplace_activity(this auto&& self, Args_&&... args_) { return self.activities.emplace_back(std::forward<Args_>(args_)...); }
     decltype(auto) set_status(this auto&& self, status_type st) noexcept { self.status = st; return std::forward<decltype(self)>(self); }
     decltype(auto) set_afk(this auto&& self, bool a) noexcept { self.afk = a; return std::forward<decltype(self)>(self); }
 };

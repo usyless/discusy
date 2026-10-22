@@ -215,8 +215,8 @@ class Callback {
             incoming_waiters.clear();
             }
             for (auto& node : incoming) {
-                active_waiters.emplace_back(std::move(node));
-                active_waiters.back()->vector_idx = active_waiters.size() - 1;
+                auto& waiter = active_waiters.emplace_back(std::move(node));
+                waiter->vector_idx = active_waiters.size() - 1;
             }
         }
 

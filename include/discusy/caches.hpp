@@ -686,19 +686,19 @@ public:
     }
 
     [[nodiscard]] auto get_member(const snowflake guild_id, const snowflake user_id) const {
-        return members.get(guild_scoped_id{guild_id, user_id});
+        return members.get(guild_scoped_id{.guild_id=guild_id, .id=user_id});
     }
 
     [[nodiscard]] auto get_role(const snowflake guild_id, const snowflake role_id) const {
-        return roles.get(guild_scoped_id{guild_id, role_id});
+        return roles.get(guild_scoped_id{.guild_id=guild_id, .id=role_id});
     }
 
     [[nodiscard]] auto get_emoji(const snowflake guild_id, const snowflake emoji_id) const {
-        return emojis.get(guild_scoped_id{guild_id, emoji_id});
+        return emojis.get(guild_scoped_id{.guild_id=guild_id, .id=emoji_id});
     }
 
     [[nodiscard]] auto get_voice_state(const snowflake guild_id, const snowflake user_id) const {
-        return voice_states.get(guild_scoped_id{guild_id, user_id});
+        return voice_states.get(guild_scoped_id{.guild_id=guild_id, .id=user_id});
     }
 
     [[nodiscard]] auto guild_channels(const snowflake guild_id) const {
@@ -719,7 +719,7 @@ public:
 
     // the voice channel this user is currently sat in, if any
     [[nodiscard]] opt<snowflake> voice_channel_of(const snowflake guild_id, const snowflake user_id) const {
-        const auto state = voice_states.get(guild_scoped_id{guild_id, user_id});
+        const auto state = voice_states.get(guild_scoped_id{.guild_id=guild_id, .id=user_id});
         if (!state || !state->channel_id || !*state->channel_id) return std::nullopt;
         return *state->channel_id;
     }
@@ -799,8 +799,8 @@ private:
             guilds.modify(e.other.guild_id, [](cached_guild& g) { ++g.member_count; });
         });
         callbacks_.on_guild_member_remove.listen_system([this](const recieve_event::guild_member_remove& e) {
-            members.erase(guild_scoped_id{e.guild_id, e.user.id});
-            voice_states.erase(guild_scoped_id{e.guild_id, e.user.id});
+            members.erase(guild_scoped_id{.guild_id=e.guild_id, .id=e.user.id});
+            voice_states.erase(guild_scoped_id{.guild_id=e.guild_id, .id=e.user.id});
             guilds.modify(e.guild_id, [](cached_guild& g) { if (g.member_count > 0) --g.member_count; });
         });
         callbacks_.on_guild_member_update.listen_system([this](const recieve_event::guild_member_update& e) { handle_member_update(e); });
@@ -811,7 +811,7 @@ private:
         callbacks_.on_guild_role_create.listen_system([this](const recieve_event::guild_role_create& e) { store_role(e); });
         callbacks_.on_guild_role_update.listen_system([this](const recieve_event::guild_role_update& e) { store_role(e); });
         callbacks_.on_guild_role_delete.listen_system([this](const recieve_event::guild_role_delete& e) {
-            roles.erase(guild_scoped_id{e.guild_id, e.role_id});
+            roles.erase(guild_scoped_id{.guild_id=e.guild_id, .id=e.role_id});
         });
 
         callbacks_.on_guild_emojis_update.listen_system([this](const recieve_event::guild_emojis_update& e) {
@@ -823,8 +823,8 @@ private:
 
         callbacks_.on_user_update.listen_system([this](const recieve_event::user_update& e) {
             if (users.enabled()) {
-                auto copy = e;
-                attach_bot(copy, callbacks_.bot_ptr_);
+                auto copy = std::make_shared<discusy::user::user>(e);
+                attach_bot(*copy, callbacks_.bot_ptr_);
                 users.insert(e.id, std::move(copy));
             }
         });
@@ -834,8 +834,8 @@ private:
 
     void handle_ready(const recieve_event::ready& e) {
         if (users.enabled()) {
-            auto copy = e.user;
-            attach_bot(copy, callbacks_.bot_ptr_);
+            auto copy = std::make_shared<discusy::user::user>(e.user);
+            attach_bot(*copy, callbacks_.bot_ptr_);
             users.insert(e.user.id, std::move(copy));
         }
 
@@ -876,13 +876,13 @@ private:
         const auto guild_id = incoming.guild.id;
 
         if (guilds.enabled()) {
-            cached_guild cached{};
-            cached.guild = incoming.guild;
-            attach_bot(cached.guild, callbacks_.bot_ptr_);
-            cached.member_count = incoming.other.member_count;
-            cached.large = incoming.other.large;
-            cached.unavailable = incoming.other.unavailable.value_or(false);
-            cached.joined_at = incoming.other.joined_at;
+            auto cached = std::make_shared<cached_guild>();
+            cached->guild = incoming.guild;
+            attach_bot(cached->guild, callbacks_.bot_ptr_);
+            cached->member_count = incoming.other.member_count;
+            cached->large = incoming.other.large;
+            cached->unavailable = incoming.other.unavailable.value_or(false);
+            cached->joined_at = incoming.other.joined_at;
 
             guilds.insert(guild_id, std::move(cached));
         }
@@ -916,9 +916,9 @@ private:
             for (const auto& state : incoming.other.voice_states) {
                 if (!state.channel_id || !*state.channel_id) continue;
 
-                auto copy = state;
-                copy.guild_id = guild_id; // omitted inside GUILD_CREATE
-                voice_states.insert(guild_scoped_id{guild_id, state.user_id}, std::move(copy), guild_id);
+                auto copy = std::make_shared<discusy::voice::voice_state>(state);
+                copy->guild_id = guild_id; // omitted inside GUILD_CREATE
+                voice_states.insert(guild_scoped_id{.guild_id=guild_id, .id=state.user_id}, std::move(copy), guild_id);
             }
         }
     }
@@ -934,7 +934,7 @@ private:
 
         if (roles.enabled()) {
             roles.erase_group(e.id);
-            for (const auto& role : e.roles) roles.insert(guild_scoped_id{e.id, role.id}, role, e.id);
+            for (const auto& role : e.roles) roles.insert(guild_scoped_id{.guild_id=e.id, .id=role.id}, role, e.id);
         }
 
         if (emojis.enabled()) {
@@ -957,13 +957,13 @@ private:
 
     void handle_member_update(const recieve_event::guild_member_update& e) {
         if (users.enabled()) {
-            auto copy = e.user;
-            attach_bot(copy, callbacks_.bot_ptr_);
+            auto copy = std::make_shared<discusy::user::user>(e.user);
+            attach_bot(*copy, callbacks_.bot_ptr_);
             users.insert(e.user.id, std::move(copy));
         }
         if (!members.enabled()) return;
 
-        members.upsert(guild_scoped_id{e.guild_id, e.user.id}, e.guild_id, [this, &e](discusy::guild::guild_member_with_guild& m) {
+        members.upsert(guild_scoped_id{.guild_id=e.guild_id, .id=e.user.id}, e.guild_id, [this, &e](discusy::guild::guild_member_with_guild& m) {
             m.other.guild_id = e.guild_id;
             cache_detail::apply_member_update(m.guild_member, e);
             attach_bot(m.guild_member, callbacks_.bot_ptr_);
@@ -979,27 +979,27 @@ private:
         if (!voice_states.enabled()) return;
 
         if (!e.channel_id || !*e.channel_id) { // left voice
-            voice_states.erase(guild_scoped_id{guild_id, e.user_id});
+            voice_states.erase(guild_scoped_id{.guild_id=guild_id, .id=e.user_id});
             return;
         }
 
-        voice_states.insert(guild_scoped_id{guild_id, e.user_id}, e, guild_id);
+        voice_states.insert(guild_scoped_id{.guild_id=guild_id, .id=e.user_id}, e, guild_id);
     }
 
     void store_channel(const discusy::channel::channel& channel, const snowflake guild_id = snowflake{}) {
         if (!channels.enabled()) return;
 
-        auto copy = channel;
+        auto copy = std::make_shared<discusy::channel::channel>(channel);
         if (guild_id) {
-            copy.guild_id = guild_id;
-        } else if (!copy.guild_id) {
+            copy->guild_id = guild_id;
+        } else if (!copy->guild_id) {
             if (const auto existing = channels.get(channel.id); existing && existing->guild_id) {
-                copy.guild_id = existing->guild_id;
+                copy->guild_id = existing->guild_id;
             }
         }
 
-        attach_bot(copy, callbacks_.bot_ptr_);
-        const auto group = copy.guild_id.value_or(snowflake{});
+        attach_bot(*copy, callbacks_.bot_ptr_);
+        const auto group = copy->guild_id.value_or(snowflake{});
         channels.insert(channel.id, std::move(copy), group);
     }
 
@@ -1009,19 +1009,19 @@ private:
         const auto user_id = member.user->id;
 
         if (users.enabled()) {
-            auto user_copy = *member.user;
-            attach_bot(user_copy, callbacks_.bot_ptr_);
+            auto user_copy = std::make_shared<discusy::user::user>(*member.user);
+            attach_bot(*user_copy, callbacks_.bot_ptr_);
             users.insert(user_id, std::move(user_copy));
         }
         if (!members.enabled() || !guild_id) return;
 
-        discusy::guild::guild_member_with_guild stored{};
-        stored.guild_member = member;
-        stored.guild_member.set_guild_id_context_void(guild_id);
-        attach_bot(stored.guild_member, callbacks_.bot_ptr_);
-        stored.other.guild_id = guild_id;
+        auto stored = std::make_shared<discusy::guild::guild_member_with_guild>();
+        stored->guild_member = member;
+        stored->guild_member.set_guild_id_context_void(guild_id);
+        attach_bot(stored->guild_member, callbacks_.bot_ptr_);
+        stored->other.guild_id = guild_id;
 
-        members.insert(guild_scoped_id{guild_id, user_id}, std::move(stored), guild_id);
+        members.insert(guild_scoped_id{.guild_id=guild_id, .id=user_id}, std::move(stored), guild_id);
     }
 
     void store_member(const discusy::guild::guild_member_with_guild& member, const snowflake guild_id = snowflake{}) {
@@ -1031,12 +1031,12 @@ private:
 
     void store_role(const recieve_event::guild_role_create& e) {
         if (!roles.enabled()) return;
-        roles.insert(guild_scoped_id{e.guild_id, e.role.id}, e.role, e.guild_id);
+        roles.insert(guild_scoped_id{.guild_id=e.guild_id, .id=e.role.id}, e.role, e.guild_id);
     }
 
     void store_emoji(const discusy::emoji::emoji& emoji, const snowflake guild_id) {
         if (!emojis.enabled() || !emoji.id || !*emoji.id) return; // unicode emoji, not ours to cache
-        emojis.insert(guild_scoped_id{guild_id, *emoji.id}, emoji, guild_id);
+        emojis.insert(guild_scoped_id{.guild_id=guild_id, .id=*emoji.id}, emoji, guild_id);
     }
 
     gateway_callbacks& callbacks_;

@@ -3440,6 +3440,15 @@ namespace message {
             self.fields->emplace_back(std::move(itm));
             return std::forward<decltype(self)>(self);
         }
+        decltype(auto) add_field(this auto&& self) {
+            if (!self.fields) self.fields.emplace();
+            return self.fields->emplace_back();
+        }
+        template <typename... Args_>
+        decltype(auto) emplace_field(this auto&& self, Args_&&... args_) {
+            if (!self.fields) self.fields.emplace();
+            return self.fields->emplace_back(std::forward<Args_>(args_)...);
+        }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<embed_flags>> flags_) noexcept { self.flags = flags_; return std::forward<decltype(self)>(self); }
         decltype(auto) add_flags(this auto&& self, embed_flags f) noexcept {
             if (!self.flags) self.flags.emplace();
@@ -4990,6 +4999,9 @@ namespace message {
         decltype(auto) set_embeds(this auto&& self, std::vector<discusy::message::embed> embeds_) { self.embeds = std::move(embeds_); return std::forward<decltype(self)>(self); }
         DISCUSY_VARIADIC_SETTER(set_embeds, discusy::message::embed)
         decltype(auto) add_embed(this auto&& self, discusy::message::embed itm) { self.embeds.emplace_back(std::move(itm)); return std::forward<decltype(self)>(self); }
+        decltype(auto) add_embed(this auto&& self) { return self.embeds.emplace_back(); }
+        template <typename... Args_>
+        decltype(auto) emplace_embed(this auto&& self, Args_&&... args_) { return self.embeds.emplace_back(std::forward<Args_>(args_)...); }
         decltype(auto) set_reactions(this auto&& self, opt<std::vector<discusy::message::reaction>> reactions_) { self.reactions = std::move(reactions_); return std::forward<decltype(self)>(self); }
         DISCUSY_VARIADIC_SETTER(set_reactions, discusy::message::reaction)
         decltype(auto) add_reaction(this auto&& self, discusy::message::reaction itm) {
