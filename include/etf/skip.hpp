@@ -17,6 +17,9 @@ namespace glz
       {
          using etf::detail::read_be;
 
+         depth_guard guard{ctx};
+         if (!guard) [[unlikely]] return;
+
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return;
@@ -57,6 +60,10 @@ namespace glz
             break;
          }
          case etf::tag::COMPRESSED: {
+            if (ctx.depth > 1) [[unlikely]] {
+               ctx.error = error_code::syntax_error;
+               return;
+            }
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -388,4 +395,15 @@ namespace glz
          }
       }
    };
+
+   namespace etf::detail
+   {
+      template <auto Opts>
+      GLZ_ALWAYS_INLINE void skip_nested_value(is_context auto& ctx, auto& it, auto end) noexcept
+      {
+         depth_guard guard{ctx};
+         if (!guard) [[unlikely]] return;
+         skip_value<EETF>::op<Opts>(ctx, it, end);
+      }
+   } // namespace etf::detail
 } // namespace glz

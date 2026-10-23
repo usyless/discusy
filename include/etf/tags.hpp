@@ -98,7 +98,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE void ensure_space(B& b, size_t needed)
       {
          if (needed > b.size()) [[unlikely]] {
-            glz::grow_buffer(b, (std::max)(b.size() * 2, needed + 64));
+            glz::grow_buffer(b, needed);
          }
       }
 
