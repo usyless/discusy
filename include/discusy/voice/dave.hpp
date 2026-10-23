@@ -1,14 +1,50 @@
 #pragma once
 
+#include <cstring>
 #include <memory>
 #include <string>
 
 #include <dave/dave_interfaces.h>
+#include <dave/logger.h>
 #include <mls/crypto.h>
 
 #include "../log.hpp"
 
 namespace discusy {
+
+inline void init_dave_logging() noexcept {
+    static const bool initialized = []() noexcept {
+#ifdef DISCUSY_LOGGING
+        discord::dave::SetLogSink([](discord::dave::LoggingSeverity severity,
+                                     const char* file,
+                                     int line,
+                                     const std::string& message) {
+            const char* file_name = file;
+            if (!file_name) {
+                file_name = "unknown";
+            } else if (const char* sep = std::strrchr(file_name, '/')) {
+                file_name = sep + 1;
+            } else if (const char* sep_win = std::strrchr(file_name, '\\')) {
+                file_name = sep_win + 1;
+            }
+            const char* sev_str = "INFO";
+            switch (severity) {
+                case discord::dave::LS_VERBOSE: sev_str = "VERBOSE"; break;
+                case discord::dave::LS_INFO:    sev_str = "INFO"; break;
+                case discord::dave::LS_WARNING: sev_str = "WARN"; break;
+                case discord::dave::LS_ERROR:   sev_str = "ERROR"; break;
+                case discord::dave::LS_NONE:    return;
+                default:                        sev_str = "UNKNOWN"; break;
+            }
+            log::Logger{}("[libdave] [{}] ({}:{}) {}", sev_str, file_name, line, message);
+        });
+#else
+        discord::dave::SetLogSink([](auto&&...) {});
+#endif
+        return true;
+    }();
+    (void)initialized;
+}
 
 struct dave {
     std::unique_ptr<discord::dave::mls::ISession> session_;
@@ -21,6 +57,7 @@ struct dave {
     dave& operator=(dave&& other) = delete;
 
     dave() {
+        init_dave_logging();
         create_session();
 
         encryptor_ = discord::dave::CreateEncryptor();

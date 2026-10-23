@@ -98,6 +98,7 @@
 #include <sodium.h> // IWYU pragma: keep
 #include <opus.h> // IWYU pragma: keep
 #include <dave/dave_interfaces.h> // IWYU pragma: keep
+#include <dave/logger.h> // IWYU pragma: keep
 #include <mls/crypto.h> // IWYU pragma: keep
 #include <boost/container/deque.hpp> // IWYU pragma: keep
 #endif
