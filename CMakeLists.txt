@@ -96,7 +96,7 @@ set_tracked_cache_version(DISCUSY_OPENSSL_VERSION "4.0.1" "Version (git tag/bran
 set_tracked_cache_version(DISCUSY_LIBSODIUM_VERSION "1.0.22-RELEASE" "Version (git tag/branch) to use for libsodium")
 set_tracked_cache_version(DISCUSY_NLOHMANN_JSON_VERSION "v3.12.0" "Version (git tag/branch) to use for nlohmann json")
 set_tracked_cache_version(DISCUSY_MLSPP_VERSION "fc724c3100ce3b5d8565dbd6d93648a440991a8c" "Version (git tag/branch) to use for mlspp")
-set_tracked_cache_version(DISCUSY_LIBDAVE_VERSION "v1.2.1/cpp" "Version (git tag/branch) to use for libdave")
+set_tracked_cache_version(DISCUSY_LIBDAVE_VERSION "v1.2.2/cpp" "Version (git tag/branch) to use for libdave")
 set_tracked_cache_version(DISCUSY_OPUS_VERSION "v1.6.1" "Version (git tag/branch) to use for opus")
 set_tracked_cache_version(DISCUSY_MIMALLOC_VERSION "v3.5.3" "Version (git tag/branch) to use for mimalloc")
 set_tracked_cache_version(DISCUSY_CATCH2_VERSION "v3.16.1" "Version (git tag/branch) to use for Catch2")
