@@ -837,7 +837,8 @@ namespace glz
                         }
                      }
                      else {
-                        if constexpr (std::is_trivially_copyable_v<V>) {
+                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                      std::is_trivially_copyable_v<V>) {
                            resize_unfilled(value, orig_size + len);
                         }
                         else {
@@ -856,7 +857,8 @@ namespace glz
                      }
                   }
                   else {
-                     if constexpr (std::is_trivially_copyable_v<V>) {
+                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                   std::is_trivially_copyable_v<V>) {
                         resize_unfilled(value, orig_size + len);
                      }
                      else {
@@ -889,7 +891,8 @@ namespace glz
                         }
                      }
                      else {
-                        if constexpr (std::is_trivially_copyable_v<V>) {
+                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                      std::is_trivially_copyable_v<V>) {
                            resize_unfilled(value, len);
                         }
                         else {
@@ -908,7 +911,8 @@ namespace glz
                      }
                   }
                   else {
-                     if constexpr (std::is_trivially_copyable_v<V>) {
+                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                   std::is_trivially_copyable_v<V>) {
                         resize_unfilled(value, len);
                      }
                      else {
@@ -1017,7 +1021,7 @@ namespace glz
                   }
                }
                for (size_t i = parse_len; i < len; ++i) {
-                  skip_value<EETF>::op<Opts>(ctx, it, end);
+                  etf::detail::skip_nested_value<Opts>(ctx, it, end);
                   if (parse_failed(ctx.error)) [[unlikely]] return;
                }
             }
@@ -1027,7 +1031,7 @@ namespace glz
                ++it;
             }
             else {
-               skip_value<EETF>::op<Opts>(ctx, it, end);
+               etf::detail::skip_nested_value<Opts>(ctx, it, end);
             }
             return;
          }
@@ -1130,7 +1134,8 @@ namespace glz
                else {
                   if constexpr (resizable<T>) {
                      if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
-                     if constexpr (std::is_trivially_copyable_v<V>) {
+                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                   std::is_trivially_copyable_v<V>) {
                         resize_unfilled(value, orig_size + len);
                      }
                      else {
@@ -1334,7 +1339,8 @@ namespace glz
                         }
                      }
                      else {
-                        if constexpr (std::is_trivially_copyable_v<V>) {
+                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                      std::is_trivially_copyable_v<V>) {
                            resize_unfilled(value, orig_size + len);
                         }
                         else {
@@ -1353,7 +1359,8 @@ namespace glz
                      }
                   }
                   else {
-                     if constexpr (std::is_trivially_copyable_v<V>) {
+                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                   std::is_trivially_copyable_v<V>) {
                         resize_unfilled(value, orig_size + len);
                      }
                      else {
@@ -1386,7 +1393,8 @@ namespace glz
                         }
                      }
                      else {
-                        if constexpr (std::is_trivially_copyable_v<V>) {
+                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                      std::is_trivially_copyable_v<V>) {
                            resize_unfilled(value, len);
                         }
                         else {
@@ -1405,7 +1413,8 @@ namespace glz
                      }
                   }
                   else {
-                     if constexpr (std::is_trivially_copyable_v<V>) {
+                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+                                   std::is_trivially_copyable_v<V>) {
                         resize_unfilled(value, len);
                      }
                      else {
@@ -1514,7 +1523,7 @@ namespace glz
                   }
                }
                for (size_t i = parse_len; i < len; ++i) {
-                  skip_value<EETF>::op<Opts>(ctx, it, end);
+                  etf::detail::skip_nested_value<Opts>(ctx, it, end);
                   if (parse_failed(ctx.error)) [[unlikely]] return;
                }
             }
@@ -1580,11 +1589,16 @@ namespace glz
          }
          if (bool(ctx.error)) [[unlikely]] return;
          for (uint32_t i = N; i < arity; ++i) {
-            skip_value<EETF>::op<Opts>(ctx, it, end);
+            etf::detail::skip_nested_value<Opts>(ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
          }
          if (tag == etf::tag::LIST_EXT) {
-            skip_value<EETF>::op<Opts>(ctx, it, end); // tail term
+            if (it < end && static_cast<uint8_t>(*it) == etf::tag::NIL_EXT) [[likely]] {
+               ++it;
+            }
+            else {
+               etf::detail::skip_nested_value<Opts>(ctx, it, end); // tail term
+            }
          }
       }
    };
@@ -1705,29 +1719,18 @@ namespace glz
                static constexpr auto TargetKey = get<0>(reflect<T>::keys);
                static constexpr size_t KeyLen = TargetKey.size();
                static constexpr size_t WireKeyLen = 5 + KeyLen;
-               static constexpr auto ExpectedWireKey = []() constexpr {
-                  std::array<char, WireKeyLen> arr{};
-                  arr[0] = static_cast<char>(etf::tag::BINARY_EXT);
-                  arr[1] = static_cast<char>((KeyLen >> 24) & 0xFF);
-                  arr[2] = static_cast<char>((KeyLen >> 16) & 0xFF);
-                  arr[3] = static_cast<char>((KeyLen >> 8) & 0xFF);
-                  arr[4] = static_cast<char>(KeyLen & 0xFF);
-                  for (size_t i = 0; i < KeyLen; ++i) {
-                     arr[5 + i] = TargetKey[i];
-                  }
-                  return arr;
-               }();
+               static constexpr etf::detail::static_etf_key<KeyLen> ExpectedWireKey{TargetKey};
 
                if (end - it >= static_cast<std::ptrdiff_t>(WireKeyLen) &&
-                   glz::compare<WireKeyLen>(reinterpret_cast<const char*>(it), ExpectedWireKey.data())) [[likely]] {
+                   glz::compare<WireKeyLen>(reinterpret_cast<const char*>(it), ExpectedWireKey.buf.data())) [[likely]] {
                   it += WireKeyLen;
                   if constexpr (skipped_by_meta<T, 0, operation::parse>) {
-                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     etf::detail::skip_nested_value<Opts>(ctx, it, end);
                   }
                   else {
                      using val_t = refl_t<T, 0>;
                      if constexpr (always_skipped<val_t>) {
-                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                        etf::detail::skip_nested_value<Opts>(ctx, it, end);
                      }
                      else if constexpr (reflectable<T>) {
                         parse<EETF>::op<Opts>(get_member(value, get<0>(fields)), ctx, it, end);
@@ -1752,9 +1755,9 @@ namespace glz
             if constexpr (Opts.partial_read) {
                if (read_count >= N) {
                   for (uint32_t rem = key_idx; rem < arity; ++rem) {
-                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     etf::detail::skip_nested_value<Opts>(ctx, it, end);
                      if (bool(ctx.error)) [[unlikely]] return;
-                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     etf::detail::skip_nested_value<Opts>(ctx, it, end);
                      if (bool(ctx.error)) [[unlikely]] return;
                   }
                   return;
@@ -1785,16 +1788,13 @@ namespace glz
                                  ++read_count;
                               }
                            }
-                           else {
-                              ++read_count;
-                           }
                            if constexpr (skipped_by_meta<T, I, operation::parse>) {
-                              skip_value<EETF>::op<Opts>(ctx, it, end);
+                              etf::detail::skip_nested_value<Opts>(ctx, it, end);
                            }
                            else {
                               using val_t = refl_t<T, I>;
                               if constexpr (always_skipped<val_t>) {
-                                 skip_value<EETF>::op<Opts>(ctx, it, end);
+                                 etf::detail::skip_nested_value<Opts>(ctx, it, end);
                               }
                               else if constexpr (reflectable<T>) {
                                  parse<EETF>::op<Opts>(get_member(value, get<I>(fields)), ctx, it, end);
@@ -1814,7 +1814,7 @@ namespace glz
                      return;
                   }
                   else {
-                     skip_value<EETF>::op<Opts>(ctx, it, end);
+                     etf::detail::skip_nested_value<Opts>(ctx, it, end);
                      if (parse_failed(ctx.error)) [[unlikely]] {
                         return;
                      }
@@ -1828,9 +1828,9 @@ namespace glz
                if constexpr (Opts.partial_read) {
                   if (read_count >= N) {
                      for (uint32_t rem = key_idx + 1; rem < arity; ++rem) {
-                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                        etf::detail::skip_nested_value<Opts>(ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
-                        skip_value<EETF>::op<Opts>(ctx, it, end);
+                        etf::detail::skip_nested_value<Opts>(ctx, it, end);
                         if (bool(ctx.error)) [[unlikely]] return;
                      }
                      return;
@@ -1843,7 +1843,7 @@ namespace glz
                   return;
                }
                else {
-                  skip_value<EETF>::op<Opts>(ctx, it, end);
+                  etf::detail::skip_nested_value<Opts>(ctx, it, end);
                   if (parse_failed(ctx.error)) [[unlikely]] {
                      return;
                   }
@@ -2022,6 +2022,76 @@ namespace glz
          using X = remove_meta_wrapper_t<std::decay_t<V>>;
          return std::is_enum_v<X> && !custom_read<X>;
       }();
+
+      template <class V>
+      constexpr bool variant_alt_can_match_tag(uint8_t tag) noexcept
+      {
+         using D = std::decay_t<V>;
+         if constexpr (custom_read<D> || has_custom_meta_v<D> || is_specialization_v<D, custom_t>) {
+            return true;
+         }
+         else if constexpr (is_opts_wrapper<D>) {
+            return variant_alt_can_match_tag<typename D::value_type>(tag);
+         }
+         else if constexpr (glaze_value_t<D>) {
+            using M = std::decay_t<decltype(get_member(std::declval<D&>(), meta_wrapper_v<D>))>;
+            return variant_alt_can_match_tag<M>(tag);
+         }
+         else if constexpr (is_memory_object<D>) {
+            return variant_alt_can_match_tag<memory_type<D>>(tag);
+         }
+         else if constexpr (nullable_like<D>) {
+            using inner_t = std::decay_t<decltype(*std::declval<D>())>;
+            return tag == etf::tag::NIL_EXT || tag == etf::tag::SMALL_ATOM_UTF8_EXT ||
+                   tag == etf::tag::ATOM_UTF8_EXT || tag == etf::tag::SMALL_ATOM_EXT ||
+                   tag == etf::tag::ATOM_EXT || variant_alt_can_match_tag<inner_t>(tag);
+         }
+         else if constexpr (nullable_value_t<D>) {
+            using inner_t = std::decay_t<decltype(std::declval<D>().value())>;
+            return tag == etf::tag::NIL_EXT || tag == etf::tag::SMALL_ATOM_UTF8_EXT ||
+                   tag == etf::tag::ATOM_UTF8_EXT || tag == etf::tag::SMALL_ATOM_EXT ||
+                   tag == etf::tag::ATOM_EXT || variant_alt_can_match_tag<inner_t>(tag);
+         }
+         else if constexpr (glaze_object_t<D> || reflectable<D> || readable_map_t<D>) {
+            return tag == etf::tag::MAP_EXT;
+         }
+         else if constexpr (tuple_t<D> || is_std_tuple<D>) {
+            return tag == etf::tag::SMALL_TUPLE_EXT || tag == etf::tag::LARGE_TUPLE_EXT ||
+                   tag == etf::tag::LIST_EXT;
+         }
+         else if constexpr (readable_array_t<D> && !str_t<D>) {
+            return tag == etf::tag::NIL_EXT || tag == etf::tag::LIST_EXT ||
+                   tag == etf::tag::STRING_EXT || tag == etf::tag::BINARY_EXT ||
+                   tag == etf::tag::SMALL_TUPLE_EXT || tag == etf::tag::LARGE_TUPLE_EXT;
+         }
+         else if constexpr (always_null_t<D>) {
+            return tag == etf::tag::NIL_EXT || tag == etf::tag::SMALL_ATOM_UTF8_EXT ||
+                   tag == etf::tag::ATOM_UTF8_EXT || tag == etf::tag::SMALL_ATOM_EXT ||
+                   tag == etf::tag::ATOM_EXT;
+         }
+         else if constexpr (boolean_like<D>) {
+            return tag == etf::tag::SMALL_ATOM_UTF8_EXT || tag == etf::tag::ATOM_UTF8_EXT ||
+                   tag == etf::tag::SMALL_ATOM_EXT || tag == etf::tag::ATOM_EXT ||
+                   tag == etf::tag::SMALL_INTEGER_EXT || tag == etf::tag::INTEGER_EXT;
+         }
+         else if constexpr (str_t<D> || is_year_month_day<D>) {
+            return tag == etf::tag::BINARY_EXT || tag == etf::tag::STRING_EXT ||
+                   tag == etf::tag::NIL_EXT || tag == etf::tag::SMALL_ATOM_UTF8_EXT ||
+                   tag == etf::tag::ATOM_UTF8_EXT || tag == etf::tag::SMALL_ATOM_EXT ||
+                   tag == etf::tag::ATOM_EXT;
+         }
+         else if constexpr (num_t<D> || std::is_enum_v<D> || is_system_time_point<D>) {
+            return tag == etf::tag::SMALL_INTEGER_EXT || tag == etf::tag::INTEGER_EXT ||
+                   tag == etf::tag::SMALL_BIG_EXT || tag == etf::tag::LARGE_BIG_EXT ||
+                   tag == etf::tag::NEW_FLOAT_EXT || tag == etf::tag::FLOAT_EXT ||
+                   tag == etf::tag::BINARY_EXT || tag == etf::tag::STRING_EXT ||
+                   tag == etf::tag::SMALL_ATOM_UTF8_EXT || tag == etf::tag::ATOM_UTF8_EXT ||
+                   tag == etf::tag::SMALL_ATOM_EXT || tag == etf::tag::ATOM_EXT;
+         }
+         else {
+            return true;
+         }
+      }
 
       template <class T, class IdType, bool IsEnum = std::is_enum_v<IdType>, bool IsIntegral = std::integral<IdType>>
       struct variant_id_resolver;
@@ -2333,7 +2403,7 @@ namespace glz
                         foreign_key = true;
                      }
 
-                     skip_value<EETF>::op<Opts>(ctx, scan, end);
+                     etf::detail::skip_nested_value<Opts>(ctx, scan, end);
                      if (parse_failed(ctx.error)) [[unlikely]] {
                         return;
                      }
@@ -3082,11 +3152,14 @@ namespace glz
             break;
          }
 
-         // Pass 1: Try all non-skip alternatives first
+         // Pass 1: Try all tag-compatible non-skip alternatives first
          for_each<variant_size>([&]<size_t I>() {
             if (matched) return;
             using V = std::variant_alternative_t<I, T>;
             if constexpr (!std::same_as<V, skip>) {
+               if (!etf::detail::variant_alt_can_match_tag<V>(tag)) {
+                  return;
+               }
                it = start;
                ctx.depth = depth;
                ctx.error = error_code::none;
@@ -3259,6 +3332,8 @@ namespace glz
          case etf::tag::LIST_EXT:
          case etf::tag::SMALL_TUPLE_EXT:
          case etf::tag::LARGE_TUPLE_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             typename generic_json<Mode, MapType>::array_t arr;
             from<EETF, decltype(arr)>::template op<Opts>(arr, ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -3266,6 +3341,8 @@ namespace glz
             break;
          }
          case etf::tag::MAP_EXT: {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
             typename generic_json<Mode, MapType>::object_t obj;
             from<EETF, decltype(obj)>::template op<Opts>(obj, ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
