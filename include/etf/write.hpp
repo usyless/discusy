@@ -3,6 +3,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -140,6 +141,32 @@ namespace glz
       }
 
       template <class T>
+      concept is_pointer_like = std::is_pointer_v<std::decay_t<T>> ||
+                                is_specialization_v<std::decay_t<T>, std::unique_ptr> ||
+                                is_specialization_v<std::decay_t<T>, std::shared_ptr> ||
+                                is_specialization_v<std::decay_t<T>, std::weak_ptr> ||
+                                requires { typename std::decay_t<T>::element_type; };
+
+      template <class T>
+      inline constexpr bool is_indirect_v = [] {
+         using V = std::decay_t<T>;
+         if constexpr (is_pointer_like<V>) {
+            return true;
+         }
+         else if constexpr (nullable_like<V>) {
+            using inner_t = std::decay_t<decltype(*std::declval<V>())>;
+            return is_pointer_like<inner_t>;
+         }
+         else if constexpr (nullable_value_t<V>) {
+            using inner_t = std::decay_t<decltype(std::declval<V>().value())>;
+            return is_pointer_like<inner_t>;
+         }
+         else {
+            return false;
+         }
+      }();
+
+      template <class T>
       constexpr size_t max_etf_val_size();
 
       template <class T>
@@ -149,7 +176,7 @@ namespace glz
          if constexpr (custom_write<V> || has_custom_meta_v<V>) {
             return 0;
          }
-         else if constexpr (std::is_void_v<V>) {
+         else if constexpr (std::is_void_v<V> || is_indirect_v<V>) {
             return 0;
          }
          else if constexpr (std::same_as<V, std::nullptr_t> || always_null_t<V>) {
@@ -206,22 +233,32 @@ namespace glz
          }
          else if constexpr (nullable_like<V>) {
             using inner_t = std::decay_t<decltype(*std::declval<V>())>;
-            constexpr size_t inner_max = max_etf_val_size<inner_t>();
-            if constexpr (inner_max > 0) {
-               return (std::max)(size_t{5}, inner_max);
+            if constexpr (is_indirect_v<inner_t>) {
+               return 0;
             }
             else {
-               return 0;
+               constexpr size_t inner_max = max_etf_val_size<inner_t>();
+               if constexpr (inner_max > 0) {
+                  return (std::max)(size_t{5}, inner_max);
+               }
+               else {
+                  return 0;
+               }
             }
          }
          else if constexpr (nullable_value_t<V>) {
             using inner_t = std::decay_t<decltype(std::declval<V>().value())>;
-            constexpr size_t inner_max = max_etf_val_size<inner_t>();
-            if constexpr (inner_max > 0) {
-               return (std::max)(size_t{5}, inner_max);
+            if constexpr (is_indirect_v<inner_t>) {
+               return 0;
             }
             else {
-               return 0;
+               constexpr size_t inner_max = max_etf_val_size<inner_t>();
+               if constexpr (inner_max > 0) {
+                  return (std::max)(size_t{5}, inner_max);
+               }
+               else {
+                  return 0;
+               }
             }
          }
          else if constexpr (is_system_time_point<V>) {
@@ -238,6 +275,10 @@ namespace glz
                using alt_t = std::decay_t<std::variant_alternative_t<I, V>>;
                if constexpr (std::same_as<alt_t, skip>) {
                   return false;
+               }
+               else if constexpr (is_indirect_v<alt_t>) {
+                  all_bounded = false;
+                  return true;
                }
                else {
                   constexpr size_t alt_max = max_etf_val_size<alt_t>();
@@ -310,6 +351,10 @@ namespace glz
                      if constexpr (always_skipped<field_val_t>) {
                         return false; // skip
                      }
+                     else if constexpr (is_indirect_v<field_val_t>) {
+                        all_bounded = false;
+                        return true; // abort
+                     }
                      else {
                         constexpr auto key = glz::get<I>(reflect<V>::keys);
                         constexpr size_t val_max = max_etf_val_size<field_val_t>();
@@ -366,14 +411,19 @@ namespace glz
                   }
                   else {
                      using field_val_t = std::decay_t<field_t<V, I>>;
-                     constexpr size_t val_max = max_etf_val_size<field_val_t>();
-                     if constexpr (val_max > 0) {
-                        constexpr auto key = glz::get<I>(reflect<V>::keys);
-                        total += 5 + key.size() + val_max;
-                        return false; // continue run
+                     if constexpr (is_indirect_v<field_val_t>) {
+                        return true; // abort run on unbounded field
                      }
                      else {
-                        return true; // abort run on unbounded field
+                        constexpr size_t val_max = max_etf_val_size<field_val_t>();
+                        if constexpr (val_max > 0) {
+                           constexpr auto key = glz::get<I>(reflect<V>::keys);
+                           total += 5 + key.size() + val_max;
+                           return false; // continue run
+                        }
+                        else {
+                           return true; // abort run on unbounded field
+                        }
                      }
                   }
                });
@@ -902,7 +952,7 @@ namespace glz
                using val_t = std::decay_t<decltype(member_val)>;
 
                static constexpr auto key = reflect<T>::keys[I];
-               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
+               constexpr size_t val_max = etf::detail::is_indirect_v<val_t> ? 0 : etf::detail::max_etf_val_size<val_t>();
 
                auto on_skipped = [&] {
                   if constexpr (not fixed_max_size && val_max == 0) {
@@ -1067,7 +1117,7 @@ namespace glz
                using val_t = std::decay_t<decltype(member_val)>;
 
                static constexpr auto key = reflect<T>::keys[I];
-               constexpr size_t val_max = etf::detail::max_etf_val_size<val_t>();
+               constexpr size_t val_max = etf::detail::is_indirect_v<val_t> ? 0 : etf::detail::max_etf_val_size<val_t>();
 
                if constexpr (etf::detail::is_etf_str_like<val_t>) {
                   const auto sv = etf::detail::get_etf_str_view(member_val);
