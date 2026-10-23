@@ -2139,13 +2139,19 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         uint64_t val5 = 0x123456789aULL;                        // 5 bytes
         uint64_t val8 = 0x123456789abcdef0ULL;                  // 8 bytes (Snowflake range)
 
-        std::string enc1, enc3, enc5, enc8;
+        std::string enc1;
+        std::string enc3;
+        std::string enc5;
+        std::string enc8;
         REQUIRE_FALSE(glz::write_etf(val1, enc1));
         REQUIRE_FALSE(glz::write_etf(val3, enc3));
         REQUIRE_FALSE(glz::write_etf(val5, enc5));
         REQUIRE_FALSE(glz::write_etf(val8, enc8));
 
-        uint64_t dec1 = 0, dec3 = 0, dec5 = 0, dec8 = 0;
+        uint64_t dec1 = 0;
+        uint64_t dec3 = 0;
+        uint64_t dec5 = 0;
+        uint64_t dec8 = 0;
         REQUIRE_FALSE(glz::read_etf(dec1, enc1));
         REQUIRE_FALSE(glz::read_etf(dec3, enc3));
         REQUIRE_FALSE(glz::read_etf(dec5, enc5));
@@ -5303,7 +5309,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         NullableValueHolder empty_h{
             .name = "empty",
             .count = {},
-            .desc = {}
+            .desc = {},
         };
         std::string empty_buf;
         REQUIRE_FALSE(glz::write_etf(empty_h, empty_buf));
@@ -5484,7 +5490,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
 
         std::array<discusy::snowflake, 4> sf_arr = {
             discusy::snowflake{111ULL}, discusy::snowflake{222ULL},
-            discusy::snowflake{333ULL}, discusy::snowflake{444ULL}
+            discusy::snowflake{333ULL}, discusy::snowflake{444ULL},
         };
         std::string sf_arr_buf;
         REQUIRE_FALSE(glz::write_etf(sf_arr, sf_arr_buf));
@@ -5610,7 +5616,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
             .name = "long_string_forcing_heap_alloc_1234567890_abcdef",
             .description = std::nullopt,
             .count = 1,
-            .enabled = true
+            .enabled = true,
         };
         const auto* name_ptr = std::get<test_etf_types::SampleStruct>(sv_obj).name.data();
         const auto name_cap = std::get<test_etf_types::SampleStruct>(sv_obj).name.capacity();
@@ -5620,7 +5626,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
             .name = "short",
             .description = std::nullopt,
             .count = 2,
-            .enabled = false
+            .enabled = false,
         };
         std::string enc_struct;
         REQUIRE_FALSE(glz::write_etf(sv_new, enc_struct));
@@ -5670,11 +5676,11 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
 
         // 2. Hybrid struct bounded run coalescing
         test_etf_types::SampleStruct hybrid{
-            .id = discusy::snowflake{99887766554433ULL},
+            .id = discusy::snowflake{112233445566778899ULL},
             .name = "hybrid_test_name",
             .description = "hybrid_description",
             .count = 1234,
-            .enabled = true
+            .enabled = true,
         };
         std::string enc_hybrid;
         REQUIRE_FALSE(glz::write_etf(hybrid, enc_hybrid));
@@ -5694,7 +5700,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
             .name = "null_opt_test",
             .description = std::nullopt,
             .count = 4321,
-            .enabled = false
+            .enabled = false,
         };
         std::string enc_null;
         REQUIRE_FALSE(glz::write_etf(hybrid_null, enc_null));
@@ -5706,6 +5712,58 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK_FALSE(dec_null.description.has_value());
         CHECK(dec_null.count == hybrid_null.count);
         CHECK(dec_null.enabled == hybrid_null.enabled);
+    }
+
+    SECTION("UB & OOB safety regression tests") {
+        // 1. Empty string into float/double with quoted_num (0-length BINARY_EXT at buffer end)
+        std::string empty_bin{
+            static_cast<char>(glz::etf::magic_version),
+            static_cast<char>(glz::etf::tag::BINARY_EXT),
+            0, 0, 0, 0,
+        };
+        double d_empty = 0.0;
+        static constexpr glz::etf::etf_opts glz_opts_quoted_num{.quoted_num = true};
+        auto ec_empty_d = glz::read_etf<glz_opts_quoted_num>(d_empty, empty_bin);
+        CHECK(ec_empty_d.ec == glz::error_code::parse_number_failure);
+
+        // 2. FLOAT_EXT consisting of 31 spaces at the end of buffer
+        std::string spaces_float{
+            static_cast<char>(glz::etf::magic_version),
+            static_cast<char>(glz::etf::tag::FLOAT_EXT),
+        };
+        spaces_float.append(31, ' ');
+        double d_spaces = 0.0;
+        auto ec_spaces = glz::read_etf(d_spaces, spaces_float);
+        CHECK(ec_spaces.ec == glz::error_code::parse_number_failure);
+
+        // 3. NEW_FLOAT_EXT finite double > FLT_MAX into float (float-cast-overflow)
+        std::string huge_double_etf;
+        const double huge_d = 1e300;
+        REQUIRE_FALSE(glz::write_etf(huge_d, huge_double_etf));
+        float f_ovf = 0.0F;
+        auto ec_f_ovf = glz::read_etf(f_ovf, huge_double_etf);
+        CHECK(ec_f_ovf.ec == glz::error_code::parse_number_failure);
+
+        // 4. Numeric timestamp overflow (signed int64_t duration multiplication overflow)
+        std::string huge_ts_etf;
+        const int64_t huge_ts = std::numeric_limits<int64_t>::max();
+        REQUIRE_FALSE(glz::write_etf(huge_ts, huge_ts_etf));
+        std::chrono::system_clock::time_point tp{};
+        auto ec_tp = glz::read_etf(tp, huge_ts_etf);
+        CHECK(static_cast<bool>(ec_tp));
+
+        // 5. STRING_EXT into std::array<bool, 3> (non-0/1 bytes must not memcpy raw invalid bool representations)
+        std::string str_bool_etf{
+            static_cast<char>(glz::etf::magic_version),
+            static_cast<char>(glz::etf::tag::STRING_EXT),
+            0, 3,
+            static_cast<char>(0), static_cast<char>(42), static_cast<char>(255),
+        };
+        std::array<bool, 3> bool_arr{};
+        REQUIRE_FALSE(glz::read_etf(bool_arr, str_bool_etf));
+        CHECK(bool_arr[0] == false);
+        CHECK(bool_arr[1] == true);
+        CHECK(bool_arr[2] == true);
     }
 }
 

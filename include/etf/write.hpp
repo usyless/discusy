@@ -250,7 +250,7 @@ namespace glz
                   }
                   else {
                      using field_val_t = std::decay_t<field_t<V, I>>;
-                     if constexpr (never_written<etf_opts{}, field_val_t>) {
+                     if constexpr (always_skipped<field_val_t>) {
                         return false; // skip
                      }
                      else {
@@ -1103,7 +1103,10 @@ namespace glz
          const auto start_ix = ix;
          ix += 5;
          chrono_detail::write_iso_time_point<false>(value, ctx, b, ix);
-         if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+         if (static_cast<bool>(ctx.error)) [[unlikely]] {
+            ix = start_ix;
+            return;
+         }
 
          const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
          b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);
@@ -1128,7 +1131,10 @@ namespace glz
          const auto mo = static_cast<unsigned>(value.month());
          const auto dy = static_cast<unsigned>(value.day());
          chrono_detail::write_iso_date<false>(yr, mo, dy, ctx, b, ix);
-         if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+         if (static_cast<bool>(ctx.error)) [[unlikely]] {
+            ix = start_ix;
+            return;
+         }
 
          const auto len = static_cast<uint32_t>(ix - (start_ix + 5));
          b[start_ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::BINARY_EXT);

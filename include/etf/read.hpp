@@ -1061,12 +1061,20 @@ namespace glz
                }
 
                const auto orig_size = check_append_arrays(Opts) ? value.size() : 0;
-               if constexpr (sizeof(V) == 1) {
+               if constexpr (sizeof(V) == 1 && !std::same_as<std::remove_cvref_t<V>, bool> &&
+                             (std::is_integral_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>)) {
                   if constexpr (resizable<T>) {
                      if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
                      resize_unfilled(value, orig_size + len);
-                     if (len > 0) {
-                        std::memcpy(value.data() + orig_size, it, len);
+                     if constexpr (requires { value.data(); }) {
+                        if (len > 0) {
+                           std::memcpy(value.data() + orig_size, it, len);
+                        }
+                     }
+                     else {
+                        for (size_t i = 0; i < len; ++i) {
+                           value[orig_size + i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                        }
                      }
                   }
                   else if constexpr (emplace_backable<T>) {
@@ -1101,11 +1109,21 @@ namespace glz
                         }
                      }
                      const size_t copy_len = (len < value.size()) ? len : value.size();
-                     if (copy_len > 0) {
-                        std::memcpy(value.data(), it, copy_len);
+                     if constexpr (requires { value.data(); }) {
+                        if (copy_len > 0) {
+                           std::memcpy(value.data(), it, copy_len);
+                        }
+                        if (copy_len < value.size()) {
+                           std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+                        }
                      }
-                     if (copy_len < value.size()) {
-                        std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+                     else {
+                        for (size_t i = 0; i < copy_len; ++i) {
+                           value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                        }
+                        for (size_t i = copy_len; i < value.size(); ++i) {
+                           value[i] = V{};
+                        }
                      }
                   }
                }
@@ -1169,7 +1187,8 @@ namespace glz
          }
 
          if (tag == etf::tag::BINARY_EXT) {
-            if constexpr (sizeof(V) == 1 && (std::is_integral_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>)) {
+            if constexpr (sizeof(V) == 1 && !std::same_as<std::remove_cvref_t<V>, bool> &&
+                          (std::is_integral_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>)) {
                if (end - it < 4) [[unlikely]] {
                   ctx.error = error_code::unexpected_end;
                   return;
@@ -1200,8 +1219,15 @@ namespace glz
                if constexpr (resizable<T>) {
                   if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
                   resize_unfilled(value, orig_size + len);
-                  if (len > 0) {
-                     std::memcpy(value.data() + orig_size, it, len);
+                  if constexpr (requires { value.data(); }) {
+                     if (len > 0) {
+                        std::memcpy(value.data() + orig_size, it, len);
+                     }
+                  }
+                  else {
+                     for (size_t i = 0; i < len; ++i) {
+                        value[orig_size + i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                     }
                   }
                }
                else if constexpr (emplace_backable<T>) {
@@ -1236,11 +1262,21 @@ namespace glz
                      }
                   }
                   const size_t copy_len = (len < value.size()) ? len : value.size();
-                  if (copy_len > 0) {
-                     std::memcpy(value.data(), it, copy_len);
+                  if constexpr (requires { value.data(); }) {
+                     if (copy_len > 0) {
+                        std::memcpy(value.data(), it, copy_len);
+                     }
+                     if (copy_len < value.size()) {
+                        std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+                     }
                   }
-                  if (copy_len < value.size()) {
-                     std::memset(value.data() + copy_len, 0, value.size() - copy_len);
+                  else {
+                     for (size_t i = 0; i < copy_len; ++i) {
+                        value[i] = static_cast<V>(static_cast<uint8_t>(it[i]));
+                     }
+                     for (size_t i = copy_len; i < value.size(); ++i) {
+                        value[i] = V{};
+                     }
                   }
                }
                it += len;
@@ -3280,23 +3316,27 @@ namespace glz
             if (etf::detail::read_number(ctx, it, end, num)) {
                using Duration = std::remove_cvref_t<T>::duration;
                using Period = Duration::period;
+               bool ok = false;
                if constexpr (std::ratio_equal_v<Period, std::milli>) {
-                  value = std::chrono::time_point_cast<Duration>(
-                     std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
+                  ok = chrono_detail::make_sys_time(
+                     value, std::chrono::seconds{num / 1000}, std::chrono::milliseconds{num % 1000});
                }
                else if constexpr (std::ratio_equal_v<Period, std::ratio<1>>) {
-                  value = std::chrono::time_point_cast<Duration>(
-                     std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+                  ok = chrono_detail::make_sys_time(
+                     value, std::chrono::seconds{num}, std::chrono::nanoseconds{0});
                }
                else {
                   if (num > 10000000000LL || num < -10000000000LL) {
-                     value = std::chrono::time_point_cast<Duration>(
-                        std::chrono::system_clock::time_point{std::chrono::milliseconds{num}});
+                     ok = chrono_detail::make_sys_time(
+                        value, std::chrono::seconds{num / 1000}, std::chrono::milliseconds{num % 1000});
                   }
                   else {
-                     value = std::chrono::time_point_cast<Duration>(
-                        std::chrono::system_clock::time_point{std::chrono::seconds{num}});
+                     ok = chrono_detail::make_sys_time(
+                        value, std::chrono::seconds{num}, std::chrono::nanoseconds{0});
                   }
+               }
+               if (!ok) [[unlikely]] {
+                  ctx.error = error_code::parse_error;
                }
                return;
             }

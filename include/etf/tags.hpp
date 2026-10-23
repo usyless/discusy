@@ -233,20 +233,20 @@ namespace glz::etf
          if (len > 0) {
             std::memcpy(&b[ix + 5], data, len);
          }
-         ix += 5 + len;
+         ix += size_t{5} + len;
       }
 
       template <typename B, typename IX>
       GLZ_ALWAYS_INLINE void dump_binary(const void* data, uint32_t len, B& b, IX& ix)
       {
-         ensure_space(b, ix + 5 + len);
+         ensure_space(b, ix + size_t{5} + len);
          dump_binary_unchecked(data, len, b, ix);
       }
 
       template <typename B, typename IX>
       GLZ_ALWAYS_INLINE bool dump_binary(is_context auto& ctx, const void* data, uint32_t len, B& b, IX& ix)
       {
-         if (!glz::ensure_space(ctx, b, ix + 5 + len + write_padding_bytes)) [[unlikely]] return false;
+         if (!glz::ensure_space(ctx, b, ix + size_t{5} + len + write_padding_bytes)) [[unlikely]] return false;
          dump_binary_unchecked(data, len, b, ix);
          return true;
       }
@@ -287,7 +287,7 @@ namespace glz::etf
                return false;
             }
             key = std::string_view{reinterpret_cast<const char*>(it + 5), len};
-            it += 5 + len;
+            it += size_t{5} + len;
             return true;
          }
          if (it >= end) [[unlikely]] {
@@ -479,7 +479,7 @@ namespace glz::etf
             const uint32_t len = read_be<uint32_t>(it + 1);
             if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             sv = std::string_view{reinterpret_cast<const char*>(it + 5), len};
-            it += 5 + len;
+            it += size_t{5} + len;
             return true;
          }
          auto save_it = it;
@@ -500,8 +500,8 @@ namespace glz::etf
       template <typename T>
       GLZ_ALWAYS_INLINE bool parse_number_from_string(std::string_view sv, T& num) noexcept
       {
+         if (sv.empty()) [[unlikely]] return false;
          if constexpr (std::is_unsigned_v<T>) {
-            if (sv.empty()) [[unlikely]] return false;
             size_t start = 0;
             const size_t sz = sv.size();
             while (start < sz && sv[start] == '0') {
@@ -814,6 +814,17 @@ namespace glz::etf
                      d = -d;
                   }
                }
+               if (!std::isfinite(d)) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return false;
+               }
+               if constexpr (sizeof(T) < sizeof(double)) {
+                  if (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
+                      d > static_cast<double>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
                num = static_cast<T>(d);
             }
             return true;
@@ -916,6 +927,17 @@ namespace glz::etf
                      d = -d;
                   }
                }
+               if (!std::isfinite(d)) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return false;
+               }
+               if constexpr (sizeof(T) < sizeof(double)) {
+                  if (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
+                      d > static_cast<double>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
                num = static_cast<T>(d);
             }
             return true;
@@ -931,6 +953,13 @@ namespace glz::etf
                it += 8;
                double d = NAN;
                std::memcpy(&d, &bits, sizeof(double));
+               if constexpr (sizeof(T) < sizeof(double)) {
+                  if (std::isfinite(d) && (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
+                                           d > static_cast<double>((std::numeric_limits<T>::max)()))) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return false;
+                  }
+               }
                num = static_cast<T>(d);
                return true;
             }
@@ -945,6 +974,10 @@ namespace glz::etf
                const char* p_it = reinterpret_cast<const char*>(it);
                it += 31;
                while (p_it < it && *p_it == ' ') ++p_it;
+               if (p_it == it) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return false;
+               }
                if constexpr (glz::fast_float::is_supported_float_type<T>::value) {
                   auto [p, ec] = glz::from_chars<false>(p_it, it, num);
                   if (ec != std::errc{} || p == p_it) [[unlikely]] {
