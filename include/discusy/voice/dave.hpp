@@ -39,7 +39,7 @@ inline void init_dave_logging() noexcept {
             log::Logger{}("[libdave] [{}] ({}:{}) {}", sev_str, file_name, line, message);
         });
 #else
-        discord::dave::SetLogSink([](auto&&...) {});
+        discord::dave::SetLogSink([](discord::dave::LoggingSeverity, const char*, int, const std::string&) {});
 #endif
         return true;
     }();
