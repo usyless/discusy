@@ -146,6 +146,7 @@ private:
         stop_heartbeat();
         ws_.pause();
         reconnect_timeout_timer_.cancel();
+        reconnect_scheduled_ = false;
     }
 
     void handle_ws_open() {
