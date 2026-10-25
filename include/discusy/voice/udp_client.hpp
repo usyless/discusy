@@ -620,7 +620,7 @@ private:
         has_prepared_packet_ = false;
         next_frame_tp_ = clock::now();
 
-        rtp_header_.fill(0);
+        // rtp_header_.fill(0);
         rtp_header_[0] = 0x80;
         rtp_header_[1] = 0x78;
         std::memcpy(&rtp_header_[8], &ssrc_net_order_, 4);
