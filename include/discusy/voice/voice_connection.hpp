@@ -904,6 +904,7 @@ private:
         stop_heartbeat();
         ws_.pause();
         reconnect_timeout_timer_.cancel();
+        reconnect_scheduled_ = false;
     }
 
     void escalate(const escalation_action action) {
@@ -1307,6 +1308,7 @@ private:
 
                 ws_.resume();
                 reconnect_timeout_timer_.cancel();
+                reconnect_scheduled_ = false;
 
                 if (udp_client_ == nullptr) {
                     #ifdef DISCUSY_LOGGING
@@ -1431,6 +1433,7 @@ private:
             case VoiceOpcode::Resumed: {
                 ws_.resume();
                 reconnect_timeout_timer_.cancel();
+                reconnect_scheduled_ = false;
                 reconnect_backoff_time_ = std::chrono::milliseconds{0};
                 reconnect_attempts_ = 0;
 
