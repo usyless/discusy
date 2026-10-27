@@ -24,7 +24,6 @@
 #include <array>
 #include <cstring>
 #include <algorithm>
-#include <ranges>
 
 namespace test_etf_types {
 
@@ -332,7 +331,7 @@ struct OnlyName {
 
 enum class TestReflectedEnum {
     FOO,
-    BAR
+    BAR,
 };
 
 struct StructWithEnum {
@@ -437,7 +436,7 @@ struct glz::meta<test_etf_types::EnumTaggedVariant> {
 template <>
 inline constexpr auto glz::ids_v<test_etf_types::EnumTaggedVariant> = std::array{
     test_etf_types::VariantEnumId::Alpha,
-    test_etf_types::VariantEnumId::Beta
+    test_etf_types::VariantEnumId::Beta,
 };
 
 using namespace test_etf_types;
@@ -560,7 +559,7 @@ TEST_CASE("ETF: Basic types serialization and deserialization", "[etf]") {
         CHECK(dec_i64 == med_i64);
 
         // int64_t boundary: std::numeric_limits<int64_t>::min()
-        std::int64_t min_i64 = (std::numeric_limits<std::int64_t>::min)();
+        std::int64_t min_i64 = std::numeric_limits<std::int64_t>::min();
         std::string enc_min;
         REQUIRE_FALSE(glz::write_etf(min_i64, enc_min));
         REQUIRE(enc_min.size() == 1 + 1 + 1 + 1 + 8);
@@ -2106,7 +2105,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
 
         test_etf_types::StructWithEnum s_enum{
             .val = test_etf_types::TestReflectedEnum::BAR,
-            .num = 456
+            .num = 456,
         };
         std::string enc_enum;
         REQUIRE_FALSE(glz::write_etf(s_enum, enc_enum));
@@ -2116,7 +2115,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         CHECK(dec_enum == s_enum);
 
         test_etf_types::StructWithOptionalSubStruct s_sub{
-            .pt = test_etf_types::FixedPoint2D{.x = 100, .y = 200}
+            .pt = test_etf_types::FixedPoint2D{.x = 100, .y = 200},
         };
         std::string enc_sub;
         REQUIRE_FALSE(glz::write_etf(s_sub, enc_sub));
@@ -5354,7 +5353,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         NullableValueHolder populated{
             .name = "active",
             .count = CustomNullableValue<int>{12345},
-            .desc = CustomNullableValue<std::string>{"description text"}
+            .desc = CustomNullableValue<std::string>{"description text"},
         };
         std::string pop_buf;
         REQUIRE_FALSE(glz::write_etf(populated, pop_buf));
@@ -5627,7 +5626,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(std::get<discusy::integer>(dec_int) == 9876543210LL);
 
         // 3. Double alternative (NEW_FLOAT_EXT)
-        SlashOptionVal v_dbl = double{3.141592653589793};
+        SlashOptionVal v_dbl = std::numbers::pi;
         std::string enc_dbl;
         REQUIRE_FALSE(glz::write_etf(v_dbl, enc_dbl));
         SlashOptionVal dec_dbl{};
