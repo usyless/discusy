@@ -803,12 +803,12 @@ inline focused_input interaction::application_command_data::focused(this auto&& 
 
     focused_input out{.name = o->name};
     if (o->value) {
-        if (const auto* v = std::get_if<std::string>(&*o->value)) {
-            out.value = *v;
-        } else if (const auto* v = std::get_if<integer>(&*o->value)) {
-            out.value = number_str{*v}.view();
-        } else if (const auto* v = std::get_if<double>(&*o->value)) {
-            out.value = number_str{*v}.view();
+        if (const auto* str = std::get_if<std::string>(&*o->value)) {
+            out.value = *str;
+        } else if (const auto* num = std::get_if<integer>(&*o->value)) {
+            out.value = number_str{*num}.view();
+        } else if (const auto* dbl = std::get_if<double>(&*o->value)) {
+            out.value = number_str{*dbl}.view();
         }
     }
     return out;
