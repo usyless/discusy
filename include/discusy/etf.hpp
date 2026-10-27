@@ -43,7 +43,7 @@ inline constexpr glz::etf::etf_opts glz_opts_not_null_term{
 // On true return: failure
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf(T& object, std::string& etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data)) {
         logger("ETF parsing failed: {}", glz::format_error(err, etf_data));
@@ -57,7 +57,7 @@ requires ( log::IsLogger<F> )
 
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf(T& object, std::string& etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
     detail::reset_ctx(ctx);
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data, ctx)) {
