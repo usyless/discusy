@@ -214,9 +214,9 @@ template <typename T>
     return cmd.get_bool(name);
 }
 
-// USER, CHANNEL, ROLE, MENTIONABLE and ATTACHMENT options all arrive as the id
-// in string form. This parses it back without the caller reaching for
-// std::from_chars every time.
+// USER, CHANNEL, ROLE, MENTIONABLE and ATTACHMENT options arrive as the id
+// in string form in JSON, or as an integer snowflake in ETF. This parses it back
+// without the caller reaching for std::from_chars every time.
 [[nodiscard]] inline std::optional<snowflake> get_snowflake(
     const interaction::application_command_data& cmd, const std::string_view name)
 {

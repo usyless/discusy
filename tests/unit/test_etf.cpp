@@ -2261,12 +2261,17 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
     opt_enabled.value = true;
     opt_enabled.focused = false;
 
+    discusy::interaction::application_command_interaction_data_option opt_file{};
+    opt_file.name = "file";
+    opt_file.type = discusy::application_commands::application_command_option_type::ATTACHMENT;
+    opt_file.value = discusy::integer{1564377313125072916LL};
+
     // Subcommand (Level 2):
     discusy::interaction::application_command_interaction_data_option sub_cmd{};
     sub_cmd.name = "configure";
     sub_cmd.type = discusy::application_commands::application_command_option_type::SUB_COMMAND;
     sub_cmd.options = std::vector<discusy::interaction::application_command_interaction_data_option>{
-        opt_host, opt_port, opt_ratio, opt_enabled,
+        opt_host, opt_port, opt_ratio, opt_enabled, opt_file,
     };
 
     // Subcommand Group (Level 1):
@@ -2301,6 +2306,15 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
     ch.name = "bot-commands";
     ch.guild_id = inter.guild_id;
     (*res.channels)[ch.id.value] = ch;
+
+    res.attachments.emplace();
+    discusy::message::attachment att{};
+    att.id = discusy::snowflake{1564377313125072916ULL};
+    att.filename = "silence.opus";
+    att.url = "https://cdn.discordapp.com/ephemeral-attachments/1494064812014047412/1564377313125072916/silence.opus";
+    att.proxy_url = "https://media.discordapp.net/ephemeral-attachments/1494064812014047412/1564377313125072916/silence.opus";
+    att.size = 21341;
+    (*res.attachments)[att.id.value] = att;
 
     cmd_data.resolved = res;
     inter.data = cmd_data;
@@ -2470,6 +2484,23 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
         REQUIRE(dec_enabled.focused.has_value());
         CHECK(*dec_enabled.focused == false);
 
+        // Attachment snowflake option (stored as integer in ETF wire format)
+        const auto& dec_file = (*dec_sub.options)[4];
+        CHECK(dec_file.name == "file");
+        CHECK(dec_file.type == discusy::application_commands::application_command_option_type::ATTACHMENT);
+        REQUIRE(dec_file.value.has_value());
+        REQUIRE(std::holds_alternative<discusy::integer>(*dec_file.value));
+        CHECK(std::get<discusy::integer>(*dec_file.value) == 1564377313125072916LL);
+        REQUIRE(dec_file.value_as<discusy::snowflake>().has_value());
+        CHECK(*dec_file.value_as<discusy::snowflake>() == discusy::snowflake{1564377313125072916ULL});
+        REQUIRE(dec_file.value_as<std::string>().has_value());
+        CHECK(*dec_file.value_as<std::string>() == "1564377313125072916");
+        CHECK(dec_cmd.get_snowflake("file") == discusy::snowflake{1564377313125072916ULL});
+        CHECK(dec_cmd.get_string("file") == "1564377313125072916");
+        CHECK(dec_cmd.resolved_attachment("file") != nullptr);
+        CHECK(dec_cmd.resolved_attachment("file")->filename == "silence.opus");
+        CHECK(dec_cmd.resolved_attachment(discusy::snowflake{1564377313125072916ULL}) != nullptr);
+
         // Resolved payload data
         REQUIRE(dec_cmd.resolved.has_value());
         const auto& dec_res = *dec_cmd.resolved;
@@ -2499,6 +2530,12 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
         REQUIRE(it_ch != dec_res.channels->end());
         CHECK(it_ch->second.name == "bot-commands");
         CHECK(it_ch->second.type == discusy::channel::channel_type::GUILD_TEXT);
+
+        REQUIRE(dec_res.attachments.has_value());
+        auto it_att = dec_res.attachments->find(att.id.value);
+        REQUIRE(it_att != dec_res.attachments->end());
+        CHECK(it_att->second.filename == "silence.opus");
+        CHECK(it_att->second.size == 21341);
     }
 
     SECTION("Erlang sorted gateway dispatch order (d field first)") {

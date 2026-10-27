@@ -5175,14 +5175,40 @@ namespace interaction {
             if (!self.value) return std::nullopt;
             if constexpr (std::is_same_v<T, std::string>) {
                 if (const auto* v = std::get_if<std::string>(&*self.value)) return *v;
+                if (self.type == application_commands::application_command_option_type::USER ||
+                    self.type == application_commands::application_command_option_type::CHANNEL ||
+                    self.type == application_commands::application_command_option_type::ROLE ||
+                    self.type == application_commands::application_command_option_type::MENTIONABLE ||
+                    self.type == application_commands::application_command_option_type::ATTACHMENT) {
+                    if (const auto* v = std::get_if<integer>(&*self.value)) {
+                        return std::to_string(static_cast<std::uint64_t>(*v));
+                    }
+                }
             } else if constexpr (std::is_same_v<T, bool>) {
                 if (const auto* v = std::get_if<bool>(&*self.value)) return *v;
             } else if constexpr (std::is_same_v<T, double>) {
                 if (const auto* v = std::get_if<double>(&*self.value)) return *v;
                 if (const auto* v = std::get_if<integer>(&*self.value)) return static_cast<double>(*v);
+            } else if constexpr (std::is_same_v<T, snowflake>) {
+                if (const auto* v = std::get_if<integer>(&*self.value)) {
+                    if (*v > 0) return snowflake{static_cast<std::uint64_t>(*v)};
+                } else if (const auto* s = std::get_if<std::string>(&*self.value)) {
+                    if (!s->empty()) {
+                        if (const auto num = ulp::str::to_number<std::uint64_t>(*s)) {
+                            return snowflake{*num};
+                        }
+                    }
+                }
             } else if constexpr (std::is_integral_v<T>) {
                 if (const auto* v = std::get_if<integer>(&*self.value)) return static_cast<T>(*v);
                 if (const auto* v = std::get_if<double>(&*self.value)) return static_cast<T>(*v);
+                if (const auto* s = std::get_if<std::string>(&*self.value)) {
+                    if (!s->empty()) {
+                        if (const auto num = ulp::str::to_number<T>(*s)) {
+                            return *num;
+                        }
+                    }
+                }
             }
             return std::nullopt;
         }

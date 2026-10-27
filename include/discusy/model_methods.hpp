@@ -783,13 +783,8 @@ inline std::optional<bool> interaction::application_command_data::get_bool(this 
 }
 
 inline std::optional<snowflake> interaction::application_command_data::get_snowflake(this auto&& self, const std::string_view opt_name) {
-    const auto s = self.get_string(opt_name);
-    if (!s || s->empty()) return std::nullopt;
-
-    const auto v = ulp::str::to_number<std::uint64_t>(*s);
-    if (!v) return std::nullopt;
-
-    return snowflake{*v};
+    const auto* o = self.find_option(opt_name);
+    return o ? o->template value_as<snowflake>() : std::nullopt;
 }
 
 inline const interaction::application_command_interaction_data_option* interaction::application_command_data::focused_option(this auto&& self) noexcept {
@@ -808,7 +803,13 @@ inline focused_input interaction::application_command_data::focused(this auto&& 
 
     focused_input out{.name = o->name};
     if (o->value) {
-        if (const auto* v = std::get_if<std::string>(&*o->value)) out.value = *v;
+        if (const auto* v = std::get_if<std::string>(&*o->value)) {
+            out.value = *v;
+        } else if (const auto* v = std::get_if<integer>(&*o->value)) {
+            out.value = std::to_string(*v);
+        } else if (const auto* v = std::get_if<double>(&*o->value)) {
+            out.value = std::to_string(*v);
+        }
     }
     return out;
 }
