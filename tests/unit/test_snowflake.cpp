@@ -2,6 +2,7 @@
 #include <discusy/types.hpp>
 #include <string_view>
 #include <compare>
+#include <limits>
 
 TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowflake]") {
     // A known snowflake: 175928847299117063ULL
@@ -128,5 +129,73 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(std::is_eq(mu1 <=> mu2));
         static_assert(mu1 == mu2);
         static_assert(std::is_eq(mu1 <=> mu2));
+    }
+}
+
+TEST_CASE("number_str stack formatting and semantics", "[types][number_str]") {
+    SECTION("constexpr integer formatting") {
+        constexpr discusy::number_str n0{0};
+        static_assert(n0.view() == "0");
+        static_assert(n0.size() == 1);
+        static_assert(!n0.empty());
+
+        constexpr discusy::number_str n42{42};
+        static_assert(n42.view() == "42");
+        static_assert(n42.size() == 2);
+
+        constexpr discusy::number_str n_neg{-12345};
+        static_assert(n_neg.view() == "-12345");
+        static_assert(n_neg.size() == 6);
+
+        constexpr discusy::number_str n_u64{1564377313125072916ULL};
+        static_assert(n_u64.view() == "1564377313125072916");
+    }
+
+    SECTION("runtime integer and boundary formatting") {
+        discusy::number_str min_i64{std::numeric_limits<std::int64_t>::min()};
+        CHECK(min_i64.view() == "-9223372036854775808");
+
+        discusy::number_str max_i64{std::numeric_limits<std::int64_t>::max()};
+        CHECK(max_i64.view() == "9223372036854775807");
+
+        discusy::number_str max_u64{std::numeric_limits<std::uint64_t>::max()};
+        CHECK(max_u64.view() == "18446744073709551615");
+
+        discusy::number_str port{static_cast<std::uint16_t>(54321)};
+        CHECK(port.view() == "54321");
+        CHECK(std::string{port.c_str()} == "54321");
+    }
+
+    SECTION("floating point and enum formatting") {
+        discusy::number_str pi{3.14};
+        CHECK(pi.view().starts_with("3.14"));
+
+        enum class test_code : int { ok = 200, not_found = 404 };
+        discusy::number_str code{test_code::ok};
+        CHECK(code.view() == "200");
+    }
+
+    SECTION("snowflake constructor and string concatenation") {
+        discusy::snowflake sf{1564377313125072916ULL};
+        discusy::number_str ns{sf};
+        CHECK(ns.view() == "1564377313125072916");
+
+        auto combined = ulp::str::concat_strings("[shard ", discusy::number_str{0}, "] status: ", discusy::number_str{200});
+        CHECK(combined == "[shard 0] status: 200");
+
+        auto formatted = std::format("{}", discusy::number_str{999});
+        CHECK(formatted == "999");
+    }
+
+    SECTION("comparison operators") {
+        discusy::number_str a{100};
+        discusy::number_str b{100};
+        discusy::number_str c{200};
+
+        CHECK(a == b);
+        CHECK(a != c);
+        CHECK(a == "100");
+        CHECK(c > a);
+        CHECK(std::is_eq(a <=> b));
     }
 }

@@ -137,7 +137,7 @@ private:
     #ifdef DISCUSY_LOGGING
     template <typename ...Args>
     void log(const std::format_string<Args...>& s, Args&&... args) {
-        log::Logger{}("{}{}", ulp::str::concat_strings("[discusy shard ", ulp::str::to_string_view(shard_id_), "] "), std::format(s, std::forward<Args>(args)...));
+        log::Logger{}("{}{}", ulp::str::concat_strings("[discusy shard ", discusy::number_str{shard_id_}, "] "), std::format(s, std::forward<Args>(args)...));
     }
     #endif
 

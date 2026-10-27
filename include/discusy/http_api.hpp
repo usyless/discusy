@@ -170,7 +170,7 @@ private:
             discusy::api::error err{};
             std::string err_msg;
             if (discusy::json::parse_json<discusy::json::glz_opts_non_minified>(err, resp.body)) {
-                err_msg = resp.body.empty() ? ("HTTP error " + std::string{ulp::str::to_string_view(resp.status_code)}) : "JSON Parsing error while parsing error";
+                err_msg = resp.body.empty() ? ("HTTP error " + discusy::number_str{resp.status_code}.str()) : "JSON Parsing error while parsing error";
             } else {
                 err_msg = std::move(err.message);
             }
@@ -1459,7 +1459,7 @@ public:
         get_answer_voters,
         get,
         discusy::api::poll::get_answer_voters_response,
-        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/polls/", message_id.stack_str(), "/answers/", std::to_string(answer_id), make_query_string(query)),
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/polls/", message_id.stack_str(), "/answers/", discusy::number_str{answer_id}, make_query_string(query)),
         const discusy::snowflake channel_id, const discusy::snowflake message_id, const discusy::integer answer_id, const discusy::api::poll::get_answer_voters_query& query = {}
     )
 

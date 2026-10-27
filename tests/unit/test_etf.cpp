@@ -3,6 +3,7 @@
 #include <discusy/types.hpp>
 #include <discusy/gateway_events.hpp>
 #include <discusy/json.hpp>
+#include <discusy/model_methods.hpp>
 #include <charconv>
 #include <etf/etf.hpp>
 #include <numbers>
@@ -2440,7 +2441,7 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
 
         // Hierarchy Level 3 (Leaf options)
         REQUIRE(dec_sub.options.has_value());
-        REQUIRE(dec_sub.options->size() == 4);
+        REQUIRE(dec_sub.options->size() == 5);
 
         // String option
         const auto& dec_host = (*dec_sub.options)[0];
@@ -2500,6 +2501,22 @@ TEST_CASE("ETF: Deep Discord Interaction gateway event payload", "[etf][gateway]
         CHECK(dec_cmd.resolved_attachment("file") != nullptr);
         CHECK(dec_cmd.resolved_attachment("file")->filename == "silence.opus");
         CHECK(dec_cmd.resolved_attachment(discusy::snowflake{1564377313125072916ULL}) != nullptr);
+
+        // Test focused() lifetime safety with integer and double options
+        {
+            discusy::interaction::application_command_data focus_cmd{};
+            discusy::interaction::application_command_interaction_data_option focus_int_opt{};
+            focus_int_opt.name = "count";
+            focus_int_opt.type = discusy::application_commands::application_command_option_type::INTEGER;
+            focus_int_opt.value = discusy::integer{42};
+            focus_int_opt.focused = true;
+            focus_cmd.options = std::vector<discusy::interaction::application_command_interaction_data_option>{focus_int_opt};
+
+            discusy::focused_input fi = focus_cmd.focused();
+            CHECK(static_cast<bool>(fi));
+            CHECK(fi.name == "count");
+            CHECK(fi.value == "42");
+        }
 
         // Resolved payload data
         REQUIRE(dec_cmd.resolved.has_value());

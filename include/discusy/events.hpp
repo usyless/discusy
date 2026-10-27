@@ -5181,7 +5181,7 @@ namespace interaction {
                     self.type == application_commands::application_command_option_type::MENTIONABLE ||
                     self.type == application_commands::application_command_option_type::ATTACHMENT) {
                     if (const auto* v = std::get_if<integer>(&*self.value)) {
-                        return std::to_string(static_cast<std::uint64_t>(*v));
+                        return number_str{static_cast<std::uint64_t>(*v)}.str();
                     }
                 }
             } else if constexpr (std::is_same_v<T, bool>) {
@@ -5256,7 +5256,7 @@ namespace interaction {
         [[nodiscard]] std::optional<bool> get_bool(this auto&& self, std::string_view opt_name) noexcept;
         [[nodiscard]] std::optional<snowflake> get_snowflake(this auto&& self, std::string_view opt_name);
         [[nodiscard]] const application_command_interaction_data_option* focused_option(this auto&& self) noexcept;
-        [[nodiscard]] focused_input focused(this auto&& self) noexcept;
+        [[nodiscard]] focused_input focused(this auto&& self);
         [[nodiscard]] const discusy::message::attachment* resolved_attachment(this auto&& self, snowflake id) noexcept;
         [[nodiscard]] const discusy::message::attachment* resolved_attachment(this auto&& self, std::string_view opt_name);
         [[nodiscard]] const discusy::user::user* resolved_user(this auto&& self, snowflake id) noexcept;
@@ -5546,7 +5546,7 @@ namespace interaction {
         [[nodiscard]] std::optional<double> get_double(this auto&& self, std::string_view opt_name) noexcept;
         [[nodiscard]] std::optional<bool> get_bool(this auto&& self, std::string_view opt_name) noexcept;
         [[nodiscard]] std::optional<snowflake> get_snowflake(this auto&& self, std::string_view opt_name);
-        [[nodiscard]] focused_input focused(this auto&& self) noexcept;
+        [[nodiscard]] focused_input focused(this auto&& self);
         [[nodiscard]] std::string_view component_custom_id(this auto&& self) noexcept;
         [[nodiscard]] const std::vector<std::string>* component_values(this auto&& self) noexcept;
         [[nodiscard]] std::string_view component_first_value(this auto&& self) noexcept;

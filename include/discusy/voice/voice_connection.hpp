@@ -892,7 +892,7 @@ private:
     #ifdef DISCUSY_LOGGING
     template <typename ...Args>
     void log(const std::format_string<Args...>& s, Args&&... args) {
-        log::Logger{}("{}{}", ulp::str::concat_strings("[discusy voice conn ", ulp::str::to_string_view(channel_id_.load(std::memory_order_relaxed)), "] "), std::format(s, std::forward<Args>(args)...));
+        log::Logger{}("{}{}", ulp::str::concat_strings("[discusy voice conn ", discusy::number_str{channel_id_.load(std::memory_order_relaxed)}, "] "), std::format(s, std::forward<Args>(args)...));
     }
     #endif
 

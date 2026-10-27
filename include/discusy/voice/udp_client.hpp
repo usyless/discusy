@@ -16,6 +16,7 @@
 #include <sodium.h>
 #include <boost/container/deque.hpp>
 
+#include "../types.hpp"
 #include "../audio_runtime.hpp"
 #include "../io_context.hpp"
 #include "../log.hpp" // IWYU pragma: keep
@@ -428,7 +429,7 @@ private:
         discovery_packet_[6] = (ssrc >> 8) & 0xFF;
         discovery_packet_[7] = (ssrc >> 0) & 0xFF;
 
-        resolver_.async_resolve(udp::v4(), host, ulp::str::to_string_view(port),
+        resolver_.async_resolve(udp::v4(), host, discusy::number_str{port}.view(),
             boost::asio::cancel_after(std::chrono::seconds{5},
                 [s = this->shared_from_this(), session = session_, cb = std::forward<F>(cb)](const boost::system::error_code& error, const udp::resolver::results_type& results) mutable {
                     auto& self = *s;

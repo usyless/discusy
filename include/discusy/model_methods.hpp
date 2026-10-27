@@ -797,7 +797,7 @@ inline const interaction::application_command_interaction_data_option* interacti
     return nullptr;
 }
 
-inline focused_input interaction::application_command_data::focused(this auto&& self) noexcept {
+inline focused_input interaction::application_command_data::focused(this auto&& self) {
     const auto* o = self.focused_option();
     if (!o) return {};
 
@@ -806,9 +806,9 @@ inline focused_input interaction::application_command_data::focused(this auto&& 
         if (const auto* v = std::get_if<std::string>(&*o->value)) {
             out.value = *v;
         } else if (const auto* v = std::get_if<integer>(&*o->value)) {
-            out.value = std::to_string(*v);
+            out.value = number_str{*v}.view();
         } else if (const auto* v = std::get_if<double>(&*o->value)) {
-            out.value = std::to_string(*v);
+            out.value = number_str{*v}.view();
         }
     }
     return out;
@@ -936,7 +936,7 @@ inline const interaction::application_command_interaction_data_option* interacti
     return cmd ? cmd->focused_option() : nullptr;
 }
 
-inline focused_input interaction::interaction::focused(this auto&& self) noexcept {
+inline focused_input interaction::interaction::focused(this auto&& self) {
     const auto* cmd = self.command_data();
     return cmd ? cmd->focused() : focused_input{};
 }

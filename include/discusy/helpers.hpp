@@ -328,7 +328,7 @@ DISCUSY_RESOLVED_GETTER(resolved_message,    messages,    discusy::message::mess
 using discusy::focused_input;
 
 [[nodiscard]] inline focused_input focused(
-    const interaction::application_command_data& cmd) noexcept
+    const interaction::application_command_data& cmd)
 {
     return cmd.focused();
 }

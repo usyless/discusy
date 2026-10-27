@@ -128,16 +128,19 @@ struct command_path {
 };
 
 struct focused_input {
-    std::string_view name{};
-    std::string_view value{};
+    std::string name{};
+    std::string value{};
 
-    [[nodiscard]] constexpr explicit operator bool() const noexcept { return !name.empty(); }
+    [[nodiscard]] explicit operator bool() const noexcept { return !name.empty(); }
 };
 
 inline constexpr std::uint64_t DISCORD_EPOCH = 1420070400000;
 
 struct snowflake_str;
 struct snowflake_mention_str;
+template <std::size_t N>
+struct basic_number_str;
+using number_str = basic_number_str<32>;
 
 struct snowflake {
     std::uint64_t value{};
@@ -368,6 +371,126 @@ struct snowflake_mention_str {
         static constexpr auto value = &T::view;
     };
 };
+
+template <std::size_t N>
+struct basic_number_str {
+    std::array<char, N> buf{};
+    std::uint8_t len{0};
+
+    constexpr basic_number_str() noexcept = default;
+
+    template <typename U>
+        requires((std::is_arithmetic_v<std::decay_t<U>> || std::is_enum_v<std::decay_t<U>>) && !std::is_same_v<std::decay_t<U>, bool>)
+    constexpr explicit basic_number_str(U val) noexcept {
+        using Decayed = std::decay_t<U>;
+        if constexpr (std::is_enum_v<Decayed>) {
+            *this = basic_number_str(static_cast<std::underlying_type_t<Decayed>>(val));
+        } else if constexpr (std::is_integral_v<Decayed>) {
+            if consteval {
+                buf = {};
+                if (val == 0) {
+                    buf[0] = '0';
+                    buf[1] = '\0';
+                    len = 1;
+                    return;
+                }
+                std::array<char, N> temp{};
+                std::size_t i = 0;
+                bool negative = false;
+                if constexpr (std::is_signed_v<Decayed>) {
+                    if (val < 0) {
+                        negative = true;
+                    }
+                }
+                using UnsignedT = std::make_unsigned_t<Decayed>;
+                UnsignedT uval = negative ? static_cast<UnsignedT>(0 - static_cast<UnsignedT>(val)) : static_cast<UnsignedT>(val);
+                while (uval > 0) {
+                    temp[i++] = static_cast<char>('0' + (uval % 10));
+                    uval /= 10;
+                }
+                std::size_t out_idx = 0;
+                if (negative) {
+                    buf[out_idx++] = '-';
+                }
+                for (std::size_t j = 0; j < i; ++j) {
+                    buf[out_idx + j] = temp[i - 1 - j];
+                }
+                out_idx += i;
+                buf[out_idx] = '\0';
+                len = static_cast<std::uint8_t>(out_idx);
+            } else {
+                auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
+                *ptr = '\0';
+                len = static_cast<std::uint8_t>(ptr - buf.data());
+            }
+        } else {
+            auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
+            *ptr = '\0';
+            len = static_cast<std::uint8_t>(ptr - buf.data());
+        }
+    }
+
+    constexpr explicit basic_number_str(snowflake s) noexcept : basic_number_str(s.value) {}
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept {
+        return std::string_view{buf.data(), len};
+    }
+
+    [[nodiscard]] constexpr operator std::string_view() const noexcept {
+        return view();
+    }
+
+    [[nodiscard]] std::string str() const {
+        return std::string{buf.data(), len};
+    }
+
+    [[nodiscard]] constexpr const char* c_str() const noexcept {
+        return buf.data();
+    }
+
+    [[nodiscard]] constexpr const char* data() const noexcept {
+        return buf.data();
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept {
+        return len;
+    }
+
+    [[nodiscard]] constexpr std::size_t length() const noexcept {
+        return len;
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return len == 0;
+    }
+
+    constexpr bool operator==(const basic_number_str& other) const noexcept {
+        return view() == other.view();
+    }
+    constexpr auto operator<=>(const basic_number_str& other) const noexcept {
+        return view() <=> other.view();
+    }
+
+    constexpr bool operator==(std::string_view sv) const noexcept {
+        return view() == sv;
+    }
+    constexpr auto operator<=>(std::string_view sv) const noexcept {
+        return view() <=> sv;
+    }
+
+    [[nodiscard]] friend std::size_t hash_value(const basic_number_str& s) noexcept {
+        return std::hash<std::string_view>{}(s.view());
+    }
+
+    struct glaze {
+        using T = basic_number_str;
+        using mimic = std::string_view;
+        static constexpr auto value = &T::view;
+    };
+};
+
+template <typename U>
+basic_number_str(U) -> basic_number_str<32>;
 
 namespace detail {
     constexpr void format_mention(char* buf, std::uint8_t& len, std::string_view prefix, std::uint64_t val) noexcept {
@@ -1018,7 +1141,7 @@ private:
 
         if constexpr (traits::honours_size) {
             if (opts.size && cdn::valid_size(*opts.size)) {
-                add("size", std::to_string(*opts.size));
+                add("size", number_str{*opts.size});
             }
         }
         if (opts.animated && fmt == image_format::webp && is_animated()) {
@@ -1051,7 +1174,7 @@ namespace detail {
     inline void append_size(std::string& out, const opt<std::uint32_t> size) {
         if (size && valid_size(*size)) {
             out += "?size=";
-            out += std::to_string(*size);
+            out += number_str{*size}.view();
         }
     }
 }
@@ -1127,7 +1250,7 @@ namespace detail {
 [[nodiscard]] inline std::string default_user_avatar(const snowflake user_id) {
     std::string out{BASE};
     out += "embed/avatars/";
-    out += std::to_string((user_id.value >> 22) % 6);
+    out += static_cast<char>('0' + ((user_id.value >> 22) % 6));
     out += ".png";
     return out;
 }
@@ -1135,7 +1258,7 @@ namespace detail {
 [[nodiscard]] inline std::string default_user_avatar_legacy(const std::uint16_t discriminator) {
     std::string out{BASE};
     out += "embed/avatars/";
-    out += std::to_string(discriminator % 5);
+    out += static_cast<char>('0' + (discriminator % 5));
     out += ".png";
     return out;
 }
@@ -1336,6 +1459,20 @@ struct std::hash<discusy::snowflake_str> {
 template <>
 struct std::formatter<discusy::snowflake_str> : std::formatter<std::string_view> {
     auto format(const discusy::snowflake_str& s, std::format_context& ctx) const {
+        return std::formatter<std::string_view>::format(s.view(), ctx);
+    }
+};
+
+template <std::size_t N>
+struct std::hash<discusy::basic_number_str<N>> {
+    [[nodiscard]] std::size_t operator()(const discusy::basic_number_str<N>& s) const noexcept {
+        return std::hash<std::string_view>{}(s.view());
+    }
+};
+
+template <std::size_t N>
+struct std::formatter<discusy::basic_number_str<N>> : std::formatter<std::string_view> {
+    auto format(const discusy::basic_number_str<N>& s, std::format_context& ctx) const {
         return std::formatter<std::string_view>::format(s.view(), ctx);
     }
 };
