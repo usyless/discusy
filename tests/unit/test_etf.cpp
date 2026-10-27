@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "sanitized_guild_create_payload.hpp"
 #include <discusy/etf.hpp>
 #include <discusy/types.hpp>
 #include <discusy/gateway_events.hpp>
@@ -22,6 +23,8 @@
 #include <tuple>
 #include <array>
 #include <cstring>
+#include <algorithm>
+#include <ranges>
 
 namespace test_etf_types {
 
@@ -5820,4 +5823,90 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(bool_arr[2] == true);
     }
 }
+
+TEST_CASE("ETF: Live sanitized Discord GUILD_CREATE gateway event payload", "[etf][gateway][guild_create]") {
+    const auto payload = test_payloads::guild_create_etf_view;
+    REQUIRE_FALSE(payload.empty());
+    REQUIRE(payload.size() == 33111);
+
+    SECTION("Fast payload base extraction (skip large d)") {
+        discusy::recieve_event::payload_base base_event{};
+        REQUIRE_FALSE(discusy::etf::parse_payload_base(base_event, payload));
+        CHECK(base_event.op == discusy::Opcode::Dispatch);
+        REQUIRE(base_event.s.has_value());
+        CHECK(*base_event.s == 3);
+        REQUIRE(base_event.t.has_value());
+        CHECK(*base_event.t == discusy::recieve_event::event::GUILD_CREATE);
+    }
+
+    SECTION("Full shard dispatch payload decoding into guild_create") {
+        discusy::recieve_event::payload<discusy::recieve_event::guild_create> dispatch_payload{};
+        discusy::recieve_event::payload_base dispatch_payload_base{};
+        REQUIRE_FALSE(discusy::etf::parse_etf(dispatch_payload_base, payload));
+        REQUIRE_FALSE(discusy::etf::parse_etf(dispatch_payload, payload));
+
+        CHECK(dispatch_payload_base.op == discusy::Opcode::Dispatch);
+        REQUIRE(dispatch_payload_base.s.has_value());
+        CHECK(*dispatch_payload_base.s == 3);
+        REQUIRE(dispatch_payload_base.t.has_value());
+        CHECK(*dispatch_payload_base.t == discusy::recieve_event::event::GUILD_CREATE);
+
+        REQUIRE(std::holds_alternative<discusy::recieve_event::guilds::guild_create_struct>(dispatch_payload.d));
+        const auto& gc = std::get<discusy::recieve_event::guilds::guild_create_struct>(dispatch_payload.d);
+
+        // Top-level guild metadata
+        CHECK(gc.guild.id == discusy::snowflake{100000000000000003ULL});
+        CHECK(gc.guild.name == "name_95");
+        CHECK(gc.guild.owner_id == discusy::snowflake{100000000000000002ULL});
+        CHECK(gc.guild.preferred_locale == "en-US");
+        CHECK(gc.guild.premium_tier == discusy::guild::premium_tier::TIER_1);
+        CHECK(gc.guild.premium_subscription_count == 2);
+        CHECK(gc.guild.system_channel_id == discusy::snowflake{100000000000000001ULL});
+
+        // Collections: roles, channels, emojis, stickers, soundboard
+        CHECK(gc.guild.roles.size() == 51);
+        CHECK(gc.other.channels.size() == 30);
+        CHECK(gc.guild.emojis.size() == 25);
+        REQUIRE(gc.guild.stickers.has_value());
+        CHECK(gc.guild.stickers->size() == 7);
+        CHECK(gc.other.soundboard_sounds.size() == 12);
+        CHECK(gc.other.members.size() == 1);
+        CHECK(gc.other.member_count == 44);
+        CHECK(gc.other.large == false);
+        CHECK(gc.other.unavailable == false);
+
+        // Operator overloads test
+        CHECK(gc->id == gc.guild.id);
+        CHECK(gc->name == gc.guild.name);
+        CHECK(gc().channels.size() == gc.other.channels.size());
+
+        // Validate role structure
+        const auto everyone_it = std::ranges::find_if(gc.guild.roles, [](const auto& r) {
+            return r.name == "@everyone";
+        });
+        REQUIRE(everyone_it != gc.guild.roles.end());
+        CHECK(everyone_it->permissions.has_flag(discusy::permissions::permissions::SEND_MESSAGES));
+
+        // Validate member and role linkage (members[0] is the bot user)
+        const auto& member = gc.other.members[0];
+        REQUIRE(member.user.has_value());
+        CHECK(member.user->id == discusy::snowflake{100000000000000043ULL});
+        CHECK(member.user->username == "username_1");
+        CHECK(member.roles.size() == 2);
+        CHECK(member.roles[0] == discusy::snowflake{100000000000000042ULL});
+        CHECK(member.roles[1] == discusy::snowflake{100000000000000061ULL});
+
+        // Validate channels
+        const auto text_ch_it = std::ranges::find_if(gc.other.channels, [](const auto& ch) {
+            return ch.type == discusy::channel::channel_type::GUILD_TEXT;
+        });
+        REQUIRE(text_ch_it != gc.other.channels.end());
+        CHECK(text_ch_it->id > discusy::snowflake{0});
+
+        // Validate soundboard sounds
+        CHECK(gc.other.soundboard_sounds[0].volume == 1.0);
+        CHECK(gc.other.soundboard_sounds[0].emoji_name == "🍏");
+    }
+}
+
 
