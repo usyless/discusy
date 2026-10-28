@@ -132,12 +132,16 @@ bool is_command_channel(const channel::channel& channel) {
     return channel.type == channel::channel_type::GUILD_TEXT && channel.name && channel.name->starts_with(COMMAND_PREFIX);
 }
 
+bool is_empty_topic(const std::optional<std::string>& topic) {
+    return !topic || topic->empty() || (topic->find_first_not_of(" \t\n\r") == std::string::npos);
+}
+
 static constexpr glz::opts write_opts{
     .prettify = true,
 };
 
 static constexpr glz::opts read_opts{
-    .minified = false
+    .minified = false,
 };
 
 bool save_cache(const std::unique_lock<std::shared_mutex>&) {
@@ -184,7 +188,7 @@ auto force_remake_commands(bot& bot, Token&& token) {
 
     for (const auto& channel : COMMAND_CHANNELS) {
         if (!channel.name || *channel.name == FIND_CHANNEL_NAME) continue;
-        if (!channel.topic) continue;
+        if (is_empty_topic(channel.topic)) continue;
 
         commands.emplace_back(anywhere_slash(
             std::string{command_name_from_channel_name(*channel.name)}, *channel.topic));
@@ -340,72 +344,174 @@ int main(int, char* argv[]) {
             }
 
             bot.gateway_callbacks.on_channel_create([&bot](const recieve_event::channel_create& e) -> void {
-                if (!e.guild_id || !is_command_channel(e) || (*e.guild_id != ::config.SERVER_ID)) return;
+                if (!e.guild_id || !is_command_channel(e) || (*e.guild_id != ::config.SERVER_ID) || !e.name) return;
+
+                const auto command_name = command_name_from_channel_name(*e.name);
+                if (command_name == FIND_COMMAND_NAME) {
+                    std::unique_lock lock(mtx);
+                    if (std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id) == COMMAND_CHANNELS.end()) {
+                        COMMAND_CHANNELS.emplace_back(e);
+                    }
+                    return;
+                }
 
                 bool is_full{false};
                 {
-                std::shared_lock lock(mtx);
-                if (COMMAND_CHANNELS.size() >= MAX_COMMAND_CHANNELS) is_full = true;
+                std::unique_lock lock(mtx);
+                if (COMMAND_CHANNELS.size() >= MAX_COMMAND_CHANNELS) {
+                    is_full = true;
+                } else if (std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id) == COMMAND_CHANNELS.end()) {
+                    COMMAND_CHANNELS.emplace_back(e);
+                }
                 }
 
-                e.send(is_full ? "Max command limit reached!"
-                            : "Please set a channel description to activate the command!")(token::detached);
+                if (is_full) {
+                    e.send("Max command limit reached!")(token::detached);
+                    return;
+                }
+
+                if (is_empty_topic(e.topic)) {
+                    e.send("Please set a channel description to activate the command!")(token::detached);
+                }
             });
 
             bot.gateway_callbacks.on_channel_update([&bot](const recieve_event::channel_update& e) -> void {
                 if (!e.guild_id || (*e.guild_id != ::config.SERVER_ID)) return;
 
-                if (!is_command_channel(e)) return;
-
-                if (!e.topic) {
-                    e.send("No description provided...")(token::detached);
-                    return;
-                }
-
-                const auto command_name = command_name_from_channel_name(*e.name);
-                if (command_name == FIND_COMMAND_NAME) return;
-
-                bool is_full{false};
-                {
-                std::unique_lock lock(mtx);
-                if (COMMAND_CHANNELS.size() >= MAX_COMMAND_CHANNELS) { is_full = true; }
-                else if (std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id) == COMMAND_CHANNELS.end()) { COMMAND_CHANNELS.emplace_back(e); }
-                }
-
-                if (!is_full) {
-                    bot.api.create_global_application_command<false>(
-                        anywhere_slash(std::string{command_name}, e.topic.value_or("How"))
-                    )([&bot, id = e.id, command_name = std::string{command_name}](const auto& resp_ec, auto resp) {
-                        const channel::channel channel{
-                            .id = id,
-                            .bot_ptr_ = &bot,
-                        };
-
-                        if (resp_ec || !resp) {
-                            {
-                            std::unique_lock lock(mtx);
-                            auto channel_it = std::ranges::find(COMMAND_CHANNELS, id, &channel::channel::id);
-                            if (channel_it != COMMAND_CHANNELS.end()) COMMAND_CHANNELS.erase(channel_it);
-                            if (auto it = ::cache.command_images.find(command_name); it != ::cache.command_images.end()) {
+                if (!is_command_channel(e)) {
+                    std::unique_lock lock(mtx);
+                    auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                    if (channel_it != COMMAND_CHANNELS.end()) {
+                        if (channel_it->name) {
+                            const auto old_cmd = command_name_from_channel_name(*channel_it->name);
+                            if (auto it = ::cache.command_images.find(old_cmd); it != ::cache.command_images.end()) {
                                 {
-                                std::scoped_lock dup_lock{dup_mtx};
-                                prevent_duplicates.erase(&it->first);
+                                    std::scoped_lock dup_lock{dup_mtx};
+                                    prevent_duplicates.erase(&it->first);
                                 }
                                 ::cache.command_images.erase(it);
                                 save_cache(lock);
                             }
-                            }
-
-                            channel.send("Failed to create command... Try editing the description again")(token::detached);
-                            return;
                         }
-
-                        channel.send("Updating command!")(token::detached);
-                    });
+                        COMMAND_CHANNELS.erase(channel_it);
+                        lock.unlock();
+                        force_remake_commands(bot, token::detached);
+                    }
                     return;
                 }
 
-                e.send("Unable to create command, max commands reached!")(token::detached);
+                if (!e.name) return;
+
+                const auto command_name = command_name_from_channel_name(*e.name);
+                if (command_name == FIND_COMMAND_NAME) {
+                    std::unique_lock lock(mtx);
+                    auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                    if (channel_it != COMMAND_CHANNELS.end()) {
+                        *channel_it = e;
+                    } else if (COMMAND_CHANNELS.size() < MAX_COMMAND_CHANNELS) {
+                        COMMAND_CHANNELS.emplace_back(e);
+                    }
+                    return;
+                }
+
+                const bool topic_empty_new = is_empty_topic(e.topic);
+
+                std::unique_lock lock(mtx);
+                auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+
+                if (channel_it != COMMAND_CHANNELS.end()) {
+                    const bool topic_empty_old = is_empty_topic(channel_it->topic);
+                    const bool topic_changed = (topic_empty_old != topic_empty_new) || (!topic_empty_old && *channel_it->topic != *e.topic);
+                    const bool name_changed = (channel_it->name != e.name);
+
+                    if (!name_changed && !topic_changed) {
+                        *channel_it = e;
+                        return;
+                    }
+
+                    if (topic_changed && topic_empty_new) {
+                        *channel_it = e;
+                        lock.unlock();
+                        e.send("No description provided...")(token::detached);
+                        force_remake_commands(bot, token::detached);
+                        return;
+                    }
+
+                    if (name_changed) {
+                        if (channel_it->name) {
+                            const auto old_cmd_name = command_name_from_channel_name(*channel_it->name);
+                            if (old_cmd_name != command_name) {
+                                if (auto it = ::cache.command_images.find(old_cmd_name); it != ::cache.command_images.end()) {
+                                    ::cache.command_images[std::string{command_name}] = std::move(it->second);
+                                    {
+                                        std::scoped_lock dup_lock{dup_mtx};
+                                        prevent_duplicates.erase(&it->first);
+                                    }
+                                    ::cache.command_images.erase(it);
+                                    save_cache(lock);
+                                }
+                            }
+                        }
+
+                        *channel_it = e;
+                        lock.unlock();
+                        if (topic_empty_new) {
+                            e.send("Please set a channel description to activate the command!")(token::detached);
+                        } else {
+                            force_remake_commands(bot, token::detached);
+                            e.send("Updating command!")(token::detached);
+                        }
+                        return;
+                    }
+
+                    *channel_it = e;
+                } else {
+                    if (COMMAND_CHANNELS.size() >= MAX_COMMAND_CHANNELS) {
+                        lock.unlock();
+                        e.send("Unable to create command, max commands reached!")(token::detached);
+                        return;
+                    }
+
+                    COMMAND_CHANNELS.emplace_back(e);
+
+                    if (topic_empty_new) {
+                        lock.unlock();
+                        e.send("Please set a channel description to activate the command!")(token::detached);
+                        return;
+                    }
+                }
+
+                lock.unlock();
+
+                bot.api.create_global_application_command<false>(
+                    anywhere_slash(std::string{command_name}, *e.topic)
+                )([&bot, id = e.id, command_name = std::string{command_name}](const auto& resp_ec, auto resp) {
+                    const channel::channel channel{
+                        .id = id,
+                        .bot_ptr_ = &bot,
+                    };
+
+                    if (resp_ec || !resp) {
+                        {
+                        std::unique_lock lock(mtx);
+                        auto channel_it = std::ranges::find(COMMAND_CHANNELS, id, &channel::channel::id);
+                        if (channel_it != COMMAND_CHANNELS.end()) COMMAND_CHANNELS.erase(channel_it);
+                        if (auto it = ::cache.command_images.find(command_name); it != ::cache.command_images.end()) {
+                            {
+                            std::scoped_lock dup_lock{dup_mtx};
+                            prevent_duplicates.erase(&it->first);
+                            }
+                            ::cache.command_images.erase(it);
+                            save_cache(lock);
+                        }
+                        }
+
+                        channel.send("Failed to create command... Try editing the description again")(token::detached);
+                        return;
+                    }
+
+                    channel.send("Updating command!")(token::detached);
+                });
             });
 
             bot.gateway_callbacks.on_channel_delete([&bot, &make_find_channel](const recieve_event::channel_delete& e) -> void {
