@@ -6018,9 +6018,13 @@ case discusy::components::component_type::name: { \
 
 #define GEN_COMPONENT_META(name, macro) \
 template <> \
-struct glz::meta<discusy::components::name> { \
-    using T = discusy::components::name; \
-    static constexpr auto read_fn = [](auto& wrapper, const glz::raw_json& raw, glz::context& ctx) { \
+struct glz::from<glz::JSON, discusy::components::name> { \
+    template <auto Opts> \
+    static void op(auto& wrapper, glz::is_context auto&& ctx, auto&& it, auto end) { \
+        glz::raw_json_view raw; \
+        glz::parse<glz::JSON>::template op<Opts>(raw, ctx, it, end); \
+        if (static_cast<bool>(ctx.error)) [[unlikely]] return; \
+        \
         discusy::components::type_extractor ext; \
         \
         static constexpr glz::opts opts{ \
@@ -6043,9 +6047,17 @@ struct glz::meta<discusy::components::name> { \
                 return; \
             } \
         } \
-    }; \
-    static constexpr auto write_fn = [](const T& wrapper) -> const typename T::variant_base& { return static_cast<const typename T::variant_base&>(wrapper); }; \
-    static constexpr auto value = glz::custom<read_fn, write_fn>; \
+    } \
+}; \
+template <> \
+struct glz::to<glz::JSON, discusy::components::name> { \
+    template <auto Opts> \
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&&... args) { \
+        glz::to<glz::JSON, discusy::components::name::variant_base>::template op<Opts>( \
+            static_cast<const discusy::components::name::variant_base&>(wrapper), \
+            ctx, std::forward<decltype(args)>(args)... \
+        ); \
+    } \
 };
 
 #pragma push_macro("DISCUSY_D")
@@ -6151,9 +6163,13 @@ GEN_COMPONENT_ETF(label_child_component, LABEL_CHILD_COMPONENTS)
 #undef DISCUSY_X
 
 template <>
-struct glz::meta<discusy::interaction::component_interaction_response> {
-    using T = discusy::interaction::component_interaction_response;
-    static constexpr auto read_fn = [](auto& wrapper, const glz::raw_json& raw, glz::context& ctx) {
+struct glz::from<glz::JSON, discusy::interaction::component_interaction_response> {
+    template <auto Opts>
+    static void op(auto& wrapper, glz::is_context auto&& ctx, auto&& it, auto end) {
+        glz::raw_json_view raw;
+        glz::parse<glz::JSON>::template op<Opts>(raw, ctx, it, end);
+        if (static_cast<bool>(ctx.error)) [[unlikely]] return;
+
         discusy::components::ir_type_extractor ext;
 
         static constexpr glz::opts opts{
@@ -6200,9 +6216,18 @@ struct glz::meta<discusy::interaction::component_interaction_response> {
                 return;
             }
         }
-    };
-    static constexpr auto write_fn = [](const T& wrapper) -> const typename T::variant_base& { return static_cast<const T::variant_base&>(wrapper); };
-    static constexpr auto value = glz::custom<read_fn, write_fn>;
+    }
+};
+
+template <>
+struct glz::to<glz::JSON, discusy::interaction::component_interaction_response> {
+    template <auto Opts>
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&&... args) {
+        glz::to<glz::JSON, discusy::interaction::component_interaction_response::variant_base>::template op<Opts>(
+            static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
+            ctx, std::forward<decltype(args)>(args)...
+        );
+    }
 };
 
 #ifdef DISCUSY_USE_ETF

@@ -1,3 +1,6 @@
+#ifndef DISCUSY_USE_ETF
+#define DISCUSY_USE_ETF
+#endif
 #include <catch2/catch_test_macros.hpp>
 #include <discusy/events.hpp>
 #include <discusy/json.hpp>
