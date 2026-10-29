@@ -1035,6 +1035,7 @@ namespace guild {
         static constexpr std::string_view NEWS = "NEWS";
         static constexpr std::string_view PARTNERED = "PARTNERED";
         static constexpr std::string_view PREVIEW_ENABLED = "PREVIEW_ENABLED";
+        static constexpr std::string_view PRUNE_REQUIRES_ADMIN = "PRUNE_REQUIRES_ADMIN";
         static constexpr std::string_view RAID_ALERTS_DISABLED = "RAID_ALERTS_DISABLED";
         static constexpr std::string_view ROLE_ICONS = "ROLE_ICONS";
         static constexpr std::string_view ROLE_SUBSCRIPTIONS_AVAILABLE_FOR_PURCHASE = "ROLE_SUBSCRIPTIONS_AVAILABLE_FOR_PURCHASE";
@@ -1468,6 +1469,7 @@ namespace channel {
         opt<thread_member> member{};
         opt<integer> default_auto_archive_duration{};
         opt<permissions_t> permissions{};
+        opt<permissions_t> app_permissions{};
         opt<flags_t<channel_flags>> flags{};
         opt<integer> total_message_sent{};
         opt<std::vector<forum_tag>> available_tags{};
@@ -1530,6 +1532,13 @@ namespace channel {
             return std::forward<decltype(self)>(self);
         }
         decltype(auto) add_permissions(this auto&& self, permissions::permissions p) noexcept { return std::forward<decltype(self)>(self).add_permission(p); }
+        decltype(auto) set_app_permissions(this auto&& self, opt<permissions_t> app_permissions_) noexcept { self.app_permissions = app_permissions_; return std::forward<decltype(self)>(self); }
+        decltype(auto) add_app_permission(this auto&& self, permissions::permissions p) noexcept {
+            if (!self.app_permissions) self.app_permissions.emplace();
+            self.app_permissions->add_flags(p);
+            return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_app_permissions(this auto&& self, permissions::permissions p) noexcept { return std::forward<decltype(self)>(self).add_app_permission(p); }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<channel_flags>> flags_) noexcept { self.flags = flags_; return std::forward<decltype(self)>(self); }
         decltype(auto) add_flags(this auto&& self, channel_flags f) noexcept {
             if (!self.flags) self.flags.emplace();
@@ -3259,6 +3268,7 @@ namespace message {
         article, // article embed
         link, // link embed
         poll_result, // poll result embed
+        components, // link preview built from Discord components
     };
 
     enum class embed_media_flags : std::uint8_t {
@@ -5741,6 +5751,7 @@ namespace lobby {
         snowflake id{};
         opt<lobby_metadata> metadata{}; // nullable
         opt<flags_t<lobby_member_flags>> flags{};
+        opt<std::string> additional_name{};
 
         static lobby_member create(snowflake id_ = {}) noexcept {
             return lobby_member{.id = id_};
@@ -5754,6 +5765,7 @@ namespace lobby {
             return std::forward<decltype(self)>(self);
         }
         decltype(auto) add_flag(this auto&& self, lobby_member_flags f) noexcept { return std::forward<decltype(self)>(self).add_flags(f); }
+        decltype(auto) set_additional_name(this auto&& self, opt<std::string> additional_name_) { self.additional_name = std::move(additional_name_); return std::forward<decltype(self)>(self); }
     };
 
     struct lobby {
@@ -5885,7 +5897,7 @@ template <>
 struct glz::meta<discusy::message::embed_type> {
     using enum discusy::message::embed_type;
     static constexpr auto value = glz::enumerate(
-        rich, image, video, gifv, article, link, poll_result
+        rich, image, video, gifv, article, link, poll_result, components
     );
 };
 

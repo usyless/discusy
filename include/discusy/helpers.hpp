@@ -125,6 +125,9 @@ namespace discusy::helpers {
 [[nodiscard]] inline std::string mention(const discusy::application_commands::application_command& cmd) {
     return cmd.mention();
 }
+[[nodiscard]] inline constexpr snowflake_mention_str mention_game(const snowflake id) noexcept {
+    return id.mention_game();
+}
 
 // command options
 

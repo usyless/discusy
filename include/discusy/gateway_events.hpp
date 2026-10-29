@@ -152,6 +152,7 @@ struct ready_application_partial {
     // Application ID
     snowflake id{};
     opt<flags_t<discusy::application::application_flags>> flags{};
+    opt<flags_t<discusy::application::application_flags, flags_type::string>> flags_new{};
 };
 
 struct ready {

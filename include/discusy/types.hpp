@@ -163,6 +163,7 @@ struct snowflake {
     [[nodiscard]] constexpr snowflake_mention_str mention_user() const noexcept;
     [[nodiscard]] constexpr snowflake_mention_str mention_channel() const noexcept;
     [[nodiscard]] constexpr snowflake_mention_str mention_role() const noexcept;
+    [[nodiscard]] constexpr snowflake_mention_str mention_game() const noexcept;
     [[nodiscard]] inline std::string mention_command(std::string_view name) const;
     [[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view subcommand) const;
     [[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view group, std::string_view subcommand) const;
@@ -545,6 +546,12 @@ constexpr snowflake_mention_str snowflake::mention_channel() const noexcept {
 constexpr snowflake_mention_str snowflake::mention_role() const noexcept {
     snowflake_mention_str res{};
     detail::format_mention(res.buf.data(), res.len, "<@&", value);
+    return res;
+}
+
+constexpr snowflake_mention_str snowflake::mention_game() const noexcept {
+    snowflake_mention_str res{};
+    detail::format_mention(res.buf.data(), res.len, "<@$", value);
     return res;
 }
 

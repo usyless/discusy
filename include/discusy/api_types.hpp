@@ -3101,6 +3101,7 @@ namespace lobby {
         snowflake id{};
         opt<discusy::lobby::lobby_metadata> metadata{};
         opt<flags_t<discusy::lobby::lobby_member_flags>> flags{};
+        opt<explicit_null<std::string>> additional_name{};
 
         static lobby_member_request create(snowflake id_ = {}) noexcept {
             return lobby_member_request{.id = id_};
@@ -3108,6 +3109,8 @@ namespace lobby {
         decltype(auto) set_id(this auto&& self, snowflake id_) noexcept { self.id = id_; return std::forward<decltype(self)>(self); }
         decltype(auto) set_metadata(this auto&& self, opt<discusy::lobby::lobby_metadata> m) { self.metadata = std::move(m); return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<discusy::lobby::lobby_member_flags>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
+        decltype(auto) set_additional_name(this auto&& self, opt<explicit_null<std::string>> an) { self.additional_name = std::move(an); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_additional_name(this auto&& self, std::string an) { self.additional_name = explicit_null<std::string>{std::move(an)}; return std::forward<decltype(self)>(self); }
     };
 
     struct bulk_lobby_member_request {
@@ -3115,6 +3118,7 @@ namespace lobby {
         opt<discusy::lobby::lobby_metadata> metadata{};
         opt<flags_t<discusy::lobby::lobby_member_flags>> flags{};
         opt<bool> remove_member{};
+        opt<explicit_null<std::string>> additional_name{};
 
         static bulk_lobby_member_request create(snowflake id_ = {}) noexcept {
             return bulk_lobby_member_request{.id = id_};
@@ -3123,6 +3127,8 @@ namespace lobby {
         decltype(auto) set_metadata(this auto&& self, opt<discusy::lobby::lobby_metadata> m) { self.metadata = std::move(m); return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<discusy::lobby::lobby_member_flags>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
         decltype(auto) set_remove_member(this auto&& self, opt<bool> rm) noexcept { self.remove_member = rm; return std::forward<decltype(self)>(self); }
+        decltype(auto) set_additional_name(this auto&& self, opt<explicit_null<std::string>> an) { self.additional_name = std::move(an); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_additional_name(this auto&& self, std::string an) { self.additional_name = explicit_null<std::string>{std::move(an)}; return std::forward<decltype(self)>(self); }
     };
 
     struct create_lobby {
@@ -3181,12 +3187,14 @@ namespace lobby {
     struct add_lobby_member {
         opt<discusy::lobby::lobby_metadata> metadata{};
         opt<flags_t<discusy::lobby::lobby_member_flags>> flags{};
+        opt<std::string> additional_name{};
 
         static add_lobby_member create() noexcept {
             return add_lobby_member{};
         }
         decltype(auto) set_metadata(this auto&& self, opt<discusy::lobby::lobby_metadata> m) { self.metadata = std::move(m); return std::forward<decltype(self)>(self); }
         decltype(auto) set_flags(this auto&& self, opt<flags_t<discusy::lobby::lobby_member_flags>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
+        decltype(auto) set_additional_name(this auto&& self, opt<std::string> an) { self.additional_name = std::move(an); return std::forward<decltype(self)>(self); }
     };
 
     using bulk_update_lobby_members = std::span<const bulk_lobby_member_request>;
@@ -3479,6 +3487,7 @@ namespace user {
         opt<snowflake> before{};
         opt<snowflake> after{};
         opt<integer> limit{};
+        opt<integer> shard{};
         opt<bool> with_counts{};
 
         static get_current_user_guilds_query create() noexcept {
@@ -3487,6 +3496,7 @@ namespace user {
         decltype(auto) set_before(this auto&& self, opt<snowflake> b) noexcept { self.before = b; return std::forward<decltype(self)>(self); }
         decltype(auto) set_after(this auto&& self, opt<snowflake> a) noexcept { self.after = a; return std::forward<decltype(self)>(self); }
         decltype(auto) set_limit(this auto&& self, opt<integer> l) noexcept { self.limit = l; return std::forward<decltype(self)>(self); }
+        decltype(auto) set_shard(this auto&& self, opt<integer> s) noexcept { self.shard = s; return std::forward<decltype(self)>(self); }
         decltype(auto) set_with_counts(this auto&& self, opt<bool> wc) noexcept { self.with_counts = wc; return std::forward<decltype(self)>(self); }
     };
 
