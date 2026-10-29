@@ -6016,7 +6016,7 @@ case discusy::components::component_type::name: { \
 template <> \
 struct glz::meta<discusy::components::name> { \
     using T = discusy::components::name; \
-    static constexpr auto read_fn = [](T& wrapper, const glz::raw_json& raw, glz::context& ctx) { \
+    static constexpr auto read_fn = [](auto& wrapper, const glz::raw_json& raw, glz::context& ctx) { \
         discusy::components::type_extractor ext; \
         \
         static constexpr glz::opts opts{ \
