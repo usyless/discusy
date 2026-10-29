@@ -11,7 +11,9 @@
 #include <concepts>
 
 #include <glaze/glaze.hpp>
+#ifdef DISCUSY_USE_ETF
 #include <etf/etf.hpp>
+#endif
 
 #include "types.hpp"
 #include "io_context.hpp"
@@ -5909,6 +5911,7 @@ struct glz::meta<discusy::components::select_default_value_type> {
     );
 };
 
+#ifdef DISCUSY_USE_ETF
 namespace discusy::components::detail {
 
 template <auto Opts, typename It0, typename It1>
@@ -5997,6 +6000,7 @@ template <auto Opts, typename It0, typename It1>
 }
 
 }
+#endif
 
 #define DISCUSY_X(name, ...) \
 case discusy::components::component_type::name: { \
@@ -6054,6 +6058,7 @@ GEN_COMPONENT_META(section_accessory, SECTION_ACCESSORY)
 GEN_COMPONENT_META(container_child_component, CONTAINER_CHILD_COMPONENTS)
 GEN_COMPONENT_META(label_child_component, LABEL_CHILD_COMPONENTS)
 
+#ifdef DISCUSY_USE_ETF
 #pragma push_macro("DISCUSY_X")
 #undef DISCUSY_X
 #define DISCUSY_X(name, ...) \
@@ -6126,6 +6131,7 @@ GEN_COMPONENT_ETF(label_child_component, LABEL_CHILD_COMPONENTS)
 #pragma pop_macro("GEN_COMPONENT_ETF")
 #undef DISCUSY_X
 #pragma pop_macro("DISCUSY_X")
+#endif
 
 #undef DISCUSY_D
 #pragma pop_macro("DISCUSY_D")
@@ -6147,7 +6153,7 @@ GEN_COMPONENT_ETF(label_child_component, LABEL_CHILD_COMPONENTS)
 template <>
 struct glz::meta<discusy::interaction::component_interaction_response> {
     using T = discusy::interaction::component_interaction_response;
-    static constexpr auto read_fn = [](T& wrapper, const glz::raw_json& raw, glz::context& ctx) {
+    static constexpr auto read_fn = [](auto& wrapper, const glz::raw_json& raw, glz::context& ctx) {
         discusy::components::ir_type_extractor ext;
 
         static constexpr glz::opts opts{
@@ -6199,6 +6205,7 @@ struct glz::meta<discusy::interaction::component_interaction_response> {
     static constexpr auto value = glz::custom<read_fn, write_fn>;
 };
 
+#ifdef DISCUSY_USE_ETF
 template <>
 struct glz::from<glz::EETF, discusy::interaction::component_interaction_response> {
     template <auto Opts>
@@ -6262,6 +6269,7 @@ struct glz::to<glz::EETF, discusy::interaction::component_interaction_response> 
         );
     }
 };
+#endif
 
 #undef COMMAND_INTERACTION_RESPONSE
 #pragma pop_macro("COMMAND_INTERACTION_RESPONSE")
