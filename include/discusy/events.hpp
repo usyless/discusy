@@ -3189,7 +3189,10 @@ namespace message {
         IS_THUMBNAIL = 1ULL << 1, // this attachment is the thumbnail of a thread in a media channel, displayed in the grid but not on the message
         IS_REMIX = 1ULL << 2, // this attachment has been edited using the remix feature on mobile (deprecated)
         IS_SPOILER = 1ULL << 3, // this attachment was marked as a spoiler and is blurred until clicked
+        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4, // this attachment was flagged as explicit by Discord's content scanning
         IS_ANIMATED = 1ULL << 5, // this attachment is an animated image
+        CONTAINS_GORE_CONTENT = 1ULL << 6, // this attachment was flagged as gore by Discord's content scanning
+        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7, // this attachment was flagged as self-harm by Discord's content scanning
     };
 
 
@@ -3396,7 +3399,10 @@ namespace message {
     };
 
     enum class embed_flags : std::uint8_t {
+        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4, // this embed's media was flagged as explicit by Discord's content scanning
         IS_CONTENT_INVENTORY_ENTRY = 1ULL << 5, // this embed is a fallback for a reply to an activity card
+        CONTAINS_GORE_CONTENT = 1ULL << 6, // this embed's media was flagged as gore by Discord's content scanning
+        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7, // this embed's media was flagged as self-harm by Discord's content scanning
     };
 
     struct embed {
@@ -3720,6 +3726,12 @@ namespace components {
 
     enum class unfurled_media_item_flags : std::uint8_t {
         IS_ANIMATED = 1ULL << 0, // This image is animated
+    };
+
+    enum class content_scan_metadata_flags : std::uint8_t {
+        IS_EXPLICIT_CONTENT = 1ULL << 0, // This media was flagged as explicit by Discord's content scanning
+        IS_GORE_CONTENT = 1ULL << 1, // This media was flagged as gore by Discord's content scanning
+        IS_SELF_HARM_CONTENT = 1ULL << 2, // This media was flagged as self-harm by Discord's content scanning
     };
 
     enum class separator_spacing : std::uint8_t {
@@ -4073,6 +4085,21 @@ namespace components {
         decltype(auto) set_spacing(this auto&& self, opt<separator_spacing> spacing_) noexcept { self.spacing = spacing_; return std::forward<decltype(self)>(self); }
     };
 
+    struct content_scan_metadata {
+        opt<flags_t<content_scan_metadata_flags>> flags{};
+
+        static content_scan_metadata create(opt<flags_t<content_scan_metadata_flags>> flags_ = {}) noexcept {
+            return content_scan_metadata{.flags = flags_};
+        }
+        decltype(auto) set_flags(this auto&& self, opt<flags_t<content_scan_metadata_flags>> flags_) noexcept { self.flags = flags_; return std::forward<decltype(self)>(self); }
+        decltype(auto) add_flags(this auto&& self, content_scan_metadata_flags f) noexcept {
+            if (!self.flags) self.flags.emplace();
+            self.flags->add_flags(f);
+            return std::forward<decltype(self)>(self);
+        }
+        decltype(auto) add_flag(this auto&& self, content_scan_metadata_flags f) noexcept { return std::forward<decltype(self)>(self).add_flags(f); }
+    };
+
     struct unfurled_media_item {
         std::string url{};
         opt<std::string> proxy_url{};
@@ -4082,6 +4109,7 @@ namespace components {
         opt<integer> placeholder_version{};
         opt<std::string> content_type{};
         opt<flags_t<unfurled_media_item_flags>> flags{};
+        opt<components::content_scan_metadata> content_scan_metadata{};
         opt<snowflake> attachment_id{};
 
         static unfurled_media_item create(std::string url_ = {}) {
@@ -4101,6 +4129,7 @@ namespace components {
             return std::forward<decltype(self)>(self);
         }
         decltype(auto) add_flag(this auto&& self, unfurled_media_item_flags f) noexcept { return std::forward<decltype(self)>(self).add_flags(f); }
+        decltype(auto) set_content_scan_metadata(this auto&& self, opt<components::content_scan_metadata> content_scan_metadata_) { self.content_scan_metadata = std::move(content_scan_metadata_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_attachment_id(this auto&& self, opt<snowflake> attachment_id_) noexcept { self.attachment_id = attachment_id_; return std::forward<decltype(self)>(self); }
         decltype(auto) set_attachment(this auto&& self, opt<snowflake> id_) noexcept { return std::forward<decltype(self)>(self).set_attachment_id(id_); }
     };
