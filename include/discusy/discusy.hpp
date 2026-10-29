@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -892,13 +893,8 @@ private:
         return conf;
     }
 
-    config setup_cfg(config& conf, [[maybe_unused]] bool add_voice_intent) {
-        if (conf.threads < 1) {
-            conf.threads = 1;
-            #ifdef DISCUSY_LOGGING
-            log("Less than 1 thread provided, setting to 1 thread");
-            #endif
-        }
+    static config setup_cfg(config& conf, [[maybe_unused]] bool add_voice_intent) {
+        conf.threads = std::max<std::uint32_t>(conf.threads, 1);
         #ifdef DISCUSY_VOICE
         if (add_voice_intent) conf.intents |= discusy::voice::client<bot>::required_intents;
         #endif
@@ -928,12 +924,7 @@ private:
         state_.bot_ptr = this;
         state_.gateway_callbacks.set_bot(this);
 
-        if (cfg_.threads < 1) {
-            cfg_.threads = 1;
-            #ifdef DISCUSY_LOGGING
-            log("Less than 1 thread provided, setting to 1 thread");
-            #endif
-        }
+        cfg_.threads = std::max<std::uint32_t>(cfg_.threads, 1);
         if (cfg_.initial_presence) {
             state_.presence.store(std::make_shared<const send_event::update_presence>(std::move(*cfg_.initial_presence)), std::memory_order_release);
         }
