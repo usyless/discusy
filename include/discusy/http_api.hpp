@@ -848,7 +848,7 @@ public:
     )
 
     // https://docs.discord.com/developers/resources/guild#modify-guild-channel-positions
-    DISCUSY_API_JSON_BODY(
+    DISCUSY_API_JSON_BODY_REASON(
         modify_guild_channel_positions,
         patch,
         void,

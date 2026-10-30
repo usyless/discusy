@@ -1581,7 +1581,6 @@ namespace guild {
         opt<explicit_null<integer>> position{};
         opt<explicit_null<bool>> lock_permissions{};
         opt<explicit_null<snowflake>> parent_id{};
-        opt<explicit_null<flags_t<discusy::channel::channel_flags>>> flags{};
 
         static modify_guild_channel_position create(snowflake id_ = {}) noexcept {
             return modify_guild_channel_position{.id = id_};
@@ -1590,7 +1589,6 @@ namespace guild {
         decltype(auto) set_position(this auto&& self, opt<explicit_null<integer>> pos) noexcept { self.position = pos; return std::forward<decltype(self)>(self); }
         decltype(auto) set_lock_permissions(this auto&& self, opt<explicit_null<bool>> lp) noexcept { self.lock_permissions = lp; return std::forward<decltype(self)>(self); }
         decltype(auto) set_parent_id(this auto&& self, opt<explicit_null<snowflake>> pid) noexcept { self.parent_id = pid; return std::forward<decltype(self)>(self); }
-        decltype(auto) set_flags(this auto&& self, opt<explicit_null<flags_t<discusy::channel::channel_flags>>> f) noexcept { self.flags = f; return std::forward<decltype(self)>(self); }
     };
 
     using modify_guild_channel_positions = std::span<const modify_guild_channel_position>;

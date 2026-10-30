@@ -2426,6 +2426,7 @@ namespace audit_log {
         CHANNEL_OVERWRITE_CREATE = 13, // Permission overwrite was added to a channel	Channel Overwrite
         CHANNEL_OVERWRITE_UPDATE = 14, // Permission overwrite was updated for a channel	Channel Overwrite
         CHANNEL_OVERWRITE_DELETE = 15, // Permission overwrite was deleted from a channel	Channel Overwrite
+        CHANNEL_POSITION_UPDATE = 16, // Channels were reordered
         MEMBER_KICK = 20, // Member was removed from server	
         MEMBER_PRUNE = 21, // Members were pruned from server	
         MEMBER_BAN_ADD = 22, // Member was banned from server	
@@ -2438,6 +2439,7 @@ namespace audit_log {
         ROLE_CREATE = 30, // Role was created	Role
         ROLE_UPDATE = 31, // Role was edited	Role
         ROLE_DELETE = 32, // Role was deleted	Role
+        ROLE_POSITION_UPDATE = 33, // Roles were reordered
         INVITE_CREATE = 40, // Server invite was created	Invite and Invite Metadata*
         INVITE_UPDATE = 41, // Server invite was updated	Invite and Invite Metadata*
         INVITE_DELETE = 42, // Server invite was deleted	Invite and Invite Metadata*
