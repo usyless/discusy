@@ -622,6 +622,24 @@ public:
         const discusy::snowflake channel_id, const discusy::snowflake overwrite_id
     )
 
+    // https://docs.discord.com/developers/resources/channel#get-channel-member-permissions
+    DISCUSY_API_EMPTY_BODY(
+        get_channel_member_permissions,
+        get,
+        discusy::permissions::permissions_response,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/permissions/member/", user_id.stack_str(), make_query_string(query)),
+        const discusy::snowflake channel_id, const discusy::snowflake user_id, const discusy::api::channels::get_channel_permissions_query& query = {}
+    )
+
+    // https://docs.discord.com/developers/resources/channel#get-channel-role-permissions
+    DISCUSY_API_EMPTY_BODY(
+        get_channel_role_permissions,
+        get,
+        discusy::permissions::permissions_response,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/channels/", channel_id.stack_str(), "/permissions/role/", role_id.stack_str(), make_query_string(query)),
+        const discusy::snowflake channel_id, const discusy::snowflake role_id, const discusy::api::channels::get_channel_permissions_query& query = {}
+    )
+
     // https://docs.discord.com/developers/resources/channel#follow-announcement-channel
     DISCUSY_API_JSON_BODY_REASON(
         follow_announcement_channel,
@@ -893,6 +911,15 @@ public:
         const discusy::snowflake guild_id, const discusy::api::guild::search_guild_members_query& query
     )
 
+    // https://docs.discord.com/developers/resources/guild#get-guild-member-permissions
+    DISCUSY_API_EMPTY_BODY(
+        get_guild_member_permissions,
+        get,
+        discusy::permissions::permissions_response,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/permissions/member/", user_id.stack_str()),
+        const discusy::snowflake guild_id, const discusy::snowflake user_id
+    )
+
     // https://docs.discord.com/developers/resources/guild#add-guild-member
     DISCUSY_API_JSON_BODY(
         add_guild_member,
@@ -1013,6 +1040,15 @@ public:
         get,
         discusy::permissions::role,
         ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/roles/", role_id.stack_str()),
+        const discusy::snowflake guild_id, const discusy::snowflake role_id
+    )
+
+    // https://docs.discord.com/developers/resources/guild#get-guild-role-permissions
+    DISCUSY_API_EMPTY_BODY(
+        get_guild_role_permissions,
+        get,
+        discusy::permissions::permissions_response,
+        ulp::str::concat_strings(discusy::urls::REST_BASE, "/guilds/", guild_id.stack_str(), "/permissions/role/", role_id.stack_str()),
         const discusy::snowflake guild_id, const discusy::snowflake role_id
     )
 
@@ -1261,7 +1297,7 @@ public:
     )
 
     // https://docs.discord.com/developers/resources/message#delete-message
-    DISCUSY_API_EMPTY_BODY_REASON(
+    DISCUSY_API_EMPTY_BODY(
         delete_message,
         delete_,
         void,

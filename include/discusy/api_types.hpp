@@ -1363,6 +1363,19 @@ namespace channels {
         decltype(auto) set_before(this auto&& self, opt<snowflake> b) noexcept { self.before = b; return std::forward<decltype(self)>(self); }
         decltype(auto) set_limit(this auto&& self, opt<integer> l) noexcept { self.limit = l; return std::forward<decltype(self)>(self); }
     };
+
+    struct get_channel_permissions_query {
+        opt<bool> implicit{};
+
+        static get_channel_permissions_query create(opt<bool> implicit_ = {}) noexcept {
+            return get_channel_permissions_query{.implicit = implicit_};
+        }
+        decltype(auto) set_implicit(this auto&& self, opt<bool> i) noexcept { self.implicit = i; return std::forward<decltype(self)>(self); }
+    };
+
+    using get_channel_member_permissions_query = get_channel_permissions_query;
+    using get_channel_role_permissions_query = get_channel_permissions_query;
+    using get_channel_permissions_response = discusy::permissions::permissions_response;
 }
 
 namespace guild {
@@ -1980,6 +1993,8 @@ namespace guild {
         decltype(auto) set_invites_disabled_until(this auto&& self, opt<explicit_null<timestamp>> idu) noexcept { self.invites_disabled_until = idu; return std::forward<decltype(self)>(self); }
         decltype(auto) set_dms_disabled_until(this auto&& self, opt<explicit_null<timestamp>> ddu) noexcept { self.dms_disabled_until = ddu; return std::forward<decltype(self)>(self); }
     };
+
+    using get_guild_permissions_response = discusy::permissions::permissions_response;
 }
 
 namespace webhook {
@@ -3582,6 +3597,11 @@ namespace oauth2 {
         decltype(auto) set_user(this auto&& self, opt<discusy::user::user> user_) { self.user = std::move(user_); return std::forward<decltype(self)>(self); }
     };
 }
+
+using discusy::permissions::permissions_response;
+using channels::get_channel_permissions_query;
+using get_channel_member_permissions_query = channels::get_channel_permissions_query;
+using get_channel_role_permissions_query = channels::get_channel_permissions_query;
 }
 
 template <>

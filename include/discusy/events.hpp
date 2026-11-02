@@ -332,14 +332,16 @@ namespace user {
 
     struct application_role_connection {
         opt<std::string> platform_name{};
-        std::unordered_map<std::string, application_role_connection_metadata::application_role_connection_metadata> metadata{};
+        opt<std::string> platform_username{};
+        std::unordered_map<std::string, std::string> metadata{};
 
-        static application_role_connection create(opt<std::string> platform_name_ = {}) {
-            return application_role_connection{.platform_name = std::move(platform_name_)};
+        static application_role_connection create(opt<std::string> platform_name_ = {}, opt<std::string> platform_username_ = {}) {
+            return application_role_connection{.platform_name = std::move(platform_name_), .platform_username = std::move(platform_username_)};
         }
         decltype(auto) set_platform_name(this auto&& self, opt<std::string> platform_name_) { self.platform_name = std::move(platform_name_); return std::forward<decltype(self)>(self); }
-        decltype(auto) set_metadata(this auto&& self, std::unordered_map<std::string, application_role_connection_metadata::application_role_connection_metadata> metadata_) { self.metadata = std::move(metadata_); return std::forward<decltype(self)>(self); }
-        decltype(auto) add_metadata(this auto&& self, std::string k, application_role_connection_metadata::application_role_connection_metadata v) {
+        decltype(auto) set_platform_username(this auto&& self, opt<std::string> platform_username_) { self.platform_username = std::move(platform_username_); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_metadata(this auto&& self, std::unordered_map<std::string, std::string> metadata_) { self.metadata = std::move(metadata_); return std::forward<decltype(self)>(self); }
+        decltype(auto) add_metadata(this auto&& self, std::string k, std::string v) {
             self.metadata[std::move(k)] = std::move(v);
             return std::forward<decltype(self)>(self);
         }
@@ -559,7 +561,25 @@ namespace permissions {
             return self.id.mention_role();
         }
     };
+
+    struct permissions_response {
+        permissions_t permissions{};
+
+        static permissions_response create(permissions_t permissions_ = {}) noexcept {
+            return permissions_response{.permissions = permissions_};
+        }
+        decltype(auto) set_permissions(this auto&& self, permissions_t p) noexcept { self.permissions = p; return std::forward<decltype(self)>(self); }
+        decltype(auto) add_permission(this auto&& self, discusy::permissions::permissions p) noexcept { self.permissions.add_flags(p); return std::forward<decltype(self)>(self); }
+        decltype(auto) add_permissions(this auto&& self, discusy::permissions::permissions p) noexcept { return std::forward<decltype(self)>(self).add_permission(p); }
+
+        [[nodiscard]] constexpr operator permissions_t() const noexcept { return permissions; }
+        [[nodiscard]] constexpr bool has_flags(const discusy::permissions::permissions p) const noexcept { return permissions.has_flags(p); }
+        [[nodiscard]] constexpr bool has_flag(const discusy::permissions::permissions p) const noexcept { return permissions.has_flag(p); }
+        [[nodiscard]] constexpr bool has_any_flags(const discusy::permissions::permissions p) const noexcept { return permissions.has_any_flags(p); }
+    };
 }
+
+using permissions::permissions_response;
 
 namespace guild {
     struct integration_account {
