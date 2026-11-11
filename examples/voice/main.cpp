@@ -178,12 +178,12 @@ int main() {
                 co_return;
             }
 
-            e.reply<false>("Playing 440 Hz test tone for 3 seconds... \xF0\x9F\x8E\xB5")(token::detached);
+            e.reply<false>("Playing 440 Hz test tone for 10 seconds... \xF0\x9F\x8E\xB5")(token::detached);
 
             // Generate PCM 48kHz stereo sine wave and transmit asynchronously
             // This method has a bit more overhead than the synchronous send_pcm however it will not block the main thread
             // for as long, as it will chunk up the encode and post itself to the back of the queue occasionally
-            it->second->send_pcm_async(generate_sine_wave(3.0, 440.0))(token::detached);
+            it->second->send_pcm_async(generate_sine_wave(10.0, 440.0))(token::detached);
             // The usage here is technically not valid, as it allows multiple waves to interleave, however in the case of this example it is fine,
             // as it is running single threaded and the audio is a single tone so every frame is the same which will not confuse the opus encoder
         }
