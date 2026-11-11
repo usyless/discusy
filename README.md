@@ -4,7 +4,7 @@
 
 A modern, high-performance and stable C++23 Discord bot library built around **Boost.Asio** for its networking, asynchronous model and coroutine support.
 
-All of the bot facing Discord API is covered and accessible, with types matching it identically for documentation re-usability. Up to date with [discord-api-docs](https://github.com/discord/discord-api-docs) commit [`da52492`](https://github.com/discord/discord-api-docs/commit/da52492ced82d375981c46618cc3e182daada9a2).
+All of the bot facing Discord API is covered and accessible, with types matching it identically for documentation re-usability. Up to date with [discord-api-docs](https://github.com/discord/discord-api-docs) commit [`36adecb`](https://github.com/discord/discord-api-docs/commit/36adecb2383c84beecbe676a02b1f14ec0a996df).
 
 ## Features
 - Discord API v10 with [zstd](https://github.com/facebook/zstd) + voice API v8 with [DAVE](https://github.com/discord/libdave)

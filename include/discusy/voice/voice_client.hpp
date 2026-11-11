@@ -566,7 +566,7 @@ private:
                 #endif
                 return finish(std::move(self_ptr), e.code(), nullptr);
             }
-            catch (const std::bad_alloc& e) {
+            catch ([[maybe_unused]] const std::bad_alloc& e) {
                 #ifdef DISCUSY_LOGGING
                 log::Logger{}("[voice_client] bad_alloc: {}", e.what());
                 #endif
