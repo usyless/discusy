@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 #include <version>
-#include <set>
+#include <flat_set>
 
 #include <sodium.h>
 #include <opus.h>
@@ -222,7 +222,7 @@ public:
         hb_timer_{strand_},
         reconnect_timeout_timer_{strand_},
         refresh_watchdog_{strand_},
-        recognised_users_{std::string{user_id.str()}}, // initialise with bot itself as user
+        recognised_users_{}, // initialise with bot itself as user
         server_id_{server_id},
         channel_id_{channel_id.value},
         user_id_{user_id},
@@ -269,8 +269,8 @@ public:
                 c.channel_id_.store(new_channel_id.value);
 
                 c.recognised_users_.clear();
-                c.recognised_users_.emplace(c.user_id_str_);
                 c.drop_dave_keys();
+                c.dave_.create_session();
 
                 #ifdef DISCUSY_LOGGING
                 c.log("Moved to channel {}, recognised users and DAVE keys reset", new_channel_id.value);
@@ -297,8 +297,8 @@ public:
                 c.channel_id_.store(channel_id.value);
 
                 c.recognised_users_.clear();
-                c.recognised_users_.emplace(c.user_id_str_);
                 c.drop_dave_keys();
+                c.dave_.create_session();
 
                 #ifdef DISCUSY_LOGGING
                 c.log("Moved to channel {}, recognised users and DAVE keys reset", channel_id.value);
@@ -1226,7 +1226,7 @@ private:
 
             case VoiceOpcode::DaveMlsProposals: {
                 const auto commit_welcome = dave_.session_->ProcessProposals(
-                    std::vector<uint8_t>(payload.begin(), payload.end()), recognised_users_
+                    std::vector<uint8_t>(payload.begin(), payload.end())
                 );
                 
                 if (commit_welcome) {
@@ -1266,7 +1266,7 @@ private:
                 transition_id_ = transition_id;
 
                 const auto result = dave_.session_->ProcessWelcome(
-                    std::vector<uint8_t>(payload.begin() + 2, payload.end()), recognised_users_
+                    std::vector<uint8_t>(payload.begin() + 2, payload.end())
                 );
                 
                 if (!result) {
@@ -1487,7 +1487,10 @@ private:
                 }
 
                 for (auto& id : connected.d.user_ids) {
-                    recognised_users_.emplace(std::move(id));
+                    if (id != user_id_str_) {
+                        dave_.session_->AddRecognizedUser(id);
+                        recognised_users_.emplace(std::move(id));
+                    }
                 }
 
                 send_speaking(speaking_mode::None); // TODO: should only send here if no audio truly remains
@@ -1504,6 +1507,8 @@ private:
                     return;
                 }
 
+                std::cout << "user disconnected: " << disconnected.d.user_id << std::endl;
+                dave_.session_->RemoveRecognizedUser(disconnected.d.user_id);
                 recognised_users_.erase(disconnected.d.user_id);
 
                 break;
@@ -1582,6 +1587,11 @@ private:
 
     void dave_init_session() {
         dave_.init_session(dave_protocol_version_, channel_id_.load(), user_id_str_);
+
+        // TODO: unsure if valid
+        for (const auto& id : recognised_users_) {
+            dave_.session_->AddRecognizedUser(id);
+        }
 
         const auto key_package = dave_.session_->GetMarshalledKeyPackage();
         
@@ -1940,7 +1950,7 @@ private:
 
     std::int64_t last_hb_nonce_{-1};
 
-    std::set<std::string> recognised_users_;
+    std::flat_set<std::string> recognised_users_;
 
     std::atomic_flag initialized_ = ATOMIC_FLAG_INIT;
 
