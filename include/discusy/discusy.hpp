@@ -69,6 +69,9 @@ public:
     bot(bot&& other) = delete;
     bot& operator=(bot&& other) = delete;
 
+    /**
+     ** Constructor for the HTTP only bot, can assign a token to use the api calls using `bot::assign_token`
+     */
     explicit bot(std::uint32_t threads = 1) : 
         cfg_{setup_cfg(threads)}, 
         io_ctx{static_cast<int>(cfg_.threads)}, 
@@ -93,6 +96,16 @@ public:
         ,http_only_{true}
     {
         construct();
+    }
+
+    /**
+     ** Assign a token for a http only bot, used to use the api
+     */
+    void assign_token(std::string_view token) {
+        if (!http_only_) {
+            throw std::runtime_error("Assign token can only be used for http only bots!");
+        }
+        cfg_.token.assign(token);
     }
 
     explicit bot(config cfg, bool add_voice_intent = false) : 
