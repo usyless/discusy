@@ -1507,7 +1507,6 @@ private:
                     return;
                 }
 
-                std::cout << "user disconnected: " << disconnected.d.user_id << std::endl;
                 dave_.session_->RemoveRecognizedUser(disconnected.d.user_id);
                 recognised_users_.erase(disconnected.d.user_id);
 
