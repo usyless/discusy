@@ -11,7 +11,6 @@
 #include <thread>
 #include <vector>
 #include <version>
-#include <flat_set>
 
 #include <sodium.h>
 #include <opus.h>
@@ -222,7 +221,6 @@ public:
         hb_timer_{strand_},
         reconnect_timeout_timer_{strand_},
         refresh_watchdog_{strand_},
-        recognised_users_{}, // initialise with bot itself as user
         server_id_{server_id},
         channel_id_{channel_id.value},
         user_id_{user_id},
@@ -268,7 +266,6 @@ public:
             if (new_channel_id && (new_channel_id != old_channel_id)) {
                 c.channel_id_.store(new_channel_id.value);
 
-                c.recognised_users_.clear();
                 c.drop_dave_keys();
                 c.dave_.create_session();
 
@@ -296,7 +293,6 @@ public:
             if (channel_id && (channel_id != old_channel_id)) {
                 c.channel_id_.store(channel_id.value);
 
-                c.recognised_users_.clear();
                 c.drop_dave_keys();
                 c.dave_.create_session();
 
@@ -961,6 +957,10 @@ private:
         ssrc_ = 0;
         last_hb_nonce_ = -1;
 
+        drop_dave_keys();
+        dave_.cached_external_sender_.clear();
+        dave_.create_session();
+
         if (udp_client_ != nullptr) udp_client_->reset_session();
 
         reconnect();
@@ -1486,10 +1486,9 @@ private:
                     return;
                 }
 
-                for (auto& id : connected.d.user_ids) {
+                for (const auto& id : connected.d.user_ids) {
                     if (id != user_id_str_) {
                         dave_.session_->AddRecognizedUser(id);
-                        recognised_users_.emplace(std::move(id));
                     }
                 }
 
@@ -1508,7 +1507,6 @@ private:
                 }
 
                 dave_.session_->RemoveRecognizedUser(disconnected.d.user_id);
-                recognised_users_.erase(disconnected.d.user_id);
 
                 break;
             }
@@ -1562,7 +1560,6 @@ private:
                 pending_passthrough_ = (epoch.d.protocol_version == 0);
 
                 if (epoch.d.epoch == 1) {
-                    dave_.create_session();
                     dave_init_session();
                 }
 
@@ -1586,11 +1583,6 @@ private:
 
     void dave_init_session() {
         dave_.init_session(dave_protocol_version_, channel_id_.load(), user_id_str_);
-
-        // TODO: unsure if valid
-        for (const auto& id : recognised_users_) {
-            dave_.session_->AddRecognizedUser(id);
-        }
 
         const auto key_package = dave_.session_->GetMarshalledKeyPackage();
         
@@ -1676,7 +1668,6 @@ private:
         #endif
         ws_.send(std::move(out));
 
-        dave_.create_session();
         dave_init_session();
     }
 
@@ -1948,8 +1939,6 @@ private:
     discord::dave::ProtocolVersion dave_protocol_version_{};
 
     std::int64_t last_hb_nonce_{-1};
-
-    std::flat_set<std::string> recognised_users_;
 
     std::atomic_flag initialized_ = ATOMIC_FLAG_INIT;
 

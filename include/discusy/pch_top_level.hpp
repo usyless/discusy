@@ -6,7 +6,6 @@
 #include <thread> // IWYU pragma: keep
 #include <unordered_map> // IWYU pragma: keep
 #include <flat_map> // IWYU pragma: keep
-#include <flat_set> // IWYU pragma: keep
 #include <atomic> // IWYU pragma: keep
 #include <chrono> // IWYU pragma: keep
 #include <string_view> // IWYU pragma: keep

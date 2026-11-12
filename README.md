@@ -24,8 +24,8 @@ A recent CMake version, `3.31+`
 
 A compiler supporting C++23 and at least meeting [Glaze's](https://github.com/stephenberry/glaze) minimum requirements is needed, this means needing to use libc++ with clang for older OS's such as debian 12 which some Raspberry Pi's may be running.
 
-- Clang, MSVC and GCC are supported, other compilers may be supported, try compile and find out!
-    - **You will likely need to use libc++ instead of libstdc++**
+- Clang, MSVC and GCC (15+ for `libstdc++` C++23 features such as `std::flat_map`) are supported, other compilers may be supported, try compile and find out!
+    - **You will likely need to use libc++ instead of libstdc++ on older distributions**
     - Using the mold linker is recommended
     - An example of this can be founds under [tests.yml](/.github/workflows/tests.yml)
 

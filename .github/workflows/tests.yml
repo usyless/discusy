@@ -10,7 +10,7 @@ on:
         type: choice
         options:
           - clang-23
-          - gcc-14
+          - gcc-15
       build_type:
         description: "Build type"
         required: true
@@ -43,12 +43,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev ninja-build p7zip-full
 
-          # Ensure GCC-14 and libstdc++ are installed
-          sudo apt-get install -y gcc-14 g++-14
-
-          if [ "${{ inputs.compiler }}" = "gcc-14" ]; then
-            echo "CC=gcc-14" >> $GITHUB_ENV
-            echo "CXX=g++-14" >> $GITHUB_ENV
+          if [ "${{ inputs.compiler }}" = "gcc-15" ]; then
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            sudo apt-get update
+            sudo apt-get install -y gcc-15 g++-15
+            echo "CC=gcc-15" >> $GITHUB_ENV
+            echo "CXX=g++-15" >> $GITHUB_ENV
           else
             LLVM_VERSION="23"
             sudo apt-get install -y wget lsb-release software-properties-common gnupg
