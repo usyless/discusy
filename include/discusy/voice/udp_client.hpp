@@ -592,8 +592,8 @@ private:
         ssrc = from_network_order(ssrc);
 
         const std::size_t ciphertext_len = bytes_transferred - aad_len - 4;
-        const uint8_t* ciphertext = recv_buffer_.data() + aad_len;
-        const uint8_t* nonce_suffix = recv_buffer_.data() + (bytes_transferred - 4);
+        const std::uint8_t* ciphertext = recv_buffer_.data() + aad_len;
+        const std::uint8_t* nonce_suffix = recv_buffer_.data() + (bytes_transferred - 4);
 
         unsigned long long plaintext_len = 0;
         int decrypt_rc = -1;
@@ -1014,13 +1014,12 @@ private:
     std::atomic_bool closed_{false};
     ctx::io_context::strand_udp_socket_t socket_;
     udp::endpoint remote_endpoint_;
-    udp::endpoint recv_sender_;
     udp::endpoint discovery_sender_;
 
     std::uint64_t session_{0};
 
-    std::array<uint8_t, 8192> recv_buffer_{};
-    std::array<uint8_t, 8192> recv_decrypt_buf_{};
+    std::array<std::uint8_t, 8192> recv_buffer_{};
+    std::array<std::uint8_t, 8192> recv_decrypt_buf_{};
 
     discusy::voice::store<discusy::voice::MAX_DAVE_BUFFER_SIZE> dave_buf_; // more than enough
     discusy::voice::store<discusy::voice::MAX_FINAL_BUFFER_SIZE> next_buf_;

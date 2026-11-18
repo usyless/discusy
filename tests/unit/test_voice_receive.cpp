@@ -7,11 +7,15 @@
 #include <discusy/api_constants.hpp>
 
 #ifdef DISCUSY_VOICE
+#include <discusy/state.hpp>
 #include <discusy/voice/voice_connection.hpp>
 #endif
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -85,6 +89,77 @@ TEST_CASE("Voice: Opus encoder and decoder roundtrip", "[voice][opus]") {
 
     const auto pcm_out = dec.decode(encoded.span());
     CHECK(pcm_out.size() == total_samples);
+
+    SECTION("Decoder edge cases and move semantics") {
+        std::array<std::int16_t, 8> tiny_pcm{};
+        CHECK(dec.decode_frame(encoded.span(), tiny_pcm) == OPUS_BUFFER_TOO_SMALL);
+
+        discusy::voice::opus_decoder moved_dec{std::move(dec)};
+        CHECK(moved_dec.is_valid());
+        CHECK_FALSE(dec.is_valid());
+        CHECK(dec.decode(encoded.span()).empty());
+        CHECK(moved_dec.decode(encoded.span()).size() == total_samples);
+
+        moved_dec.destroy();
+        CHECK_FALSE(moved_dec.is_valid());
+        CHECK(moved_dec.decode(encoded.span()).empty());
+    }
+}
+
+TEST_CASE("Voice: connection receive filters are thread-safe", "[voice][receive][threads]") {
+    discusy::ctx::io_context io_ctx{2};
+    discusy::state st{
+        .client{st.ssl_ctx, io_ctx},
+        .timers{io_ctx},
+        .gateway_callbacks{io_ctx},
+        .shards_ready{io_ctx},
+        .shard_session_invalidated{io_ctx},
+    };
+
+    auto conn = std::make_shared<discusy::voice::connection>(
+        io_ctx,
+        st,
+        discusy::snowflake{1},
+        discusy::snowflake{2},
+        discusy::snowflake{3},
+        std::string{"session"},
+        std::string{"token"},
+        std::string{"wss://127.0.0.1:443/?v=8"},
+        [](discusy::voice::escalation_action) {}
+    );
+
+    CHECK_FALSE(conn->is_receiving_any_audio());
+    CHECK_FALSE(conn->get_user_for_ssrc(42).has_value());
+    CHECK_FALSE(conn->get_ssrc_for_user(discusy::snowflake{100}).has_value());
+
+    std::vector<std::thread> workers;
+    workers.reserve(4);
+    for (int t = 0; t < 4; ++t) {
+        workers.emplace_back([&conn, t]() {
+            for (int i = 0; i < 200; ++i) {
+                const auto uid = discusy::snowflake{static_cast<std::uint64_t>(1000 + t * 10 + (i % 5))};
+                conn->set_receive_any_audio((i % 2) == 0);
+                conn->set_receive_user_audio(uid, (i % 3) == 0);
+                conn->send_media_sink_wants({{"any", static_cast<std::uint8_t>((i % 2 == 0) ? 100 : 0)}, {"1234", 100}});
+                (void)conn->is_receiving_any_audio();
+                (void)conn->get_user_for_ssrc(1234);
+                (void)conn->get_ssrc_for_user(uid);
+                conn->clear_user_audio_filters();
+            }
+        });
+    }
+
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    conn->enable_all_audio_receive();
+    CHECK(conn->is_receiving_any_audio());
+    conn->disable_audio_receive();
+    CHECK_FALSE(conn->is_receiving_any_audio());
+
+    io_ctx->poll();
+    conn.reset();
 }
 
 #endif

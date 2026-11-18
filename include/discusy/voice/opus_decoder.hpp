@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -80,7 +82,13 @@ public:
         const bool decode_fec = false
     ) noexcept {
         if (dec_ == nullptr || channels_ == 0) return OPUS_INVALID_STATE;
-        const int max_samples_per_channel = static_cast<int>(pcm_out.size() / channels_);
+        if (opus_frame.size() > static_cast<std::size_t>(std::numeric_limits<opus_int32>::max())) return OPUS_BAD_ARG;
+
+        const auto clamped_samples = std::min<std::size_t>(
+            pcm_out.size() / channels_,
+            static_cast<std::size_t>(std::numeric_limits<int>::max())
+        );
+        const int max_samples_per_channel = static_cast<int>(clamped_samples);
         if (max_samples_per_channel <= 0) return OPUS_BUFFER_TOO_SMALL;
 
         return opus_decode(

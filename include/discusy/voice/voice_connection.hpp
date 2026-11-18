@@ -271,14 +271,15 @@ public:
     }
 
     void start() {
-        udp_client_shared_ = std::make_shared<udp_client_t>(
+        auto client = std::make_shared<udp_client_t>(
             io_ctx_,
             udp_on_error_cb{this->weak_from_this()},
             udp_dave_encrypt{this->weak_from_this()},
             udp_on_idle_cb{this->weak_from_this()},
             udp_on_receive_cb{this->weak_from_this()}
         );
-        udp_client_ = udp_client_shared_.get();
+        udp_client_shared_ = std::move(client);
+        udp_client_.store(udp_client_shared_.get(), std::memory_order_release);
 
         boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
             if (self->destructed_) return;
@@ -388,13 +389,15 @@ public:
     }
 
     void stop_audio() {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->stop_audio();
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->stop_audio();
     }
 
     void pause_audio() {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->pause_audio();
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->pause_audio();
     }
 
     void rebuild_in_place() {
@@ -413,23 +416,27 @@ public:
     }
 
     void resume_audio() {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->resume_audio();
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->resume_audio();
     }
 
     [[nodiscard]] double get_secs_remaining() const noexcept {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return 0.0;
-        return udp_client_->get_secs_remaining();
+        const auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return 0.0;
+        return udp->get_secs_remaining();
     }
 
     [[nodiscard]] std::chrono::milliseconds get_ms_remaining() const noexcept {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return std::chrono::milliseconds{0};
-        return udp_client_->get_ms_remaining();
+        const auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return std::chrono::milliseconds{0};
+        return udp->get_ms_remaining();
     }
 
     [[nodiscard]] std::uint64_t get_frames_remaining() const noexcept {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return 0;
-        return udp_client_->get_frames_remaining();
+        const auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return 0;
+        return udp->get_frames_remaining();
     }
 
     [[nodiscard]] bool has_audio_queued() const noexcept {
@@ -437,24 +444,25 @@ public:
     }
 
     void set_underrun_grace_frames(const std::uint32_t frames) {
-        if (udp_client_ != nullptr) udp_client_->set_underrun_grace_frames(frames);
+        if (auto* const udp = udp_client()) udp->set_underrun_grace_frames(frames);
     }
 
     void set_max_catchup_frames(const std::uint32_t frames) {
-        if (udp_client_ != nullptr) udp_client_->set_max_catchup_frames(frames);
+        if (auto* const udp = udp_client()) udp->set_max_catchup_frames(frames);
     }
 
     void set_not_ready_hold_frames(const std::uint32_t frames) {
-        if (udp_client_ != nullptr) udp_client_->set_not_ready_hold_frames(frames);
+        if (auto* const udp = udp_client()) udp->set_not_ready_hold_frames(frames);
     }
 
     [[nodiscard]] audio_stats get_audio_stats() const noexcept {
-        if (udp_client_ == nullptr) return audio_stats{};
-        return udp_client_->get_stats();
+        const auto* const udp = udp_client();
+        if (udp == nullptr) return audio_stats{};
+        return udp->get_stats();
     }
 
     void reset_audio_stats() noexcept {
-        if (udp_client_ != nullptr) udp_client_->reset_stats();
+        if (auto* const udp = udp_client()) udp->reset_stats();
     }
 
     bool set_inband_fec(const bool enabled) {
@@ -528,6 +536,7 @@ public:
         {
         const std::scoped_lock lock{receive_mutex_};
         receive_any_ = enabled;
+        sink_wants_dirty_ = true;
         }
         dispatch_media_sink_wants();
     }
@@ -539,6 +548,7 @@ public:
         {
         const std::scoped_lock lock{receive_mutex_};
         user_wants_[user_id] = enabled;
+        sink_wants_dirty_ = true;
         }
         dispatch_media_sink_wants();
     }
@@ -556,6 +566,7 @@ public:
         for (const auto id : user_ids) {
             if (id) user_wants_[id] = true;
         }
+        sink_wants_dirty_ = true;
         }
         dispatch_media_sink_wants();
     }
@@ -572,6 +583,7 @@ public:
         const std::scoped_lock lock{receive_mutex_};
         user_wants_.clear();
         raw_ssrc_wants_.clear();
+        sink_wants_dirty_ = true;
         }
         dispatch_media_sink_wants();
     }
@@ -590,33 +602,31 @@ public:
         receive_any_ = true;
         user_wants_.clear();
         raw_ssrc_wants_.clear();
+        sink_wants_dirty_ = true;
         }
         dispatch_media_sink_wants();
     }
 
-    /// Sends a custom Opcode 15 Media Sink Wants payload directly (keys are `"any"` or SSRC strings, values `0..100`).
-    void send_media_sink_wants(std::unordered_map<std::string, std::uint8_t> wants) {
+    /// Sends a custom Opcode 15 Media Sink Wants payload directly (keys are `"any"` or SSRC strings; `0` = disabled, `100` = enabled).
+    void send_media_sink_wants(const std::unordered_map<std::string, std::uint8_t>& wants) {
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
         const std::scoped_lock lock{receive_mutex_};
+        receive_any_ = false;
         user_wants_.clear();
         raw_ssrc_wants_.clear();
-        for (auto& [key, val] : wants) {
-            val = std::min<std::uint8_t>(val, 100);
+        for (const auto& [key, val] : wants) {
+            const std::uint8_t normalized = (val > 0) ? 100 : 0;
             if (key == "any") {
-                receive_any_ = (val > 0);
+                receive_any_ = (normalized != 0);
             } else if (const auto parsed = ulp::str::to_number<std::uint32_t>(key)) {
-                raw_ssrc_wants_[*parsed] = val;
+                raw_ssrc_wants_[*parsed] = normalized;
             }
         }
+        sink_wants_dirty_ = true;
         }
-
-        auto shared_wants = std::make_shared<std::unordered_map<std::string, std::uint8_t>>(std::move(wants));
-        boost::asio::dispatch(strand_, [self = this->shared_from_this(), shared_wants = std::move(shared_wants)] {
-            if (self->destructed_ || !self->ready_received_) return;
-            self->send_media_sink_wants_payload(*shared_wants);
-        });
+        dispatch_media_sink_wants();
     }
 
     [[nodiscard]] bool is_receiving_any_audio() const noexcept {
@@ -642,18 +652,21 @@ public:
 
     // make sure the frame isnt bigger than voice::MAX_OPUS_FRAME_BYTES bytes
     void send_opus_frame(const std::span<const std::uint8_t> opus_data) {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->send_audio_packet(opus_data);
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->send_audio_packet(opus_data);
     }
 
     void send_opus_frames(std::vector<discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>>&& opus_frames) {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->send_audio_packets(std::move(opus_frames));
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->send_audio_packets(std::move(opus_frames));
     }
 
     void send_opus_frames(std::span<const discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>> opus_frames) {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
-        udp_client_->send_audio_packets(opus_frames);
+        auto* const udp = udp_client();
+        if (closed_.load(std::memory_order_acquire) || (udp == nullptr)) return;
+        udp->send_audio_packets(opus_frames);
     }
 
     // if you send data that doesnt exactly align to the 20ms 48000hz stereo frames silence will be appended
@@ -661,7 +674,7 @@ public:
         std::span<const std::int16_t> pcm_data,
         const std::chrono::milliseconds batch_duration = std::chrono::seconds{10}
     ) {
-        if (closed_.load(std::memory_order_acquire) || (udp_client_ == nullptr)) return;
+        if (closed_.load(std::memory_order_acquire) || (udp_client() == nullptr)) return;
 
         try {
             if (!encoder_) return;
@@ -808,7 +821,7 @@ public:
     ) {
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code)>(
             [](discusy::asio::chf<> auto&& handler, connection* self, const std::chrono::milliseconds batch_duration, auto&& owned_buffer) mutable {
-                if (self->closed_.load(std::memory_order_acquire) || !self->udp_client_) {
+                if (self->closed_.load(std::memory_order_acquire) || (self->udp_client() == nullptr)) {
                     auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
                     auto allocator = boost::asio::get_associated_allocator(
                         handler,
@@ -842,7 +855,7 @@ public:
 
                         void operator()(std::shared_ptr<task_state> ptr) {
                             boost::system::error_code ec{};
-                            if (self->closed_.load(std::memory_order_acquire) || !self->udp_client_ || (cancelled_type != boost::asio::cancellation_type::none)) {
+                            if (self->closed_.load(std::memory_order_acquire) || (self->udp_client() == nullptr) || (cancelled_type != boost::asio::cancellation_type::none)) {
                                 ec = boost::asio::error::operation_aborted;
                             }
 
@@ -1016,7 +1029,7 @@ private:
 
         closed_.store(true, std::memory_order_release);
 
-        if (udp_client_ != nullptr) udp_client_->close();
+        if (auto* const udp = udp_client()) udp->close();
 
         stop_heartbeat();
         reconnect_timeout_timer_.cancel();
@@ -1125,12 +1138,13 @@ private:
         seq_ = -1;
         ssrc_ = 0;
         last_hb_nonce_ = -1;
+        session_description_received_ = false;
 
         drop_dave_keys();
         dave_.cached_external_sender_.clear();
         dave_.create_session();
 
-        if (udp_client_ != nullptr) udp_client_->reset_session();
+        if (auto* const udp = udp_client()) udp->reset_session();
 
         reconnect();
     }
@@ -1164,6 +1178,7 @@ private:
 
         reconnecting_ = true;
         session_live_ = false;
+        ready_received_ = false;
         ready_.store(false, std::memory_order_release);
         ready_signalled_ = false;
         stop_heartbeat();
@@ -1479,14 +1494,15 @@ private:
                 reconnect_timeout_timer_.cancel();
                 reconnect_scheduled_ = false;
 
-                if (udp_client_ == nullptr) {
+                auto* const udp = udp_client();
+                if (udp == nullptr) {
                     #ifdef DISCUSY_LOGGING
                     log("READY arrived before start(), ignoring");
                     #endif
                     return;
                 }
 
-                udp_client_->reset_session();
+                udp->reset_session();
 
                 std::string_view mode;
 
@@ -1504,7 +1520,7 @@ private:
 
                 ssrc_ = ready.d.ssrc;
 
-                udp_client_->send_ip_discovery(std::move(ready.d.ip), ready.d.port, ssrc_, [weak = this->weak_from_this(), mode, strand = strand_](std::string&& my_ip, std::uint16_t my_port) mutable {
+                udp->send_ip_discovery(std::move(ready.d.ip), ready.d.port, ssrc_, [weak = this->weak_from_this(), mode, strand = strand_](std::string&& my_ip, std::uint16_t my_port) mutable {
                     boost::asio::post(strand, [weak = std::move(weak), my_ip = std::move(my_ip), my_port, mode]() mutable {
                         auto s = weak.lock();
                         if (!s) return;
@@ -1551,15 +1567,14 @@ private:
                 }
 
                 ready_received_ = true;
-                if (has_non_default_sink_wants()) {
-                    send_media_sink_wants_current();
-                }
+                sync_sink_wants_on_ready();
                 break;
             };
 
             case VoiceOpcode::SessionDescription: {
                 recieve_payload<session_description> description{};
-                if ((udp_client_ == nullptr) || json::parse_json_view(description, json_payload, shared_json_ctx_, json_logger)) {
+                auto* const udp = udp_client();
+                if ((udp == nullptr) || json::parse_json_view(description, json_payload, shared_json_ctx_, json_logger)) {
                     stop();
                     reconnect();
                     return;
@@ -1589,12 +1604,11 @@ private:
                     return;
                 }
 
+                session_description_received_ = true;
                 dave_init_session();
-                if (dave_protocol_version_ == 0) {
-                    update_all_decryptors_passthrough(true);
-                }
+                update_all_decryptors_passthrough(dave_protocol_version_ == 0);
 
-                udp_client_->set_secret_key(mode, description.d.secret_key);
+                udp->set_secret_key(mode, description.d.secret_key);
 
                 session_live_ = true;
                 reconnect_attempts_ = 0;
@@ -1616,7 +1630,7 @@ private:
                 reconnect_attempts_ = 0;
 
                 ready_received_ = true;
-                if (has_non_default_sink_wants()) {
+                if (should_sync_sink_wants_on_resume()) {
                     send_media_sink_wants_current();
                 }
 
@@ -1668,16 +1682,26 @@ private:
 
                 if (sp.d.user_id && sp.d.user_id != user_id_) {
                     bool should_resend_wants = false;
+                    opt<std::uint32_t> old_ssrc{};
                     {
                     const std::scoped_lock lock{receive_mutex_};
+                    if (const auto ssrc_it = ssrc_to_user_.find(sp.d.ssrc); ssrc_it != ssrc_to_user_.end() && ssrc_it->second != sp.d.user_id) {
+                        user_to_ssrc_.erase(ssrc_it->second);
+                    }
                     const auto old_it = user_to_ssrc_.find(sp.d.user_id);
                     const bool ssrc_changed = (old_it == user_to_ssrc_.end()) || (old_it->second != sp.d.ssrc);
                     if (old_it != user_to_ssrc_.end() && old_it->second != sp.d.ssrc) {
+                        old_ssrc = old_it->second;
                         ssrc_to_user_.erase(old_it->second);
                     }
                     ssrc_to_user_[sp.d.ssrc] = sp.d.user_id;
                     user_to_ssrc_[sp.d.user_id] = sp.d.ssrc;
                     should_resend_wants = ssrc_changed && user_wants_.contains(sp.d.user_id);
+                    }
+
+                    if (old_ssrc) {
+                        const std::scoped_lock lock{decoder_mutex_};
+                        opus_decoders_.erase(*old_ssrc);
                     }
 
                     ensure_user_decryptor(sp.d.user_id);
@@ -1962,7 +1986,7 @@ private:
         dave_.encryptor_->SetKeyRatchet(std::move(key_ratchet));
         }
 
-        if (udp_client_ != nullptr) udp_client_->kick_drain();
+        if (auto* const udp = udp_client()) udp->kick_drain();
         maybe_signal_ready();
         return true;
     }
@@ -1986,7 +2010,7 @@ private:
         dave_.encryptor_->SetPassthroughMode(passthrough);
         }
 
-        if (udp_client_ != nullptr) udp_client_->kick_drain();
+        if (auto* const udp = udp_client()) udp->kick_drain();
         maybe_signal_ready();
     }
 
@@ -2023,9 +2047,9 @@ private:
         const auto dec = std::shared_ptr<discord::dave::IDecryptor>(discord::dave::CreateDecryptor());
         if (!dec) return;
 
-        const bool passthrough = (dave_protocol_version_ == 0) || pending_passthrough_.value_or(false);
+        const bool passthrough = (session_description_received_ && (dave_protocol_version_ == 0)) || pending_passthrough_.value_or(false);
         dec->TransitionToPassthroughMode(passthrough);
-        if (dave_protocol_version_ > 0) {
+        if (session_description_received_ && (dave_protocol_version_ > 0)) {
             if (auto kr = dave_.session_->GetKeyRatchet(uid.str().str())) {
                 dec->TransitionToKeyRatchet(std::move(kr));
             }
@@ -2058,7 +2082,7 @@ private:
         const std::scoped_lock lock{receive_mutex_};
         snapshot.reserve(user_decryptors_.size());
         for (const auto& [_, dec] : user_decryptors_) {
-            snapshot.push_back(dec);
+            snapshot.emplace_back(dec);
         }
         }
 
@@ -2067,22 +2091,41 @@ private:
         }
     }
 
-    [[nodiscard]] bool has_non_default_sink_wants() const noexcept {
-        const std::scoped_lock lock{receive_mutex_};
+    [[nodiscard]] bool has_non_default_sink_wants_locked() const noexcept {
+        // Differs from Discord's initial server default (`{"any": 100}`).
         return !receive_any_ || !user_wants_.empty() || !raw_ssrc_wants_.empty();
     }
 
+    [[nodiscard]] bool should_sync_sink_wants_on_resume() const noexcept {
+        const std::scoped_lock lock{receive_mutex_};
+        return sink_wants_dirty_ || has_non_default_sink_wants_locked();
+    }
+
+    void sync_sink_wants_on_ready() {
+        std::unordered_map<std::string, std::uint8_t> wants;
+        bool should_send = false;
+        {
+        const std::scoped_lock lock{receive_mutex_};
+        sink_wants_dirty_ = false;
+        should_send = has_non_default_sink_wants_locked();
+        if (should_send) {
+            wants = build_media_sink_wants_locked();
+        }
+        }
+        if (should_send) {
+            send_media_sink_wants_payload(wants);
+        }
+    }
+
     void dispatch_media_sink_wants() {
-        boost::asio::dispatch(strand_, [self = this->shared_from_this()] {
+        boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
             if (self->destructed_ || !self->ready_received_) return;
             self->send_media_sink_wants_current();
         });
     }
 
-    void send_media_sink_wants_current() {
+    [[nodiscard]] std::unordered_map<std::string, std::uint8_t> build_media_sink_wants_locked() const {
         std::unordered_map<std::string, std::uint8_t> wants;
-        {
-        const std::scoped_lock lock{receive_mutex_};
         wants.emplace("any", receive_any_ ? std::uint8_t{100} : std::uint8_t{0});
         for (const auto& [uid, enabled] : user_wants_) {
             if (const auto it = user_to_ssrc_.find(uid); it != user_to_ssrc_.end()) {
@@ -2092,6 +2135,15 @@ private:
         for (const auto& [ssrc, val] : raw_ssrc_wants_) {
             wants[std::to_string(ssrc)] = val;
         }
+        return wants;
+    }
+
+    void send_media_sink_wants_current() {
+        std::unordered_map<std::string, std::uint8_t> wants;
+        {
+        const std::scoped_lock lock{receive_mutex_};
+        wants = build_media_sink_wants_locked();
+        sink_wants_dirty_ = false;
         }
         send_media_sink_wants_payload(wants);
     }
@@ -2297,6 +2349,8 @@ private:
 
         {
         const std::scoped_lock lock{receive_mutex_};
+        if (closed_.load(std::memory_order_acquire)) return;
+
         if (const auto it = ssrc_to_user_.find(ssrc); it != ssrc_to_user_.end()) {
             speaker_id = it->second;
         }
@@ -2352,6 +2406,7 @@ private:
         }
 
         if (want_opus) {
+            if (closed_.load(std::memory_order_acquire)) return;
             on_opus_received.fire(received_opus{
                 .guild_id = server_id_,
                 .user_id = speaker_id,
@@ -2366,11 +2421,12 @@ private:
             std::vector<std::int16_t> pcm;
             {
             const std::scoped_lock lock{decoder_mutex_};
+            if (closed_.load(std::memory_order_acquire)) return;
             auto [it, _] = opus_decoders_.try_emplace(ssrc);
             pcm = it->second.decode(opus_span);
             }
 
-            if (!pcm.empty()) {
+            if (!pcm.empty() && !closed_.load(std::memory_order_acquire)) {
                 on_audio_received.fire(received_audio{
                     .guild_id = server_id_,
                     .user_id = speaker_id,
@@ -2392,7 +2448,11 @@ private:
     using udp_client_t = udp::client<udp_on_error_cb, udp_dave_encrypt, udp_on_idle_cb, udp_on_receive_cb>;
 
     std::shared_ptr<udp_client_t> udp_client_shared_;
-    udp_client_t* udp_client_ = nullptr;
+    std::atomic<udp_client_t*> udp_client_{nullptr};
+
+    [[nodiscard]] udp_client_t* udp_client() const noexcept {
+        return udp_client_.load(std::memory_order_acquire);
+    }
 
     // Escalation cb is tiny anyway, fits in SBO
     #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
@@ -2412,6 +2472,7 @@ private:
 
     mutable std::mutex receive_mutex_;
     bool receive_any_{false};
+    bool sink_wants_dirty_{false};
     std::unordered_map<snowflake, bool> user_wants_;
     std::unordered_map<std::uint32_t, std::uint8_t> raw_ssrc_wants_;
     std::unordered_map<std::uint32_t, snowflake> ssrc_to_user_;
@@ -2468,6 +2529,7 @@ private:
     bool recieved_heartbeat_ack_{false};
 
     bool session_live_{false};
+    bool session_description_received_{false};
     bool ready_received_{false};
     bool awaiting_connect_ready_{false};
     bool reconnect_scheduled_{false};
