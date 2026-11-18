@@ -48,6 +48,7 @@ struct ready {
 
 struct hello {
     integer heartbeat_interval{};
+    opt<integer> v{};
 };
 
 struct heartbeat_ack_quoted {

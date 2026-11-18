@@ -303,15 +303,17 @@ namespace invite {
 
 // https://discord.com/developers/docs/resources/lobby
 namespace lobby {
+    constexpr inline std::uint32_t IDLE_TIMEOUT_SECONDS_MIN = 5;
     constexpr inline std::uint32_t IDLE_TIMEOUT_SECONDS_DEFAULT = 300;
-    constexpr inline std::uint32_t IDLE_TIMEOUT_SECONDS_MAX = 86400; // 24 hours
+    constexpr inline std::uint32_t IDLE_TIMEOUT_SECONDS_MAX = 604800; // 7 days
 
     constexpr inline std::size_t METADATA_KEYS_MAX = 16;
     constexpr inline std::size_t METADATA_KEY_MAX_LENGTH = 64;
     constexpr inline std::size_t METADATA_VALUE_MAX_LENGTH = 256;
     constexpr inline std::size_t METADATA_TOTAL_SIZE_MAX_BYTES = 4096;
 
-    constexpr inline std::size_t MEMBERS_MAX = 100;
+    constexpr inline std::size_t MEMBERS_MAX = 1000;
+    constexpr inline std::size_t MEMBERS_PER_REQUEST_MAX = 25;
     constexpr inline std::size_t MESSAGE_CONTENT_MAX_LENGTH = 2000;
 
     constexpr inline std::size_t GET_MESSAGES_LIMIT_MIN = 1;

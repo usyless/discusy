@@ -89,6 +89,8 @@ enum class VoiceOpcode : std::uint8_t {
     ClientsConnect = 11,
     /// A client has disconnected from the voice channel.
     ClientDisconnect = 13,
+    /// Indicate which voice data the client wants to receive.
+    MediaSinkWants = 15,
     /// A downgrade from the DAVE protocol is upcoming.
     DavePrepareTransition = 21,
     /// Execute a previously announced protocol transition.
@@ -124,7 +126,7 @@ enum class VoiceCloseCode : std::uint16_t {
     AuthenticationFailed = 4004,
     /// You sent more than one identify payload. Stahp.
     AlreadyAuthenticated = 4005,
-    /// Your session is no longer valid.
+    /// Your session is no longer valid. This can occur if you send Select Protocol again after selecting a protocol for this session.
     SessionNoLongerValid = 4006,
     /// Your session has timed out.
     SessionTimeout = 4009,
