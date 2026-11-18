@@ -2270,6 +2270,22 @@ private:
     } };
 
     void handle_udp_packet(const std::uint32_t ssrc, const std::uint16_t sequence, const std::uint32_t timestamp, const std::span<const std::uint8_t> payload) {
+        try {
+            handle_udp_packet_impl(ssrc, sequence, timestamp, payload);
+        }
+        #ifdef DISCUSY_LOGGING
+        catch (const std::exception& e) {
+            log("handle_udp_packet exception: {}", e.what());
+        }
+        #endif
+        catch (...) {
+            #ifdef DISCUSY_LOGGING
+            log("handle_udp_packet unknown exception");
+            #endif
+        }
+    }
+
+    void handle_udp_packet_impl(const std::uint32_t ssrc, const std::uint16_t sequence, const std::uint32_t timestamp, const std::span<const std::uint8_t> payload) {
         if (closed_.load(std::memory_order_acquire)) return;
 
         const bool want_opus = on_opus_received.has_listeners();
