@@ -86,7 +86,8 @@ public:
     struct join_options {
         bool muted{false};
         bool deaf{false};
-        bool receive_audio{true};
+        /// Disabled by default to avoid receiving unwanted UDP audio (`MediaSinkWants {"any": 0}`).
+        bool receive_audio{false};
         std::chrono::milliseconds timeout{5000};
         std::function<void(connection&)> on_create{};
     };
@@ -589,8 +590,8 @@ private:
 
             if (!conn) return finish(std::move(self_ptr), boost::asio::error::no_memory, nullptr);
 
-            if (!self_ptr->options.receive_audio) {
-                conn->set_receive_any_audio(false);
+            if (self_ptr->options.receive_audio) {
+                conn->set_receive_any_audio(true);
             }
 
             if (self_ptr->options.on_create) {

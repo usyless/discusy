@@ -568,12 +568,12 @@ private:
     void process_received_packet(const std::size_t bytes_transferred) {
         static constexpr std::size_t AEAD_OVERHEAD = 16;
         if (!keyed_ || !armed_ || bytes_transferred < 12 + AEAD_OVERHEAD + 4) return;
-        if ((recv_buffer_[0] >> 6) != 2) return; // RTP v2 only
+        if ((static_cast<unsigned>(recv_buffer_[0]) >> 6U) != 2U) return; // RTP v2 only
         if (recv_buffer_[1] >= 200 && recv_buffer_[1] <= 204) return; // Ignore RTCP
 
-        const std::size_t cc = recv_buffer_[0] & 0x0F;
-        const bool has_ext = (recv_buffer_[0] & 0x10) != 0;
-        const bool has_padding = (recv_buffer_[0] & 0x20) != 0;
+        const auto cc = static_cast<std::size_t>(recv_buffer_[0] & 0x0FU);
+        const bool has_ext = (recv_buffer_[0] & 0x10U) != 0U;
+        const bool has_padding = (recv_buffer_[0] & 0x20U) != 0U;
 
         const std::size_t base_header_len = 12 + (cc * 4);
         const std::size_t aad_len = base_header_len + (has_ext ? 4 : 0);
@@ -628,7 +628,7 @@ private:
         }
 
         std::size_t payload_offset = 0;
-        std::size_t payload_len = static_cast<std::size_t>(plaintext_len);
+        auto payload_len = static_cast<std::size_t>(plaintext_len);
 
         if (has_ext) {
             std::uint16_t ext_words{};

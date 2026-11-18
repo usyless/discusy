@@ -37,16 +37,16 @@ TEST_CASE("Constants: Lobby limits match Discord docs", "[constants][lobby]") {
 
 TEST_CASE("Voice: Hello, Speaking, and MediaSinkWants payload serialization", "[voice][json]") {
     SECTION("Hello payload with v field") {
-        std::string json_str = R"({"op":8,"d":{"heartbeat_interval":41250,"v":8}})";
+        const std::string_view json_str = R"({"op":8,"d":{"heartbeat_interval":41250,"v":8}})";
         discusy::voice::recieve_payload<discusy::voice::hello> payload{};
         REQUIRE_FALSE(discusy::json::parse_view(payload, json_str));
         CHECK(payload.d.heartbeat_interval == 41250);
         REQUIRE(payload.d.v.has_value());
-        CHECK(*payload.d.v == 8);
+        CHECK(payload.d.v.value_or(0) == 8);
     }
 
     SECTION("Incoming Speaking payload") {
-        std::string json_str = R"({"op":5,"d":{"user_id":"104694319306248192","ssrc":2,"speaking":1}})";
+        const std::string_view json_str = R"({"op":5,"d":{"user_id":"104694319306248192","ssrc":2,"speaking":1}})";
         discusy::voice::recieve_payload<discusy::voice::speaking_recv> payload{};
         REQUIRE_FALSE(discusy::json::parse_view(payload, json_str));
         CHECK(payload.d.user_id == discusy::snowflake{104694319306248192ULL});
@@ -59,7 +59,7 @@ TEST_CASE("Voice: Hello, Speaking, and MediaSinkWants payload serialization", "[
             {"any", 0},
             {"2", 100},
         };
-        discusy::voice::media_sink_wants_payload payload{wants};
+        const discusy::voice::media_sink_wants_payload payload{wants};
         std::string out;
         REQUIRE_FALSE(discusy::json::write(payload, out));
         CHECK(out.contains("\"op\":15"));

@@ -526,7 +526,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         receive_any_ = enabled;
         }
         dispatch_media_sink_wants();
@@ -537,7 +537,7 @@ public:
         if (closed_.load(std::memory_order_acquire) || !user_id) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         user_wants_[user_id] = enabled;
         }
         dispatch_media_sink_wants();
@@ -549,7 +549,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         receive_any_ = false;
         user_wants_.clear();
         raw_ssrc_wants_.clear();
@@ -569,7 +569,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         user_wants_.clear();
         raw_ssrc_wants_.clear();
         }
@@ -586,7 +586,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         receive_any_ = true;
         user_wants_.clear();
         raw_ssrc_wants_.clear();
@@ -599,7 +599,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         user_wants_.clear();
         raw_ssrc_wants_.clear();
         for (auto& [key, val] : wants) {
@@ -612,19 +612,20 @@ public:
         }
         }
 
-        boost::asio::dispatch(strand_, [self = this->shared_from_this(), wants = std::move(wants)]() mutable {
+        auto shared_wants = std::make_shared<std::unordered_map<std::string, std::uint8_t>>(std::move(wants));
+        boost::asio::dispatch(strand_, [self = this->shared_from_this(), shared_wants = std::move(shared_wants)] {
             if (self->destructed_ || !self->ready_received_) return;
-            self->send_media_sink_wants_payload(wants);
+            self->send_media_sink_wants_payload(*shared_wants);
         });
     }
 
     [[nodiscard]] bool is_receiving_any_audio() const noexcept {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         return receive_any_;
     }
 
     [[nodiscard]] opt<snowflake> get_user_for_ssrc(const std::uint32_t ssrc) const noexcept {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         if (const auto it = ssrc_to_user_.find(ssrc); it != ssrc_to_user_.end()) {
             return it->second;
         }
@@ -632,7 +633,7 @@ public:
     }
 
     [[nodiscard]] opt<std::uint32_t> get_ssrc_for_user(const snowflake user_id) const noexcept {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         if (const auto it = user_to_ssrc_.find(user_id); it != user_to_ssrc_.end()) {
             return it->second;
         }
@@ -1035,11 +1036,11 @@ private:
         encoder_.destroy();
 
         {
-        std::scoped_lock lock{decoder_mutex_};
+        const std::scoped_lock lock{decoder_mutex_};
         opus_decoders_.clear();
         }
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         user_decryptors_.clear();
         ssrc_to_user_.clear();
         user_to_ssrc_.clear();
@@ -1668,7 +1669,7 @@ private:
                 if (sp.d.user_id && sp.d.user_id != user_id_) {
                     bool should_resend_wants = false;
                     {
-                    std::scoped_lock lock{receive_mutex_};
+                    const std::scoped_lock lock{receive_mutex_};
                     const auto old_it = user_to_ssrc_.find(sp.d.user_id);
                     const bool ssrc_changed = (old_it == user_to_ssrc_.end()) || (old_it->second != sp.d.ssrc);
                     if (old_it != user_to_ssrc_.end() && old_it->second != sp.d.ssrc) {
@@ -1739,7 +1740,7 @@ private:
                     bool in_user_wants = false;
 
                     {
-                    std::scoped_lock lock{receive_mutex_};
+                    const std::scoped_lock lock{receive_mutex_};
                     user_decryptors_.erase(uid);
                     if (const auto it = user_to_ssrc_.find(uid); it != user_to_ssrc_.end()) {
                         removed_ssrc = it->second;
@@ -1750,7 +1751,7 @@ private:
                     }
 
                     if (removed_ssrc) {
-                        std::scoped_lock lock{decoder_mutex_};
+                        const std::scoped_lock lock{decoder_mutex_};
                         opus_decoders_.erase(*removed_ssrc);
                     }
 
@@ -2000,13 +2001,13 @@ private:
         }
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         user_decryptors_.clear();
         ssrc_to_user_.clear();
         user_to_ssrc_.clear();
         }
         {
-        std::scoped_lock lock{decoder_mutex_};
+        const std::scoped_lock lock{decoder_mutex_};
         opus_decoders_.clear();
         }
     }
@@ -2015,11 +2016,11 @@ private:
         if (!uid) return;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         if (user_decryptors_.contains(uid)) return;
         }
 
-        auto dec = std::shared_ptr<discord::dave::IDecryptor>(discord::dave::CreateDecryptor());
+        const auto dec = std::shared_ptr<discord::dave::IDecryptor>(discord::dave::CreateDecryptor());
         if (!dec) return;
 
         const bool passthrough = (dave_protocol_version_ == 0) || pending_passthrough_.value_or(false);
@@ -2030,14 +2031,14 @@ private:
             }
         }
 
-        std::scoped_lock lock{receive_mutex_};
-        user_decryptors_.try_emplace(uid, std::move(dec));
+        const std::scoped_lock lock{receive_mutex_};
+        user_decryptors_.try_emplace(uid, dec);
     }
 
     void update_all_decryptors_key_ratchets() {
         std::vector<std::pair<snowflake, std::shared_ptr<discord::dave::IDecryptor>>> snapshot;
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         snapshot.reserve(user_decryptors_.size());
         for (const auto& [uid, dec] : user_decryptors_) {
             snapshot.emplace_back(uid, dec);
@@ -2054,7 +2055,7 @@ private:
     void update_all_decryptors_passthrough(const bool passthrough) {
         std::vector<std::shared_ptr<discord::dave::IDecryptor>> snapshot;
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         snapshot.reserve(user_decryptors_.size());
         for (const auto& [_, dec] : user_decryptors_) {
             snapshot.push_back(dec);
@@ -2067,12 +2068,12 @@ private:
     }
 
     [[nodiscard]] bool has_non_default_sink_wants() const noexcept {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         return !receive_any_ || !user_wants_.empty() || !raw_ssrc_wants_.empty();
     }
 
     void dispatch_media_sink_wants() {
-        boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
+        boost::asio::dispatch(strand_, [self = this->shared_from_this()] {
             if (self->destructed_ || !self->ready_received_) return;
             self->send_media_sink_wants_current();
         });
@@ -2081,7 +2082,7 @@ private:
     void send_media_sink_wants_current() {
         std::unordered_map<std::string, std::uint8_t> wants;
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         wants.emplace("any", receive_any_ ? std::uint8_t{100} : std::uint8_t{0});
         for (const auto& [uid, enabled] : user_wants_) {
             if (const auto it = user_to_ssrc_.find(uid); it != user_to_ssrc_.end()) {
@@ -2096,7 +2097,7 @@ private:
     }
 
     void send_media_sink_wants_payload(std::unordered_map<std::string, std::uint8_t>& wants) {
-        media_sink_wants_payload payload{wants};
+        const media_sink_wants_payload payload{wants};
 
         std::string out;
         if (json::write_json(payload, out, json_logger)) {
@@ -2194,7 +2195,9 @@ public:
     Callback<voice_closed> on_closed{io_ctx_};
     Callback<channel_moved> on_channel_move{io_ctx_};
     Callback<user_speaking> on_speaking{io_ctx_};
+    /// Note: incoming audio is disabled by default (`MediaSinkWants` `{"any": 0}`). Enable via `join_options::receive_audio`, `set_receive_any_audio(true)`, or `set_received_users(...)`.
     Callback<received_opus> on_opus_received{io_ctx_};
+    /// Note: incoming audio is disabled by default (`MediaSinkWants` `{"any": 0}`). Enable via `join_options::receive_audio`, `set_receive_any_audio(true)`, or `set_received_users(...)`.
     Callback<received_audio> on_audio_received{io_ctx_};
 private:
     struct open_cb    { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
@@ -2277,7 +2280,7 @@ private:
         std::shared_ptr<discord::dave::IDecryptor> decryptor;
 
         {
-        std::scoped_lock lock{receive_mutex_};
+        const std::scoped_lock lock{receive_mutex_};
         if (const auto it = ssrc_to_user_.find(ssrc); it != ssrc_to_user_.end()) {
             speaker_id = it->second;
         }
@@ -2307,7 +2310,7 @@ private:
         if (decryptor) {
             const std::size_t max_plain = decryptor->GetMaxPlaintextByteSize(discord::dave::MediaType::Audio, payload.size());
             std::uint8_t* out_ptr = stack_buf.raw_buf.data();
-            std::size_t out_cap = stack_buf.capacity();
+            std::size_t out_cap = store<MAX_DAVE_BUFFER_SIZE>::capacity();
 
             if (max_plain > out_cap) {
                 heap_buf.resize(max_plain);
@@ -2346,7 +2349,7 @@ private:
         if (want_pcm) {
             std::vector<std::int16_t> pcm;
             {
-            std::scoped_lock lock{decoder_mutex_};
+            const std::scoped_lock lock{decoder_mutex_};
             auto [it, _] = opus_decoders_.try_emplace(ssrc);
             pcm = it->second.decode(opus_span);
             }
@@ -2365,7 +2368,7 @@ private:
     }
 
     struct udp_on_receive_cb { std::weak_ptr<connection> s; void operator()(const std::uint32_t ssrc, const std::uint16_t sequence, const std::uint32_t timestamp, const std::span<const std::uint8_t> payload) const {
-        if (auto self = s.lock()) {
+        if (const auto self = s.lock()) {
             self->handle_udp_packet(ssrc, sequence, timestamp, payload);
         }
     } };
@@ -2392,7 +2395,7 @@ private:
     std::mutex encryptor_mutex_;
 
     mutable std::mutex receive_mutex_;
-    bool receive_any_{true};
+    bool receive_any_{false};
     std::unordered_map<snowflake, bool> user_wants_;
     std::unordered_map<std::uint32_t, std::uint8_t> raw_ssrc_wants_;
     std::unordered_map<std::uint32_t, snowflake> ssrc_to_user_;
