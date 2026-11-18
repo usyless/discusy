@@ -9,6 +9,7 @@
 #include <ranges>
 #include <array>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <version>
 
@@ -24,6 +25,7 @@
 #include "dave.hpp"
 #include "internal.hpp"
 #include "opus_encoder.hpp"
+#include "opus_decoder.hpp"
 
 namespace discusy::voice {
 
@@ -184,6 +186,39 @@ struct speaking_ {
 
 using speaking_payload = send_payload_base<VoiceOpcode::Speaking, speaking_>;
 
+struct speaking_recv {
+    snowflake user_id{};
+    std::uint32_t ssrc{};
+    speaking_mode speaking{};
+};
+
+using media_sink_wants_payload = send_payload_base<VoiceOpcode::MediaSinkWants, std::unordered_map<std::string, std::uint8_t>>;
+
+struct user_speaking {
+    snowflake guild_id{};
+    snowflake user_id{};
+    std::uint32_t ssrc{};
+    speaking_mode speaking{};
+};
+
+struct received_opus {
+    snowflake guild_id{};
+    snowflake user_id{}; // 0 if the user's SSRC has not been announced via Speaking yet
+    std::uint32_t ssrc{};
+    std::uint16_t sequence{};
+    std::uint32_t timestamp{};
+    std::vector<std::uint8_t> opus{};
+};
+
+struct received_audio {
+    snowflake guild_id{};
+    snowflake user_id{}; // 0 if the user's SSRC has not been announced via Speaking yet
+    std::uint32_t ssrc{};
+    std::uint16_t sequence{};
+    std::uint32_t timestamp{};
+    std::vector<std::int16_t> pcm{}; // 48kHz stereo signed 16-bit PCM
+};
+
 struct audio_stopped {
     audio_stop_reason reason{};
     snowflake guild_id{};
@@ -205,6 +240,7 @@ struct channel_moved {
 class connection : public std::enable_shared_from_this<connection> {
 public:
     using opus_encoder = discusy::voice::opus_encoder;
+    using opus_decoder = discusy::voice::opus_decoder;
 
     connection(connection&&) = delete;
     connection& operator=(connection&&) = delete;
@@ -239,7 +275,8 @@ public:
             io_ctx_,
             udp_on_error_cb{this->weak_from_this()},
             udp_dave_encrypt{this->weak_from_this()},
-            udp_on_idle_cb{this->weak_from_this()}
+            udp_on_idle_cb{this->weak_from_this()},
+            udp_on_receive_cb{this->weak_from_this()}
         );
         udp_client_ = udp_client_shared_.get();
 
@@ -482,6 +519,124 @@ public:
 
     [[nodiscard]] std::uint32_t get_bitrate() const noexcept {
         return target_bitrate_.load(std::memory_order_relaxed);
+    }
+
+    /// Controls whether incoming audio from users without an explicit override is received (`any: 100` vs `any: 0`).
+    void set_receive_any_audio(const bool enabled) {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        receive_any_ = enabled;
+        }
+        dispatch_media_sink_wants();
+    }
+
+    /// Controls whether incoming audio from `user_id` is received (`100` vs `0`), overriding `set_receive_any_audio`.
+    void set_receive_user_audio(const snowflake user_id, const bool enabled) {
+        if (closed_.load(std::memory_order_acquire) || !user_id) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        user_wants_[user_id] = enabled;
+        }
+        dispatch_media_sink_wants();
+    }
+
+    /// Restricts incoming audio exclusively to `user_ids` (sets `any` to `0` and enables only the given users).
+    /// Passing an empty span disables all incoming audio (`any: 0`).
+    void set_received_users(const std::span<const snowflake> user_ids) {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        receive_any_ = false;
+        user_wants_.clear();
+        raw_ssrc_wants_.clear();
+        for (const auto id : user_ids) {
+            if (id) user_wants_[id] = true;
+        }
+        }
+        dispatch_media_sink_wants();
+    }
+
+    void set_received_users(std::initializer_list<snowflake> user_ids) {
+        set_received_users(std::span<const snowflake>{user_ids.begin(), user_ids.size()});
+    }
+
+    /// Clears all per-user and per-SSRC audio overrides, falling back to `is_receiving_any_audio()`.
+    void clear_user_audio_filters() {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        user_wants_.clear();
+        raw_ssrc_wants_.clear();
+        }
+        dispatch_media_sink_wants();
+    }
+
+    /// Stops receiving audio from all users (`any: 0`, clearing per-user overrides).
+    void disable_audio_receive() {
+        set_received_users(std::span<const snowflake>{});
+    }
+
+    /// Receives audio from all users (`any: 100`, clearing per-user overrides).
+    void enable_all_audio_receive() {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        receive_any_ = true;
+        user_wants_.clear();
+        raw_ssrc_wants_.clear();
+        }
+        dispatch_media_sink_wants();
+    }
+
+    /// Sends a custom Opcode 15 Media Sink Wants payload directly (keys are `"any"` or SSRC strings, values `0..100`).
+    void send_media_sink_wants(std::unordered_map<std::string, std::uint8_t> wants) {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        user_wants_.clear();
+        raw_ssrc_wants_.clear();
+        for (auto& [key, val] : wants) {
+            val = std::min<std::uint8_t>(val, 100);
+            if (key == "any") {
+                receive_any_ = (val > 0);
+            } else if (const auto parsed = ulp::str::to_number<std::uint32_t>(key)) {
+                raw_ssrc_wants_[*parsed] = val;
+            }
+        }
+        }
+
+        boost::asio::dispatch(strand_, [self = this->shared_from_this(), wants = std::move(wants)]() mutable {
+            if (self->destructed_ || !self->ready_received_) return;
+            self->send_media_sink_wants_payload(wants);
+        });
+    }
+
+    [[nodiscard]] bool is_receiving_any_audio() const noexcept {
+        std::scoped_lock lock{receive_mutex_};
+        return receive_any_;
+    }
+
+    [[nodiscard]] opt<snowflake> get_user_for_ssrc(const std::uint32_t ssrc) const noexcept {
+        std::scoped_lock lock{receive_mutex_};
+        if (const auto it = ssrc_to_user_.find(ssrc); it != ssrc_to_user_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] opt<std::uint32_t> get_ssrc_for_user(const snowflake user_id) const noexcept {
+        std::scoped_lock lock{receive_mutex_};
+        if (const auto it = user_to_ssrc_.find(user_id); it != user_to_ssrc_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
     }
 
     // make sure the frame isnt bigger than voice::MAX_OPUS_FRAME_BYTES bytes
@@ -879,6 +1034,17 @@ private:
 
         encoder_.destroy();
 
+        {
+        std::scoped_lock lock{decoder_mutex_};
+        opus_decoders_.clear();
+        }
+        {
+        std::scoped_lock lock{receive_mutex_};
+        user_decryptors_.clear();
+        ssrc_to_user_.clear();
+        user_to_ssrc_.clear();
+        }
+
         on_closed.fire(voice_closed{.guild_id = server_id_});
     }
 
@@ -896,6 +1062,7 @@ private:
     void stop() {
         reconnecting_ = true;
         session_live_ = false;
+        ready_received_ = false;
         ready_.store(false, std::memory_order_release);
         ready_signalled_ = false;
         stop_heartbeat();
@@ -1381,6 +1548,11 @@ private:
                 std::scoped_lock lock{encryptor_mutex_};
                 dave_.encryptor_->AssignSsrcToCodec(ssrc_, discord::dave::Codec::Opus);
                 }
+
+                ready_received_ = true;
+                if (has_non_default_sink_wants()) {
+                    send_media_sink_wants_current();
+                }
                 break;
             };
 
@@ -1393,6 +1565,7 @@ private:
                 }
 
                 dave_protocol_version_ = description.d.dave_protocol_version;
+                dave_protocol_version_atomic_.store(dave_protocol_version_, std::memory_order_release);
 
                 if (dave_protocol_version_ > DAVE_PROTOCOL_VERSION) {
                     #ifdef DISCUSY_LOGGING
@@ -1416,6 +1589,9 @@ private:
                 }
 
                 dave_init_session();
+                if (dave_protocol_version_ == 0) {
+                    update_all_decryptors_passthrough(true);
+                }
 
                 udp_client_->set_secret_key(mode, description.d.secret_key);
 
@@ -1437,6 +1613,11 @@ private:
                 reconnect_scheduled_ = false;
                 reconnect_backoff_time_ = std::chrono::milliseconds{0};
                 reconnect_attempts_ = 0;
+
+                ready_received_ = true;
+                if (has_non_default_sink_wants()) {
+                    send_media_sink_wants_current();
+                }
 
                 session_live_ = true;
                 maybe_signal_ready();
@@ -1478,6 +1659,46 @@ private:
                 break;
             }
 
+            case VoiceOpcode::Speaking: {
+                recieve_payload<speaking_recv> sp{};
+                if (json::parse_json_view(sp, json_payload, shared_json_ctx_, json_logger)) {
+                    break;
+                }
+
+                if (sp.d.user_id && sp.d.user_id != user_id_) {
+                    bool should_resend_wants = false;
+                    {
+                    std::scoped_lock lock{receive_mutex_};
+                    const auto old_it = user_to_ssrc_.find(sp.d.user_id);
+                    const bool ssrc_changed = (old_it == user_to_ssrc_.end()) || (old_it->second != sp.d.ssrc);
+                    if (old_it != user_to_ssrc_.end() && old_it->second != sp.d.ssrc) {
+                        ssrc_to_user_.erase(old_it->second);
+                    }
+                    ssrc_to_user_[sp.d.ssrc] = sp.d.user_id;
+                    user_to_ssrc_[sp.d.user_id] = sp.d.ssrc;
+                    should_resend_wants = ssrc_changed && user_wants_.contains(sp.d.user_id);
+                    }
+
+                    ensure_user_decryptor(sp.d.user_id);
+
+                    if (should_resend_wants && ready_received_) {
+                        send_media_sink_wants_current();
+                    }
+                }
+
+                on_speaking.fire(user_speaking{
+                    .guild_id = server_id_,
+                    .user_id = sp.d.user_id,
+                    .ssrc = sp.d.ssrc,
+                    .speaking = sp.d.speaking,
+                });
+                break;
+            }
+
+            case VoiceOpcode::MediaSinkWants: {
+                break;
+            }
+
             // MLS stuff
             case VoiceOpcode::ClientsConnect: {
                 recieve_payload<clients_connect> connected{};
@@ -1490,6 +1711,9 @@ private:
                 for (const auto& id : connected.d.user_ids) {
                     if (id != user_id_str_) {
                         dave_.session_->AddRecognizedUser(id);
+                        if (const auto parsed = ulp::str::to_number<std::uint64_t>(id)) {
+                            ensure_user_decryptor(snowflake{*parsed});
+                        }
                     }
                 }
 
@@ -1508,6 +1732,32 @@ private:
                 }
 
                 dave_.session_->RemoveRecognizedUser(disconnected.d.user_id);
+
+                if (const auto parsed = ulp::str::to_number<std::uint64_t>(disconnected.d.user_id)) {
+                    const snowflake uid{*parsed};
+                    opt<std::uint32_t> removed_ssrc{};
+                    bool in_user_wants = false;
+
+                    {
+                    std::scoped_lock lock{receive_mutex_};
+                    user_decryptors_.erase(uid);
+                    if (const auto it = user_to_ssrc_.find(uid); it != user_to_ssrc_.end()) {
+                        removed_ssrc = it->second;
+                        ssrc_to_user_.erase(it->second);
+                        user_to_ssrc_.erase(it);
+                    }
+                    in_user_wants = user_wants_.contains(uid);
+                    }
+
+                    if (removed_ssrc) {
+                        std::scoped_lock lock{decoder_mutex_};
+                        opus_decoders_.erase(*removed_ssrc);
+                    }
+
+                    if (in_user_wants && removed_ssrc && ready_received_) {
+                        send_media_sink_wants_current();
+                    }
+                }
 
                 break;
             }
@@ -1697,6 +1947,7 @@ private:
 
     bool apply_key_ratchet() {
         auto key_ratchet = dave_.session_->GetKeyRatchet(user_id_str_);
+        update_all_decryptors_key_ratchets();
 
         if (!key_ratchet) {
             #ifdef DISCUSY_LOGGING
@@ -1721,6 +1972,14 @@ private:
         const bool passthrough = *pending_passthrough_;
         pending_passthrough_.reset();
 
+        if (passthrough) {
+            dave_protocol_version_atomic_.store(0, std::memory_order_release);
+        } else {
+            dave_protocol_version_atomic_.store(dave_protocol_version_, std::memory_order_release);
+        }
+
+        update_all_decryptors_passthrough(passthrough);
+
         {
         std::scoped_lock lock{encryptor_mutex_};
         dave_.encryptor_->SetPassthroughMode(passthrough);
@@ -1734,9 +1993,120 @@ private:
         pending_passthrough_.reset();
         transition_id_ = 0;
 
+        {
         std::scoped_lock lock{encryptor_mutex_};
         dave_.encryptor_->SetKeyRatchet(nullptr);
         dave_.encryptor_->SetPassthroughMode(false);
+        }
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        user_decryptors_.clear();
+        ssrc_to_user_.clear();
+        user_to_ssrc_.clear();
+        }
+        {
+        std::scoped_lock lock{decoder_mutex_};
+        opus_decoders_.clear();
+        }
+    }
+
+    void ensure_user_decryptor(const snowflake uid) {
+        if (!uid) return;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        if (user_decryptors_.contains(uid)) return;
+        }
+
+        auto dec = std::shared_ptr<discord::dave::IDecryptor>(discord::dave::CreateDecryptor());
+        if (!dec) return;
+
+        const bool passthrough = (dave_protocol_version_ == 0) || pending_passthrough_.value_or(false);
+        dec->TransitionToPassthroughMode(passthrough);
+        if (dave_protocol_version_ > 0) {
+            if (auto kr = dave_.session_->GetKeyRatchet(uid.str().str())) {
+                dec->TransitionToKeyRatchet(std::move(kr));
+            }
+        }
+
+        std::scoped_lock lock{receive_mutex_};
+        user_decryptors_.try_emplace(uid, std::move(dec));
+    }
+
+    void update_all_decryptors_key_ratchets() {
+        std::vector<std::pair<snowflake, std::shared_ptr<discord::dave::IDecryptor>>> snapshot;
+        {
+        std::scoped_lock lock{receive_mutex_};
+        snapshot.reserve(user_decryptors_.size());
+        for (const auto& [uid, dec] : user_decryptors_) {
+            snapshot.emplace_back(uid, dec);
+        }
+        }
+
+        for (const auto& [uid, dec] : snapshot) {
+            if (auto kr = dave_.session_->GetKeyRatchet(uid.str().str())) {
+                dec->TransitionToKeyRatchet(std::move(kr));
+            }
+        }
+    }
+
+    void update_all_decryptors_passthrough(const bool passthrough) {
+        std::vector<std::shared_ptr<discord::dave::IDecryptor>> snapshot;
+        {
+        std::scoped_lock lock{receive_mutex_};
+        snapshot.reserve(user_decryptors_.size());
+        for (const auto& [_, dec] : user_decryptors_) {
+            snapshot.push_back(dec);
+        }
+        }
+
+        for (const auto& dec : snapshot) {
+            dec->TransitionToPassthroughMode(passthrough);
+        }
+    }
+
+    [[nodiscard]] bool has_non_default_sink_wants() const noexcept {
+        std::scoped_lock lock{receive_mutex_};
+        return !receive_any_ || !user_wants_.empty() || !raw_ssrc_wants_.empty();
+    }
+
+    void dispatch_media_sink_wants() {
+        boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
+            if (self->destructed_ || !self->ready_received_) return;
+            self->send_media_sink_wants_current();
+        });
+    }
+
+    void send_media_sink_wants_current() {
+        std::unordered_map<std::string, std::uint8_t> wants;
+        {
+        std::scoped_lock lock{receive_mutex_};
+        wants.emplace("any", receive_any_ ? std::uint8_t{100} : std::uint8_t{0});
+        for (const auto& [uid, enabled] : user_wants_) {
+            if (const auto it = user_to_ssrc_.find(uid); it != user_to_ssrc_.end()) {
+                wants[std::to_string(it->second)] = enabled ? std::uint8_t{100} : std::uint8_t{0};
+            }
+        }
+        for (const auto& [ssrc, val] : raw_ssrc_wants_) {
+            wants[std::to_string(ssrc)] = val;
+        }
+        }
+        send_media_sink_wants_payload(wants);
+    }
+
+    void send_media_sink_wants_payload(std::unordered_map<std::string, std::uint8_t>& wants) {
+        media_sink_wants_payload payload{wants};
+
+        std::string out;
+        if (json::write_json(payload, out, json_logger)) {
+            return;
+        }
+
+        #ifdef DISCUSY_LOGGING
+        log("Sent MediaSinkWants: {}", out);
+        #endif
+        ws_.send(std::move(out));
     }
 
     void send_speaking(std::optional<speaking_mode> mode_override = std::nullopt) {
@@ -1823,6 +2193,9 @@ public:
     Callback<voice_ready> on_ready{io_ctx_};
     Callback<voice_closed> on_closed{io_ctx_};
     Callback<channel_moved> on_channel_move{io_ctx_};
+    Callback<user_speaking> on_speaking{io_ctx_};
+    Callback<received_opus> on_opus_received{io_ctx_};
+    Callback<received_audio> on_audio_received{io_ctx_};
 private:
     struct open_cb    { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
     struct connect_cb { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
@@ -1893,7 +2266,111 @@ private:
         return encrypt_result::ok;
     } };
 
-    using udp_client_t = udp::client<udp_on_error_cb, udp_dave_encrypt, udp_on_idle_cb>;
+    void handle_udp_packet(const std::uint32_t ssrc, const std::uint16_t sequence, const std::uint32_t timestamp, const std::span<const std::uint8_t> payload) {
+        if (closed_.load(std::memory_order_acquire)) return;
+
+        const bool want_opus = on_opus_received.has_listeners();
+        const bool want_pcm = on_audio_received.has_listeners();
+        if (!want_opus && !want_pcm) return;
+
+        snowflake speaker_id{};
+        std::shared_ptr<discord::dave::IDecryptor> decryptor;
+
+        {
+        std::scoped_lock lock{receive_mutex_};
+        if (const auto it = ssrc_to_user_.find(ssrc); it != ssrc_to_user_.end()) {
+            speaker_id = it->second;
+        }
+
+        bool accept = receive_any_;
+        if (const auto ssrc_it = raw_ssrc_wants_.find(ssrc); ssrc_it != raw_ssrc_wants_.end()) {
+            accept = (ssrc_it->second > 0);
+        } else if (speaker_id) {
+            if (const auto user_it = user_wants_.find(speaker_id); user_it != user_wants_.end()) {
+                accept = user_it->second;
+            }
+        }
+        if (!accept) return;
+
+        if (speaker_id) {
+            if (const auto dec_it = user_decryptors_.find(speaker_id); dec_it != user_decryptors_.end()) {
+                decryptor = dec_it->second;
+            }
+        }
+        }
+
+        const bool dave_disabled = (dave_protocol_version_atomic_.load(std::memory_order_acquire) == 0);
+        std::span<const std::uint8_t> opus_span{};
+        store<MAX_DAVE_BUFFER_SIZE> stack_buf;
+        std::vector<std::uint8_t> heap_buf;
+
+        if (decryptor) {
+            const std::size_t max_plain = decryptor->GetMaxPlaintextByteSize(discord::dave::MediaType::Audio, payload.size());
+            std::uint8_t* out_ptr = stack_buf.raw_buf.data();
+            std::size_t out_cap = stack_buf.capacity();
+
+            if (max_plain > out_cap) {
+                heap_buf.resize(max_plain);
+                out_ptr = heap_buf.data();
+                out_cap = heap_buf.size();
+            }
+
+            std::size_t bytes_written{0};
+            const auto res = decryptor->Decrypt(
+                discord::dave::MediaType::Audio,
+                discord::dave::MakeArrayView<const std::uint8_t>(payload.data(), payload.size()),
+                discord::dave::MakeArrayView(out_ptr, out_cap),
+                &bytes_written
+            );
+            if (res != discord::dave::IDecryptor::Success || bytes_written == 0) {
+                return;
+            }
+            opus_span = std::span<const std::uint8_t>{out_ptr, bytes_written};
+        } else if (dave_disabled) {
+            opus_span = payload;
+        } else {
+            return;
+        }
+
+        if (want_opus) {
+            on_opus_received.fire(received_opus{
+                .guild_id = server_id_,
+                .user_id = speaker_id,
+                .ssrc = ssrc,
+                .sequence = sequence,
+                .timestamp = timestamp,
+                .opus = std::vector<std::uint8_t>(opus_span.begin(), opus_span.end()),
+            });
+        }
+
+        if (want_pcm) {
+            std::vector<std::int16_t> pcm;
+            {
+            std::scoped_lock lock{decoder_mutex_};
+            auto [it, _] = opus_decoders_.try_emplace(ssrc);
+            pcm = it->second.decode(opus_span);
+            }
+
+            if (!pcm.empty()) {
+                on_audio_received.fire(received_audio{
+                    .guild_id = server_id_,
+                    .user_id = speaker_id,
+                    .ssrc = ssrc,
+                    .sequence = sequence,
+                    .timestamp = timestamp,
+                    .pcm = std::move(pcm),
+                });
+            }
+        }
+    }
+
+    struct udp_on_receive_cb { std::weak_ptr<connection> s; void operator()(const std::uint32_t ssrc, const std::uint16_t sequence, const std::uint32_t timestamp, const std::span<const std::uint8_t> payload) const {
+        if (auto self = s.lock()) {
+            self->handle_udp_packet(ssrc, sequence, timestamp, payload);
+        }
+    } };
+
+    using udp_client_t = udp::client<udp_on_error_cb, udp_dave_encrypt, udp_on_idle_cb, udp_on_receive_cb>;
 
     std::shared_ptr<udp_client_t> udp_client_shared_;
     udp_client_t* udp_client_ = nullptr;
@@ -1913,6 +2390,17 @@ private:
 
     dave dave_;
     std::mutex encryptor_mutex_;
+
+    mutable std::mutex receive_mutex_;
+    bool receive_any_{true};
+    std::unordered_map<snowflake, bool> user_wants_;
+    std::unordered_map<std::uint32_t, std::uint8_t> raw_ssrc_wants_;
+    std::unordered_map<std::uint32_t, snowflake> ssrc_to_user_;
+    std::unordered_map<snowflake, std::uint32_t> user_to_ssrc_;
+    std::unordered_map<snowflake, std::shared_ptr<discord::dave::IDecryptor>> user_decryptors_;
+
+    std::mutex decoder_mutex_;
+    std::unordered_map<std::uint32_t, opus_decoder> opus_decoders_;
 
     opus_encoder encoder_{};
     std::atomic<std::uint32_t> target_bitrate_{DEFAULT_OPUS_BITRATE};
@@ -1938,6 +2426,7 @@ private:
     std::chrono::milliseconds reconnect_backoff_time_{0};
 
     discord::dave::ProtocolVersion dave_protocol_version_{};
+    std::atomic<discord::dave::ProtocolVersion> dave_protocol_version_atomic_{0};
 
     std::int64_t last_hb_nonce_{-1};
 
@@ -1960,6 +2449,7 @@ private:
     bool recieved_heartbeat_ack_{false};
 
     bool session_live_{false};
+    bool ready_received_{false};
     bool awaiting_connect_ready_{false};
     bool reconnect_scheduled_{false};
     bool escalated_{false};

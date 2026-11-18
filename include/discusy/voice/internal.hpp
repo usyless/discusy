@@ -55,6 +55,8 @@ inline constexpr std::size_t DISCORD_CHANNELS = 2;
 inline constexpr std::size_t DISCORD_FRAME_SIZE_MS = 20;
 
 inline constexpr std::size_t TIMESTAMP_INCREMENT = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
+inline constexpr std::size_t MAX_OPUS_DECODED_SAMPLES_PER_CHANNEL = (DISCORD_SAMPLING_RATE / 1000) * 120; // Opus max frame duration is 120ms
+inline constexpr std::size_t MAX_OPUS_DECODED_SAMPLES = MAX_OPUS_DECODED_SAMPLES_PER_CHANNEL * DISCORD_CHANNELS;
 
 inline constexpr auto DISCORD_FRAME_DURATION = std::chrono::milliseconds{DISCORD_FRAME_SIZE_MS};
 
@@ -77,6 +79,8 @@ struct audio_stats {
     std::uint64_t not_ready_stalls{};   // ticks spent holding for a DAVE key ratchet
     std::uint64_t no_key_drops{};       // frames dropped after the hold expired, still no key
     std::int64_t  worst_lateness_us{};  // worst observed pacing lateness
+    std::uint64_t packets_received{};   // valid voice RTP packets decrypted
+    std::uint64_t receive_decrypt_drops{}; // incoming packets that failed transport decryption
 };
 
 static constexpr std::array<std::uint8_t, 3> opus_silence = {0xF8, 0xFF, 0xFE};

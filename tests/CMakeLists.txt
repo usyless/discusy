@@ -21,6 +21,7 @@ set(TEST_SOURCES
     unit/test_zstd.cpp
     unit/test_etf.cpp
     unit/test_component_parsing.cpp
+    unit/test_voice_receive.cpp
 )
 
 add_executable(discusy_unit_tests ${TEST_SOURCES})

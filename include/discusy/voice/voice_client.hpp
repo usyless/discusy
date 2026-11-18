@@ -77,6 +77,7 @@ public:
     using connection = discusy::voice::connection;
     using connection_ref = std::shared_ptr<connection>;
     using opus_encoder = discusy::voice::opus_encoder;
+    using opus_decoder = discusy::voice::opus_decoder;
     using data = voice_connection_data;
 
     // this does not mean the connection will be valid, just that it was created
@@ -85,6 +86,7 @@ public:
     struct join_options {
         bool muted{false};
         bool deaf{false};
+        bool receive_audio{true};
         std::chrono::milliseconds timeout{5000};
         std::function<void(connection&)> on_create{};
     };
@@ -586,6 +588,10 @@ private:
             }
 
             if (!conn) return finish(std::move(self_ptr), boost::asio::error::no_memory, nullptr);
+
+            if (!self_ptr->options.receive_audio) {
+                conn->set_receive_any_audio(false);
+            }
 
             if (self_ptr->options.on_create) {
                 self_ptr->options.on_create(*conn);

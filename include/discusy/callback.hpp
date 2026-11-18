@@ -713,6 +713,12 @@ public:
         return core_->unregister(id);
     }
 
+    [[nodiscard]] bool has_listeners() const noexcept {
+        if (!core_) return false;
+        return core_->active_count.load(std::memory_order_acquire) != 0 ||
+               core_->when_waiters_count.load(std::memory_order_acquire) != 0;
+    }
+
     void fire(T&& data) {
         if (!core_) return;
         const auto active_c = core_->active_count.load(std::memory_order_acquire);

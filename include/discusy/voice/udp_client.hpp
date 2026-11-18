@@ -41,6 +41,11 @@ template <std::integral T>
     }
 }
 
+template <std::integral T>
+[[nodiscard]] GLZ_ALWAYS_INLINE constexpr T from_network_order(T value) noexcept {
+    return to_network_order(value);
+}
+
 enum class encryption_mode : std::uint8_t {
     aead_aes256_gcm_rtpsize,
     aead_xchacha20_poly1305_rtpsize,
@@ -48,23 +53,25 @@ enum class encryption_mode : std::uint8_t {
 
 using boost::asio::ip::udp;
 
-template <typename errCB, typename encryptCB, typename idleCB>
+template <typename errCB, typename encryptCB, typename idleCB, typename receiveCB>
 requires (
     std::invocable<std::decay_t<errCB>, boost::system::error_code> &&
     std::invocable<std::decay_t<encryptCB>, const discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>&, discusy::voice::store<discusy::voice::MAX_DAVE_BUFFER_SIZE>&> &&
-    std::invocable<std::decay_t<idleCB>, discusy::voice::audio_stop_reason>
+    std::invocable<std::decay_t<idleCB>, discusy::voice::audio_stop_reason> &&
+    std::invocable<std::decay_t<receiveCB>, std::uint32_t, std::uint16_t, std::uint32_t, std::span<const std::uint8_t>>
 )
-class client : public std::enable_shared_from_this<client<errCB, encryptCB, idleCB>> {
+class client : public std::enable_shared_from_this<client<errCB, encryptCB, idleCB, receiveCB>> {
 public:
 
-    template <typename F, typename F2, typename F3>
+    template <typename F, typename F2, typename F3, typename F4>
     requires (
         std::invocable<F&, boost::system::error_code> &&
         std::invocable<F2&, const discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>&, discusy::voice::store<discusy::voice::MAX_DAVE_BUFFER_SIZE>&> &&
-        std::invocable<F3&, discusy::voice::audio_stop_reason>
+        std::invocable<F3&, discusy::voice::audio_stop_reason> &&
+        std::invocable<F4&, std::uint32_t, std::uint16_t, std::uint32_t, std::span<const std::uint8_t>>
     )
-    client(ctx::io_context& io_context, F&& cb, F2&& cb2, F3&& cb3)
-        : on_error_{std::forward<F>(cb)}, encrypt_cb_{std::forward<F2>(cb2)}, on_idle_{std::forward<F3>(cb3)},
+    client(ctx::io_context& io_context, F&& cb, F2&& cb2, F3&& cb3, F4&& cb4)
+        : on_error_{std::forward<F>(cb)}, encrypt_cb_{std::forward<F2>(cb2)}, on_idle_{std::forward<F3>(cb3)}, receive_cb_{std::forward<F4>(cb4)},
         io_ctx_{io_context}, strand_{make_pacing_strand(io_context)}, socket_{strand_, udp::endpoint(udp::v4(), 0)},
         resolver_{strand_}, timer_{strand_}, silence_frame_{discusy::voice::opus_silence}
     {
@@ -308,6 +315,8 @@ public:
             .not_ready_stalls    = stat_not_ready_stalls_.load(std::memory_order_relaxed),
             .no_key_drops        = stat_no_key_drops_.load(std::memory_order_relaxed),
             .worst_lateness_us   = stat_worst_lateness_us_.load(std::memory_order_relaxed),
+            .packets_received    = stat_packets_received_.load(std::memory_order_relaxed),
+            .receive_decrypt_drops = stat_receive_decrypt_drops_.load(std::memory_order_relaxed),
         };
     }
 
@@ -324,11 +333,14 @@ public:
         stat_not_ready_stalls_.store(0, std::memory_order_relaxed);
         stat_no_key_drops_.store(0, std::memory_order_relaxed);
         stat_worst_lateness_us_.store(0, std::memory_order_relaxed);
+        stat_packets_received_.store(0, std::memory_order_relaxed);
+        stat_receive_decrypt_drops_.store(0, std::memory_order_relaxed);
     }
 
     using error_cb_t = std::decay_t<errCB>;
     using encrypt_cb_t = std::decay_t<encryptCB>;
     using idle_cb_t = std::decay_t<idleCB>;
+    using receive_cb_t = std::decay_t<receiveCB>;
 
 private:
     using clock = std::chrono::steady_clock;
@@ -347,6 +359,7 @@ private:
     error_cb_t on_error_;
     encrypt_cb_t encrypt_cb_;
     idle_cb_t on_idle_;
+    receive_cb_t receive_cb_;
 
     #ifdef DISCUSY_LOGGING
     template <typename ...Args>
@@ -552,6 +565,100 @@ private:
         return true;
     }
 
+    void process_received_packet(const std::size_t bytes_transferred) {
+        static constexpr std::size_t AEAD_OVERHEAD = 16;
+        if (!keyed_ || !armed_ || bytes_transferred < 12 + AEAD_OVERHEAD + 4) return;
+        if ((recv_buffer_[0] >> 6) != 2) return; // RTP v2 only
+        if (recv_buffer_[1] >= 200 && recv_buffer_[1] <= 204) return; // Ignore RTCP
+
+        const std::size_t cc = recv_buffer_[0] & 0x0F;
+        const bool has_ext = (recv_buffer_[0] & 0x10) != 0;
+        const bool has_padding = (recv_buffer_[0] & 0x20) != 0;
+
+        const std::size_t base_header_len = 12 + (cc * 4);
+        const std::size_t aad_len = base_header_len + (has_ext ? 4 : 0);
+        if (bytes_transferred < aad_len + AEAD_OVERHEAD + 4) return;
+
+        std::uint16_t seq{};
+        std::memcpy(&seq, &recv_buffer_[2], sizeof(seq));
+        seq = from_network_order(seq);
+
+        std::uint32_t ts{};
+        std::memcpy(&ts, &recv_buffer_[4], sizeof(ts));
+        ts = from_network_order(ts);
+
+        std::uint32_t ssrc{};
+        std::memcpy(&ssrc, &recv_buffer_[8], sizeof(ssrc));
+        ssrc = from_network_order(ssrc);
+
+        const std::size_t ciphertext_len = bytes_transferred - aad_len - 4;
+        const uint8_t* ciphertext = recv_buffer_.data() + aad_len;
+        const uint8_t* nonce_suffix = recv_buffer_.data() + (bytes_transferred - 4);
+
+        unsigned long long plaintext_len = 0;
+        int decrypt_rc = -1;
+
+        if (mode_ == encryption_mode::aead_xchacha20_poly1305_rtpsize) {
+            std::array<std::uint8_t, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> sodium_nonce{};
+            std::memcpy(sodium_nonce.data(), nonce_suffix, 4);
+
+            decrypt_rc = crypto_aead_xchacha20poly1305_ietf_decrypt(
+                recv_decrypt_buf_.data(), &plaintext_len,
+                nullptr,
+                ciphertext, ciphertext_len,
+                recv_buffer_.data(), aad_len,
+                sodium_nonce.data(), secret_key_.data()
+            );
+        } else if (mode_ == encryption_mode::aead_aes256_gcm_rtpsize) {
+            std::array<std::uint8_t, crypto_aead_aes256gcm_NPUBBYTES> sodium_nonce{};
+            std::memcpy(sodium_nonce.data(), nonce_suffix, 4);
+
+            decrypt_rc = crypto_aead_aes256gcm_decrypt(
+                recv_decrypt_buf_.data(), &plaintext_len,
+                nullptr,
+                ciphertext, ciphertext_len,
+                recv_buffer_.data(), aad_len,
+                sodium_nonce.data(), secret_key_.data()
+            );
+        }
+
+        if (decrypt_rc != 0) {
+            stat_receive_decrypt_drops_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        std::size_t payload_offset = 0;
+        std::size_t payload_len = static_cast<std::size_t>(plaintext_len);
+
+        if (has_ext) {
+            std::uint16_t ext_words{};
+            std::memcpy(&ext_words, &recv_buffer_[base_header_len + 2], sizeof(ext_words));
+            ext_words = from_network_order(ext_words);
+
+            const std::size_t ext_bytes = static_cast<std::size_t>(ext_words) * 4;
+            if (ext_bytes > payload_len) return;
+            payload_offset += ext_bytes;
+            payload_len -= ext_bytes;
+        }
+
+        if (has_padding && payload_len > 0) {
+            const std::size_t pad_len = recv_decrypt_buf_[payload_offset + payload_len - 1];
+            if (pad_len == 0 || pad_len > payload_len) return;
+            payload_len -= pad_len;
+        }
+
+        if (payload_len == 0) return;
+
+        stat_packets_received_.fetch_add(1, std::memory_order_relaxed);
+        std::invoke(
+            receive_cb_,
+            ssrc,
+            seq,
+            ts,
+            std::span<const std::uint8_t>{recv_decrypt_buf_.data() + payload_offset, payload_len}
+        );
+    }
+
     void start_receive() {
         if (closed_ || !armed_) return;
 
@@ -564,13 +671,14 @@ private:
         );
     }
 
-    void handle_receive(const boost::system::error_code& error, std::size_t /* bytes_transferred */) {
+    void handle_receive(const boost::system::error_code& error, std::size_t bytes_transferred) {
         if (closed_) return;
 
         if (error == boost::asio::error::operation_aborted) return; // whoever cancelled owns it
 
         if (!error) {
             consecutive_recv_errors_ = 0;
+            process_received_packet(bytes_transferred);
             start_receive();
             return;
         }
@@ -912,6 +1020,7 @@ private:
     std::uint64_t session_{0};
 
     std::array<uint8_t, 8192> recv_buffer_{};
+    std::array<uint8_t, 8192> recv_decrypt_buf_{};
 
     discusy::voice::store<discusy::voice::MAX_DAVE_BUFFER_SIZE> dave_buf_; // more than enough
     discusy::voice::store<discusy::voice::MAX_FINAL_BUFFER_SIZE> next_buf_;
@@ -951,6 +1060,8 @@ private:
     std::atomic<std::uint64_t> stat_not_ready_stalls_{0};
     std::atomic<std::uint64_t> stat_no_key_drops_{0};
     std::atomic<std::int64_t> stat_worst_lateness_us_{0};
+    std::atomic<std::uint64_t> stat_packets_received_{0};
+    std::atomic<std::uint64_t> stat_receive_decrypt_drops_{0};
 };
 
 }

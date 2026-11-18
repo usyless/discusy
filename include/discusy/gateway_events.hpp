@@ -1035,9 +1035,8 @@ struct identify_connection_properties {
     decltype(auto) set_device(this auto&& self, std::string d) { self.device = std::move(d); return std::forward<decltype(self)>(self); }
 };
 
-enum class capability : std::uint16_t {
-    CHANNEL_OBFUSCATION = 1ULL << 15, // Opts the client into receiving obfuscated channel metadata over the Gateway for channels it can’t view
-};
+// There are currently no capabilities available to modify gateway behavior.
+enum class capability : std::uint16_t {};
 
 struct identify {
     // Authentication token
