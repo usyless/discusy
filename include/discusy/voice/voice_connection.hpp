@@ -2405,37 +2405,43 @@ private:
             return;
         }
 
+        std::vector<std::int16_t> pcm;
+        if (want_pcm) {
+            const std::scoped_lock lock{decoder_mutex_};
+            if (closed_.load(std::memory_order_acquire)) return;
+            auto [it, _] = opus_decoders_.try_emplace(ssrc);
+            pcm = it->second.decode(opus_span);
+        }
+
         if (want_opus) {
             if (closed_.load(std::memory_order_acquire)) return;
+            std::vector<std::uint8_t> opus;
+            if (!heap_buf.empty()) {
+                heap_buf.resize(opus_span.size());
+                opus = std::move(heap_buf);
+            } else {
+                opus.assign(opus_span.begin(), opus_span.end());
+            }
+
             on_opus_received.fire(received_opus{
                 .guild_id = server_id_,
                 .user_id = speaker_id,
                 .ssrc = ssrc,
                 .sequence = sequence,
                 .timestamp = timestamp,
-                .opus = std::vector<std::uint8_t>(opus_span.begin(), opus_span.end()),
+                .opus = std::move(opus),
             });
         }
 
-        if (want_pcm) {
-            std::vector<std::int16_t> pcm;
-            {
-            const std::scoped_lock lock{decoder_mutex_};
-            if (closed_.load(std::memory_order_acquire)) return;
-            auto [it, _] = opus_decoders_.try_emplace(ssrc);
-            pcm = it->second.decode(opus_span);
-            }
-
-            if (!pcm.empty() && !closed_.load(std::memory_order_acquire)) {
-                on_audio_received.fire(received_audio{
-                    .guild_id = server_id_,
-                    .user_id = speaker_id,
-                    .ssrc = ssrc,
-                    .sequence = sequence,
-                    .timestamp = timestamp,
-                    .pcm = std::move(pcm),
-                });
-            }
+        if (!pcm.empty() && !closed_.load(std::memory_order_acquire)) {
+            on_audio_received.fire(received_audio{
+                .guild_id = server_id_,
+                .user_id = speaker_id,
+                .ssrc = ssrc,
+                .sequence = sequence,
+                .timestamp = timestamp,
+                .pcm = std::move(pcm),
+            });
         }
     }
 
