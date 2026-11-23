@@ -88,7 +88,7 @@ endmacro()
 
 # Dependency Versions
 set_tracked_cache_version(DISCUSY_USYLIBPP_VERSION "main" "Version (git tag/branch) to use for usylibpp")
-set_tracked_cache_version(DISCUSY_ZSTD_VERSION "1.5.7" "Version (git tag/branch) to use for zstd - without the leading v")
+set_tracked_cache_version(DISCUSY_ZSTD_VERSION "1.6.0" "Version (git tag/branch) to use for zstd - without the leading v")
 set_tracked_cache_version(DISCUSY_BOOST_VERSION "boost-1.92.0" "Version (git tag/branch) to use for boost")
 set_tracked_cache_version(DISCUSY_GLAZE_VERSION "v9.1.0" "Version (git tag/branch) to use for glaze")
 set_tracked_cache_version(DISCUSY_OPENSSL_VERSION "4.0.1" "Version (git tag/branch) to use for openssl (UNUSED FOR NOW)")
