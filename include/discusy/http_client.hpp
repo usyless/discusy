@@ -1288,7 +1288,7 @@ private:
                         boost::asio::recycling_allocator<void>{}
                     );
                     const auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
-                    const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, ex);
+                    const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
                     boost::asio::dispatch(
                         ex_imm,
                         boost::asio::bind_allocator(
