@@ -2,27 +2,30 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <flat_map>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 #include <boost/asio.hpp>
-#include <boost/asio/co_composed.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
-#include <boost/url.hpp>
-#include <boost/unordered/concurrent_flat_map.hpp>
 #include <boost/container/small_vector.hpp>
-
-#include <glaze/glaze.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
+#include <boost/url.hpp>
 
 #include "rate_limiter.hpp"
 #include "urls.hpp"
@@ -38,8 +41,8 @@ namespace http {
     using cookies = std::flat_map<std::string, std::string>;
 
     struct response {
-        int status_code;
-        std::string body;
+        int status_code{0};
+        std::string body{};
         http::method method{http::method::get};
         std::optional<http::headers> headers{};
         std::optional<http::cookies> cookies{};
@@ -79,44 +82,65 @@ namespace http {
         }
     };
 
-    [[nodiscard]] inline bool is_snowflake(const std::string_view str) noexcept {
-        return !str.empty() && std::ranges::all_of(str, [](unsigned char c) { 
-            return std::isdigit(c);
+    [[nodiscard]] constexpr bool is_snowflake(const std::string_view str) noexcept {
+        return !str.empty() && std::ranges::all_of(str, [](const char c) noexcept {
+            return c >= '0' && c <= '9';
         });
     }
 
-    [[nodiscard]] inline std::string generate_route_key(http::method m, std::string_view path) {
-        path = path.substr(ulp::str::strlen(urls::REST_BASE) + 1);
+    [[nodiscard]] inline std::string generate_route_key(const http::method m, std::string_view path) {
+        static constexpr std::string_view rest_base{urls::REST_BASE};
+        if (!path.starts_with(rest_base)) {
+            return {};
+        }
+
+        path.remove_prefix(rest_base.size());
+        if (!path.empty() && path.front() != '/' && path.front() != '?' && path.front() != '#') {
+            return {};
+        }
+
+        if (const auto q_or_f = path.find_first_of("?#"); q_or_f != std::string_view::npos) {
+            path = path.substr(0, q_or_f);
+        }
+
+        if (!path.empty() && path.front() == '/') {
+            path.remove_prefix(1);
+        }
+
         boost::container::small_vector<std::string_view, 16> segments;
-        ulp::str::split_by_for_each(path, '/', [&](std::string_view part) {
-            segments.emplace_back(part);
+        ulp::str::split_by_for_each(path, '/', [&](const std::string_view part) {
+            if (!part.empty()) {
+                segments.emplace_back(part);
+            }
         });
 
         const auto method_name = boost::beast::http::to_string(m);
         std::string route_key;
         route_key.reserve(method_name.size() + 1 + path.size());
-        route_key.append(method_name);
-        
-        for (size_t i = 0; i < segments.size(); ++i) {
+        route_key.append(method_name.data(), method_name.size());
+
+        for (std::size_t i = 0; i < segments.size(); ++i) {
             route_key += '/';
-            
-            // If the segment is a numeric ID, we need to check if it's a top-level resource
+
+            // If the segment is a numeric ID, keep major resource parameters
             if (is_snowflake(segments[i])) {
+                bool keep_id = false;
                 if (i > 0) {
                     const auto prev = segments[i - 1];
                     if (prev == "guilds" || prev == "channels" || prev == "webhooks") {
-                        goto keep_id;
+                        keep_id = true;
                     }
                 }
                 // Path structure: /webhooks/{webhook_id}/{webhook_token}
-                if (i > 1 && segments[i - 2] == "webhooks") {
-                    goto keep_id;
+                if (!keep_id && i > 1 && segments[i - 2] == "webhooks") {
+                    keep_id = true;
                 }
 
-                route_key += ":id";
-                continue;
-                keep_id:
-                route_key += segments[i];
+                if (keep_id) {
+                    route_key += segments[i];
+                } else {
+                    route_key += ":id";
+                }
             } else {
                 route_key += segments[i];
             }
@@ -129,20 +153,94 @@ namespace http {
         return route_key;
     }
 
+    struct parsed_url {
+        bool is_ssl{true};
+        bool host_is_name{true};
+        std::string host;
+        std::string host_header;
+        std::string port;
+        std::string target;
+    };
+
+    [[nodiscard]] inline std::optional<parsed_url> parse_http_url(const boost::urls::url_view_base& uv) {
+        const auto scheme_id = uv.scheme_id();
+        if (scheme_id != boost::urls::scheme::http && scheme_id != boost::urls::scheme::https) {
+            return std::nullopt;
+        }
+
+        const bool is_ssl = (scheme_id == boost::urls::scheme::https);
+        const auto host_addr = uv.host_address();
+        if (host_addr.empty()) {
+            return std::nullopt;
+        }
+
+        const bool host_is_name = (uv.host_type() == boost::urls::host_type::name);
+
+        std::string port;
+        if (uv.has_port() && !uv.port().empty()) {
+            if (uv.port_number() == 0) {
+                return std::nullopt;
+            }
+            port.assign(uv.port());
+        } else {
+            port = is_ssl ? "443" : "80";
+        }
+
+        std::string host{host_addr};
+        if (host_is_name) {
+            ulp::str::to_lowercase_inplace(host);
+        }
+
+        std::string host_header{uv.encoded_host()};
+        if (host_is_name) {
+            ulp::str::to_lowercase_inplace(host_header);
+        }
+        const std::string_view default_port = is_ssl ? "443" : "80";
+        if (port != default_port) {
+            host_header += ':';
+            host_header += port;
+        }
+
+        // RFC 9110 / 9112: request-target is path + optional query (never fragment) and starts with '/'.
+        std::string target{uv.encoded_target()};
+        if (target.empty() || target.front() != '/') {
+            target.insert(target.begin(), '/');
+        }
+
+        return parsed_url{
+            .is_ssl = is_ssl,
+            .host_is_name = host_is_name,
+            .host = std::move(host),
+            .host_header = std::move(host_header),
+            .port = std::move(port),
+            .target = std::move(target),
+        };
+    }
+
+    [[nodiscard]] inline std::optional<parsed_url> parse_http_url(const std::string_view url_str) {
+        const auto parsed = boost::urls::parse_uri(url_str);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        return parse_http_url(*parsed);
+    }
+
     using plain_stream_t = ctx::io_context::strand_tcp_stream_t;
     using ssl_stream_t = boost::asio::ssl::stream<plain_stream_t>;
     using stream_t = std::variant<plain_stream_t, ssl_stream_t>;
 
     [[nodiscard]] inline plain_stream_t& get_lowest_layer(stream_t& s) noexcept {
-        return std::visit([](auto& stream) -> plain_stream_t& {
-            return boost::beast::get_lowest_layer(stream);
-        }, s);
+        if (auto* plain = std::get_if<plain_stream_t>(&s)) {
+            return *plain;
+        }
+        return boost::beast::get_lowest_layer(*std::get_if<ssl_stream_t>(&s));
     }
 
     [[nodiscard]] inline ctx::io_context::strand_t get_stream_executor(stream_t& s) noexcept {
-        return std::visit([](auto& stream) {
-            return stream.get_executor();
-        }, s);
+        if (auto* plain = std::get_if<plain_stream_t>(&s)) {
+            return plain->get_executor();
+        }
+        return std::get_if<ssl_stream_t>(&s)->get_executor();
     }
 
     struct pooled_connection {
@@ -162,18 +260,20 @@ namespace http {
     struct pool_endpoint_hash {
         using is_transparent = void;
 
+        [[nodiscard]] static std::size_t combine(const std::string_view host, const std::string_view port, const bool is_ssl) noexcept {
+            static constexpr auto magic = static_cast<std::size_t>(0x9e3779b97f4a7c15ULL);
+            std::size_t seed = std::hash<std::string_view>{}(host);
+            seed ^= std::hash<std::string_view>{}(port) + magic + (seed << 6U) + (seed >> 2U);
+            seed ^= std::hash<bool>{}(is_ssl) + magic + (seed << 6U) + (seed >> 2U);
+            return seed;
+        }
+
         [[nodiscard]] std::size_t operator()(const pool_endpoint_key& k) const noexcept {
-            std::size_t h1 = std::hash<std::string_view>{}(k.host);
-            std::size_t h2 = std::hash<std::string_view>{}(k.port);
-            std::size_t h3 = std::hash<bool>{}(k.is_ssl);
-            return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)) ^ (h3 + 0x9e3779b9 + (h2 << 6) + (h2 >> 2));
+            return combine(k.host, k.port, k.is_ssl);
         }
 
         [[nodiscard]] std::size_t operator()(const std::tuple<std::string_view, std::string_view, bool>& t) const noexcept {
-            std::size_t h1 = std::hash<std::string_view>{}(std::get<0>(t));
-            std::size_t h2 = std::hash<std::string_view>{}(std::get<1>(t));
-            std::size_t h3 = std::hash<bool>{}(std::get<2>(t));
-            return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)) ^ (h3 + 0x9e3779b9 + (h2 << 6) + (h2 >> 2));
+            return combine(std::get<0>(t), std::get<1>(t), std::get<2>(t));
         }
     };
 
@@ -216,22 +316,34 @@ public:
     rate_limiter rate_limiter_;
 
 protected:
+    static constexpr std::size_t POOL_BUFFER_SHRINK_THRESHOLD = 64UZ * 1024;
+    static constexpr std::chrono::seconds eviction_timeout_{107};
+    static constexpr std::chrono::seconds max_idle_time_{117};
+
+    struct eviction_state {
+        ctx::io_context::strand_t strand;
+        ctx::io_context::strand_timer_t timer;
+        std::atomic<bool> active{false};
+
+        explicit eviction_state(ctx::io_context::strand_t s)
+            : strand{std::move(s)}, timer{strand} {}
+    };
+
     using pooled_conn_list = boost::container::small_vector<http::pooled_connection, 4>;
     boost::unordered::concurrent_flat_map<http::pool_endpoint_key, pooled_conn_list, http::pool_endpoint_hash, http::pool_endpoint_equal> connection_pool_;
     std::atomic<std::size_t> max_pool_size_{256};
 
-    static constexpr std::chrono::seconds eviction_timeout_{107};
-    ctx::io_context::executor_timer_t eviction_timer_;
+    std::mutex eviction_mtx_;
+    std::shared_ptr<eviction_state> eviction_state_;
 
     void evict_idle_connections() {
-        static constexpr auto max_idle_time = std::chrono::seconds{117};
         const auto now = std::chrono::steady_clock::now();
 
         pooled_conn_list connections_to_close;
         connection_pool_.erase_if([&](auto& item) {
             auto& connections = item.second;
-            for (auto it = connections.begin(); it != connections.end(); ) {
-                if ((now - it->last_used) > max_idle_time) {
+            for (auto it = connections.begin(); it != connections.end();) {
+                if (!it->stream || (now - it->last_used) > max_idle_time_) {
                     if (it->stream) connections_to_close.emplace_back(std::move(*it));
                     it = connections.erase(it);
                 } else {
@@ -241,73 +353,143 @@ protected:
             return connections.empty();
         });
 
-        for (auto& conn : connections_to_close) {
-            boost::beast::error_code ignored_ec;
-            http::get_lowest_layer(*conn.stream).socket().close(ignored_ec);
+        for (const auto& conn : connections_to_close) {
+            http::get_lowest_layer(*conn.stream).close();
+        }
+    }
+
+    void cancel_eviction_timer() {
+        std::shared_ptr<eviction_state> old_state;
+        {
+            const std::scoped_lock lock{eviction_mtx_};
+            old_state = std::move(eviction_state_);
+        }
+        if (old_state) {
+            old_state->active.store(false, std::memory_order_release);
+            const auto strand = old_state->strand;
+            boost::asio::dispatch(strand, [st = std::move(old_state)] mutable {
+                st->timer.cancel();
+            });
         }
     }
 
 public:
-    std::optional<http::pooled_connection> checkout_connection(const std::string_view host, const std::string_view port, bool is_ssl) {
+    http_client_base(boost::asio::ssl::context& ssl_ctx, ctx::io_context& ctx)
+        : ssl_ctx_{ssl_ctx}, io_ctx_{ctx} {}
+
+    http_client_base(const http_client_base&) = delete;
+    http_client_base& operator=(const http_client_base&) = delete;
+    http_client_base(http_client_base&&) = delete;
+    http_client_base& operator=(http_client_base&&) = delete;
+
+    ~http_client_base() noexcept {
+        try {
+            stop();
+        } catch (...) { // NOLINT(bugprone-empty-catch)
+        }
+    }
+
+    std::optional<http::pooled_connection> checkout_connection(const std::string_view host, const std::string_view port, const bool is_ssl) {
+        const auto now = std::chrono::steady_clock::now();
         std::optional<http::pooled_connection> conn;
-        connection_pool_.visit(std::make_tuple(host, port, is_ssl), [&conn](auto& entry) {
+        pooled_conn_list expired;
+
+        connection_pool_.visit(std::tuple{host, port, is_ssl}, [&](auto& entry) {
             auto& connections = entry.second;
-            if (!connections.empty()) {
-                conn.emplace(std::move(connections.back()));
+            while (!connections.empty()) {
+                auto candidate = std::move(connections.back());
                 connections.pop_back();
+                if (!candidate.stream) continue;
+                if ((now - candidate.last_used) > max_idle_time_ ||
+                    !http::get_lowest_layer(*candidate.stream).socket().is_open()) {
+                    expired.emplace_back(std::move(candidate));
+                    continue;
+                }
+                conn.emplace(std::move(candidate));
+                break;
             }
         });
+
+        for (const auto& dead : expired) {
+            http::get_lowest_layer(*dead.stream).close();
+        }
         return conn;
     }
 
-    bool checkin_connection(const std::string_view host, const std::string_view port, bool is_ssl, http::pooled_connection conn) {
-        if (!conn.stream) return false;
+    bool checkin_connection(const std::string_view host, const std::string_view port, const bool is_ssl, http::pooled_connection& conn) {
+        const auto limit = max_pool_size_.load(std::memory_order_relaxed);
+        if (limit == 0 || !conn.stream || conn.buffer.size() != 0) return false;
+
         auto& lowest = http::get_lowest_layer(*conn.stream);
         if (!lowest.socket().is_open()) return false;
-        
+
+        if (conn.buffer.capacity() > POOL_BUFFER_SHRINK_THRESHOLD) {
+            conn.buffer = boost::beast::flat_buffer{};
+        }
+
         lowest.expires_never();
         conn.last_used = std::chrono::steady_clock::now();
-        const auto limit = max_pool_size_.load(std::memory_order_relaxed);
 
         bool inserted = false;
-        bool visited = connection_pool_.visit(std::tuple{host, port, is_ssl}, [&](auto& entry) {
+        const auto try_push = [&](auto& entry) {
             if (entry.second.size() < limit) {
                 entry.second.emplace_back(std::move(conn));
                 inserted = true;
             }
-        }) != 0UZ;
+        };
 
-        if (!visited) {
-            pooled_conn_list vec;
-            vec.emplace_back(std::move(conn));
-            inserted = connection_pool_.emplace(http::pool_endpoint_key{.host = std::string(host), .port = std::string(port), .is_ssl = is_ssl}, std::move(vec));
+        if (connection_pool_.visit(std::tuple{host, port, is_ssl}, try_push) == 0UZ) {
+            connection_pool_.try_emplace_and_visit(
+                http::pool_endpoint_key{.host = std::string{host}, .port = std::string{port}, .is_ssl = is_ssl},
+                try_push,
+                try_push
+            );
         }
+
         return inserted;
     }
 
-    http_client_base(boost::asio::ssl::context& ssl_ctx, ctx::io_context& ctx) 
-        : ssl_ctx_{ssl_ctx}, io_ctx_{ctx}, eviction_timer_{io_ctx_.executor_} {}
+    bool checkin_connection(const std::string_view host, const std::string_view port, const bool is_ssl, http::pooled_connection&& conn) {
+        auto local_conn = std::move(conn);
+        return checkin_connection(host, port, is_ssl, local_conn);
+    }
 
-    // call after stopping and re-starting io context
+    // Call after starting or restarting the io_context.
     void start() {
+        cancel_eviction_timer();
         connection_pool_.clear();
 
-        eviction_timer_.expires_after(eviction_timeout_);
-        eviction_timer_.async_wait([i = this](this auto&& self, boost::system::error_code ec) -> void {
-            if (ec) return;
+        auto st = std::make_shared<eviction_state>(io_ctx_.make_strand());
+        st->active.store(true, std::memory_order_release);
+        {
+            const std::scoped_lock lock{eviction_mtx_};
+            eviction_state_ = st;
+        }
 
-            i->evict_idle_connections();
-            i->eviction_timer_.expires_after(discusy::http_client_base::eviction_timeout_);
-            i->eviction_timer_.async_wait(self);
+        const auto strand = st->strand;
+        boost::asio::dispatch(strand, [this, st = std::move(st)] mutable {
+            if (!st->active.load(std::memory_order_acquire)) return;
+
+            auto& timer = st->timer;
+            timer.expires_after(eviction_timeout_);
+            timer.async_wait([this, st = std::move(st)](this auto&& self, const boost::system::error_code& ec) -> void {
+                if (ec || !st->active.load(std::memory_order_acquire)) return;
+
+                this->evict_idle_connections();
+                if (!st->active.load(std::memory_order_acquire)) return;
+
+                st->timer.expires_after(eviction_timeout_);
+                st->timer.async_wait(std::forward<decltype(self)>(self));
+            });
         });
     }
 
     void stop() {
-        // eviction timer not cancelled as this is only called when the io context is stopped, so cancelled anyway
+        cancel_eviction_timer();
         connection_pool_.clear();
     }
 
-    void set_max_pool_size(std::size_t max_size) noexcept {
+    void set_max_pool_size(const std::size_t max_size) noexcept {
         max_pool_size_.store(max_size, std::memory_order_relaxed);
     }
 
@@ -318,14 +500,15 @@ public:
 
 class http_client_callback final : public http_client_base {
 private:
+    static constexpr std::chrono::seconds ssl_shutdown_timeout_{2};
+
     template <bool Api, typename Handler>
     struct request_state {
         Handler handler;
         http_client_callback* self;
         http::method current_method;
         std::string url;
-        boost::urls::url_view url_view;
-        
+
         std::string body;
         headers req_headers;
         http::options opts;
@@ -339,13 +522,16 @@ private:
 
         std::string route_key;
         std::string host;
+        std::string host_header;
         std::string port;
         std::string target;
         bool is_ssl{true};
+        bool host_is_name{true};
 
         std::unique_ptr<http::stream_t> stream;
         boost::beast::flat_buffer buffer;
         bool is_reused{false};
+        bool skip_pool{false};
 
         ctx::io_context::strand_tcp_resolver_t resolver;
         ctx::io_context::strand_timer_t timer;
@@ -364,103 +550,91 @@ private:
             boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, std::declval<ctx::io_context::executor_t>()))
         ) work_guard_;
 
-        request_state(auto&& h, http_client_callback* s, http::method m, auto&& u, auto&& b, auto&& hdrs, auto&& o)
+        request_state(auto&& h, http_client_callback* s, const http::method m, auto&& u, http::parsed_url parsed, auto&& b, auto&& hdrs, auto&& o)
             : handler{std::forward<decltype(h)>(h)},
               self{s},
               current_method{m},
-              strand_{s->io_ctx_.make_strand()},
               url{std::forward<decltype(u)>(u)},
               body{std::forward<decltype(b)>(b)},
               req_headers{std::forward<decltype(hdrs)>(hdrs)},
               opts{std::forward<decltype(o)>(o)},
+              strand_{s->io_ctx_.make_strand()},
+              host{std::move(parsed.host)},
+              host_header{std::move(parsed.host_header)},
+              port{std::move(parsed.port)},
+              target{std::move(parsed.target)},
+              is_ssl{parsed.is_ssl},
+              host_is_name{parsed.host_is_name},
               resolver{strand_},
               timer{strand_},
               allocator{boost::asio::get_associated_allocator(handler, boost::asio::recycling_allocator<void>{})},
               work_guard_{boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, s->io_ctx_.executor_))} {}
-        
-        bool is_cancelled() const noexcept {
+
+        [[nodiscard]] bool is_cancelled() const noexcept {
             return cancelled_type != boost::asio::cancellation_type::none;
         }
 
-        void handle_cancel(std::shared_ptr<request_state> self_ptr, boost::asio::cancellation_type type) {
+        void handle_cancel(std::shared_ptr<request_state> self_ptr, const boost::asio::cancellation_type type) {
             if (type == boost::asio::cancellation_type::none) return;
+            if (completed.load(std::memory_order_acquire)) return;
 
-            boost::asio::post(get_strand(), [self_ptr = std::move(self_ptr), type]() {
-                self_ptr->cancelled_type = type;
+            // Hold strand_mtx_ across post() so cancel ordering against strand handoff
+            // in step_acquire_connection() is strictly FIFO and race-free.
+            const std::scoped_lock lock{strand_mtx_};
+            boost::asio::post(strand_, [self_ptr = std::move(self_ptr), type] {
+                if (self_ptr->completed.load(std::memory_order_acquire)) return;
+                self_ptr->cancelled_type = self_ptr->cancelled_type | type;
                 self_ptr->child_signal.emit(type);
             });
-        }
-
-        ctx::io_context::strand_t get_strand() {
-            std::scoped_lock lock{strand_mtx_};
-            return strand_;
         }
 
         auto get_executor() {
             return boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
         }
 
-        auto get_immediate_executor() {
-            return boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
+        void close_stream_immediately() noexcept {
+            if (stream) {
+                http::get_lowest_layer(*stream).close();
+                stream.reset();
+            }
         }
 
-        void complete(boost::system::error_code ec, http::response&& res = {}) {
-            auto slot = boost::asio::get_associated_cancellation_slot(handler);
-            if (slot.is_connected()) slot.clear();
-            work_guard_.reset();
-            std::move(handler)(ec, std::move(res));
-        }
-
-        void finish(std::shared_ptr<request_state> self_ptr, boost::system::error_code ec, http::response res = {}) {
+        void finish(std::shared_ptr<request_state> self_ptr, const boost::system::error_code ec, http::response res = {}) {
             if (completed.exchange(true, std::memory_order_acq_rel)) return;
 
-            auto ex = get_executor();
+            // Ensure stream is closed/destroyed on its own strand before completing on handler's executor.
+            close_stream_immediately();
 
-            boost::asio::dispatch(ex,
-                boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, res = std::move(res)]() mutable {
-                    self_ptr->complete(ec, std::move(res));
-                })
+            const auto ex = get_executor();
+            const auto alloc = allocator;
+
+            boost::asio::dispatch(
+                ex,
+                boost::asio::bind_allocator(
+                    alloc,
+                    [self_ptr = std::move(self_ptr), ec, res = std::move(res)] mutable {
+                        auto h = std::move(self_ptr->handler); // NOLINT(misc-const-correctness)
+                        auto slot = boost::asio::get_associated_cancellation_slot(h);
+                        if (slot.is_connected()) slot.clear();
+                        self_ptr->work_guard_.reset();
+                        // Release state allocated with the associated allocator before invoking handler.
+                        self_ptr.reset();
+                        std::move(h)(ec, std::move(res));
+                    }
+                )
             );
         }
 
         void operation_cancelled(std::shared_ptr<request_state> self_ptr) {
-            if (stream) {
-                boost::beast::error_code ignored_ec;
-                http::get_lowest_layer(*stream).socket().close(ignored_ec);
-                stream.reset();
-            }
+            close_stream_immediately();
             finish(std::move(self_ptr), boost::asio::error::operation_aborted);
         }
 
-        void early_finish(std::shared_ptr<request_state> self_ptr, boost::system::error_code ec, http::response res = {}) {
-            if (completed.exchange(true, std::memory_order_acq_rel)) return;
-
-            auto ex_imm = get_immediate_executor();
-
-            boost::asio::dispatch(ex_imm,
-                boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, res = std::move(res)]() mutable {
-                    self_ptr->complete(ec, std::move(res));
-                })
-            );
-        }
-
         void init(std::shared_ptr<request_state> self_ptr) {
-            auto url_result = boost::urls::parse_uri(url);
-            if (!url_result) {
-                early_finish(std::move(self_ptr), boost::asio::error::invalid_argument);
-                return;
-            }
-
-            url_view = *url_result;
-
-            is_ssl = (url_view.scheme() == "https");
-            host.assign(url_view.host());
-            port.assign(url_view.has_port() ? std::string(url_view.port()) : (is_ssl ? "443" : "80"));
-            target.assign(url_view.encoded_resource());
-            if (target.empty()) target.assign("/");
-
-            boost::asio::post(strand_, boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr)]() mutable {
-                auto ptr = self_ptr.get();
+            const auto alloc = allocator;
+            const auto strand = strand_;
+            boost::asio::post(strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr)] mutable {
+                auto* ptr = self_ptr.get();
                 ptr->start(std::move(self_ptr));
             }));
         }
@@ -476,7 +650,7 @@ private:
                 route_key = http::generate_route_key(current_method, url);
 
                 if (!route_key.empty()) {
-                    auto delay = self->rate_limiter_.get_delay(route_key);
+                    const auto delay = self->rate_limiter_.get_delay(route_key);
                     if (delay.count() > 0) {
                         timer.expires_after(delay);
                         timer.async_wait(
@@ -485,8 +659,13 @@ private:
                                 boost::asio::bind_allocator(
                                     allocator,
                                     [self_ptr = std::move(self_ptr)](const boost::system::error_code& ec) mutable {
-                                        auto ptr = self_ptr.get();
-                                        if (ec) return ptr->finish(std::move(self_ptr), ec);
+                                        auto* ptr = self_ptr.get();
+                                        if (ec) {
+                                            if (ptr->is_cancelled() || ec == boost::asio::error::operation_aborted) {
+                                                return ptr->operation_cancelled(std::move(self_ptr));
+                                            }
+                                            return ptr->finish(std::move(self_ptr), ec);
+                                        }
                                         ptr->step_loop_start(std::move(self_ptr));
                                     }
                                 )
@@ -501,23 +680,20 @@ private:
         }
 
         template <typename F>
-        requires ( std::invocable<F&&, std::shared_ptr<request_state>&&> )
+        requires (std::invocable<F&&, std::shared_ptr<request_state>&&>)
         void close_connection_then(std::shared_ptr<request_state> self_ptr, F&& then) {
             if (stream) {
-                if (auto* ssl_str_ptr = std::get_if<http::ssl_stream_t>(stream.get()); ssl_str_ptr && is_ssl) {
-                    boost::beast::get_lowest_layer(*ssl_str_ptr).expires_after(opts.request_timeout);
+                if (auto* ssl_str_ptr = std::get_if<http::ssl_stream_t>(stream.get())) {
+                    const auto shutdown_timeout = std::min(opts.request_timeout, ssl_shutdown_timeout_);
+                    boost::beast::get_lowest_layer(*ssl_str_ptr).expires_after(shutdown_timeout);
                     ssl_str_ptr->async_shutdown(
                         boost::asio::bind_cancellation_slot(
                             child_signal.slot(),
                             boost::asio::bind_allocator(
                                 allocator,
-                                [self_ptr = std::move(self_ptr), then = std::forward<F>(then)](const boost::system::error_code& ec) mutable {
-                                    auto ptr = self_ptr.get();
-                                    if (ec && ec != boost::asio::ssl::error::stream_truncated) {
-                                        boost::beast::error_code ignored_ec;
-                                        http::get_lowest_layer(*ptr->stream).socket().close(ignored_ec);
-                                    }
-                                    ptr->stream.reset();
+                                [self_ptr = std::move(self_ptr), then = std::forward<F>(then)](const boost::system::error_code&) mutable {
+                                    auto* ptr = self_ptr.get();
+                                    ptr->close_stream_immediately();
                                     std::invoke(std::move(then), std::move(self_ptr));
                                 }
                             )
@@ -526,11 +702,7 @@ private:
                     return;
                 }
 
-                boost::beast::error_code ignored_ec;
-                http::get_lowest_layer(*stream).socket().close(ignored_ec);
-                stream.reset();
-                std::invoke(std::forward<F>(then), std::move(self_ptr));
-                return;
+                close_stream_immediately();
             }
 
             std::invoke(std::forward<F>(then), std::move(self_ptr));
@@ -539,62 +711,74 @@ private:
         void step_loop_start(std::shared_ptr<request_state> self_ptr) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
-            close_connection_then(std::move(self_ptr), [](std::shared_ptr<request_state> self_ptr) {
-                auto ptr = self_ptr.get();
-                ptr->step_acquire_connection(std::move(self_ptr));
-            });
+            close_stream_immediately();
+            step_acquire_connection(std::move(self_ptr));
         }
 
         void step_acquire_connection(std::shared_ptr<request_state> self_ptr) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
-            if (auto conn = self->checkout_connection(host, port, is_ssl)) {
-                #ifdef DISCUSY_LOGGING
-                log::Logger{}("Re-using connection for request: {}", url);
-                #endif
-                std::optional<ctx::io_context::strand_t> old_strand;
-                auto alloc = allocator;
+            if (!skip_pool) {
+                if (auto conn = self->checkout_connection(host, port, is_ssl)) {
+                    #ifdef DISCUSY_LOGGING
+                    log::Logger{}("Re-using connection for request: {}", url);
+                    #endif
 
-                buffer = std::move(conn->buffer);
-                is_reused = true;
-                stream = std::move(conn->stream);
-                {
-                std::scoped_lock lock{strand_mtx_};
-                old_strand.emplace(strand_);
-                strand_ = http::get_stream_executor(*stream);
+                    buffer = std::move(conn->buffer);
+                    is_reused = true;
+                    stream = std::move(conn->stream);
 
-                // this is done to prevent cancellation slot race conditions
-                // it is on purpose inside the mutex
-                boost::asio::post(*old_strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr), alloc, strand = strand_]() mutable {
-                    boost::asio::dispatch(strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr)]() mutable {
-                        auto ptr = self_ptr.get();
-                        ptr->step_write_request(std::move(self_ptr));
-                    }));
-                }));
-                }
-            } else {
-                #ifdef DISCUSY_LOGGING
-                log::Logger{}("Making new connection for request: {}", url);
-                #endif
-                is_reused = false;
-                buffer.consume(buffer.size());
-
-                if (is_ssl) {
-                    stream = std::make_unique<http::stream_t>(std::in_place_type<http::ssl_stream_t>, strand_, self->ssl_ctx_);
-                    auto& ssl_str = std::get<http::ssl_stream_t>(*stream);
-
-                    if (!SSL_set_tlsext_host_name(ssl_str.native_handle(), host.c_str())) {
-                        boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
-                        return finish(std::move(self_ptr), ec ? ec : boost::asio::ssl::error::unspecified_system_error);
+                    auto new_strand = http::get_stream_executor(*stream);
+                    if (new_strand == strand_) {
+                        return step_write_request(std::move(self_ptr));
                     }
 
-                    ssl_str.set_verify_callback(boost::asio::ssl::host_name_verification(host));
-                } else {
-                    stream = std::make_unique<http::stream_t>(std::in_place_type<http::plain_stream_t>, strand_);
+                    // Rebind resolver and timer onto the pooled stream's strand so all I/O
+                    // and cancellation operations on this request remain serialized on one strand.
+                    resolver = ctx::io_context::strand_tcp_resolver_t{new_strand};
+                    timer = ctx::io_context::strand_timer_t{new_strand};
+
+                    const auto alloc = allocator;
+                    {
+                        const std::scoped_lock lock{strand_mtx_};
+                        const auto old_strand = std::exchange(strand_, new_strand);
+
+                        // Posted inside strand_mtx_ so any cancel posted before the swap runs
+                        // on old_strand prior to this handoff, and any cancel after runs on new_strand.
+                        boost::asio::post(old_strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr), alloc, new_strand] mutable {
+                            boost::asio::post(new_strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr)] mutable {
+                                auto* ptr = self_ptr.get();
+                                ptr->step_write_request(std::move(self_ptr));
+                            }));
+                        }));
+                    }
+                    return;
+                }
+            }
+
+            #ifdef DISCUSY_LOGGING
+            log::Logger{}("Making new connection for request: {}", url);
+            #endif
+            is_reused = false;
+            skip_pool = false;
+            buffer.clear();
+
+            if (is_ssl) {
+                stream = std::make_unique<http::stream_t>(std::in_place_type<http::ssl_stream_t>, strand_, self->ssl_ctx_);
+                auto& ssl_str = std::get<http::ssl_stream_t>(*stream);
+
+                // RFC 6066 §3: SNI HostName must only be set for DNS hostnames, not IP literals.
+                if (host_is_name && !SSL_set_tlsext_host_name(ssl_str.native_handle(), host.c_str())) {
+                    const boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
+                    return finish(std::move(self_ptr), ec ? ec : boost::asio::ssl::error::unspecified_system_error);
                 }
 
-                step_resolve(std::move(self_ptr));
+                ssl_str.set_verify_callback(boost::asio::ssl::host_name_verification(host));
+            } else {
+                stream = std::make_unique<http::stream_t>(std::in_place_type<http::plain_stream_t>, strand_);
             }
+
+            step_resolve(std::move(self_ptr));
         }
 
         void step_resolve(std::shared_ptr<request_state> self_ptr) {
@@ -610,8 +794,11 @@ private:
                         boost::asio::bind_allocator(
                             allocator,
                             [self_ptr = std::move(self_ptr)](const boost::system::error_code& res_ec, const boost::asio::ip::tcp::resolver::results_type& results) mutable {
-                                auto ptr = self_ptr.get();
+                                auto* ptr = self_ptr.get();
                                 if (res_ec) {
+                                    if (ptr->is_cancelled()) {
+                                        return ptr->operation_cancelled(std::move(self_ptr));
+                                    }
                                     if (res_ec == boost::asio::error::operation_aborted) {
                                         return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
                                     }
@@ -641,11 +828,14 @@ private:
                     boost::asio::bind_allocator(
                         allocator,
                         [self_ptr = std::move(self_ptr)](const boost::system::error_code& conn_ec, const boost::asio::ip::tcp::resolver::results_type::endpoint_type&) mutable {
-                            auto ptr = self_ptr.get();
-                            if (conn_ec == boost::asio::error::operation_aborted) {
-                                return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
-                            }
+                            auto* ptr = self_ptr.get();
                             if (conn_ec) {
+                                if (ptr->is_cancelled() || conn_ec == boost::asio::error::operation_aborted) {
+                                    return ptr->operation_cancelled(std::move(self_ptr));
+                                }
+                                if (conn_ec == boost::beast::error::timeout) {
+                                    return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                }
                                 #ifdef DISCUSY_LOGGING
                                 log::Logger{}("[http_client] connect error to {}:{}: {} ({})", ptr->host, ptr->port, conn_ec.message(), conn_ec.value());
                                 #endif
@@ -680,11 +870,14 @@ private:
                     boost::asio::bind_allocator(
                         allocator,
                         [self_ptr = std::move(self_ptr)](const boost::system::error_code& hs_ec) mutable {
-                            auto ptr = self_ptr.get();
-                            if (hs_ec == boost::asio::error::operation_aborted) {
-                                return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
-                            }
+                            auto* ptr = self_ptr.get();
                             if (hs_ec) {
+                                if (ptr->is_cancelled() || hs_ec == boost::asio::error::operation_aborted) {
+                                    return ptr->operation_cancelled(std::move(self_ptr));
+                                }
+                                if (hs_ec == boost::beast::error::timeout) {
+                                    return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                }
                                 #ifdef DISCUSY_LOGGING
                                 log::Logger{}("[http_client] handshake error with {}: {} ({})", ptr->host, hs_ec.message(), hs_ec.value());
                                 #endif
@@ -697,51 +890,77 @@ private:
             );
         }
 
+        [[nodiscard]] static bool is_stale_write_error(const boost::system::error_code& ec) noexcept {
+            return ec == boost::beast::http::error::end_of_stream ||
+                   ec == boost::asio::error::eof ||
+                   ec == boost::asio::error::connection_reset ||
+                   ec == boost::asio::error::connection_aborted ||
+                   ec == boost::asio::error::broken_pipe ||
+                   ec == boost::asio::ssl::error::stream_truncated;
+        }
+
+        [[nodiscard]] static bool is_stale_read_error(const boost::system::error_code& ec) noexcept {
+            return ec == boost::beast::http::error::end_of_stream ||
+                   ec == boost::asio::error::eof ||
+                   ec == boost::asio::error::connection_reset ||
+                   ec == boost::asio::error::connection_aborted ||
+                   ec == boost::asio::ssl::error::stream_truncated;
+        }
+
         void step_write_request(std::shared_ptr<request_state> self_ptr) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
-            req.emplace(current_method, target, 11);
-            req->set(boost::beast::http::field::host, host);
-            req->set(boost::beast::http::field::user_agent, "discusy/1.0");
-            req->keep_alive(true);
+            if (!req) {
+                req.emplace(current_method, target, 11);
+                req->set(boost::beast::http::field::host, host_header);
+                req->set(boost::beast::http::field::user_agent, "discusy/1.0");
+                req->keep_alive(true);
 
-            for (const auto& [k, v] : req_headers) {
-                req->set(k, v);
-            }
-
-            if (!accumulated_cookies.empty()) {
-                std::string cookie_header;
-                for (const auto& [k, v] : accumulated_cookies) {
-                    if (!cookie_header.empty()) cookie_header += "; ";
-                    cookie_header += k;
-                    cookie_header += '=';
-                    cookie_header += v;
+                for (const auto& [k, v] : req_headers) {
+                    req->set(k, v);
                 }
-                if (auto existing = req->find(boost::beast::http::field::cookie); existing != req->end()) {
-                    req->set(boost::beast::http::field::cookie, ulp::str::concat_strings(existing->value(), "; ", cookie_header));
-                } else {
-                    req->set(boost::beast::http::field::cookie, cookie_header);
-                }
-            }
 
-            if (current_method != boost::beast::http::verb::get && current_method != boost::beast::http::verb::delete_ && current_method != boost::beast::http::verb::head) {
-                req->body() = body;
-                req->prepare_payload();
+                if (!accumulated_cookies.empty()) {
+                    std::string cookie_header;
+                    for (const auto& [k, v] : accumulated_cookies) {
+                        if (!cookie_header.empty()) cookie_header += "; ";
+                        cookie_header += k;
+                        cookie_header += '=';
+                        cookie_header += v;
+                    }
+                    if (const auto existing = req->find(boost::beast::http::field::cookie); existing != req->end()) {
+                        req->set(boost::beast::http::field::cookie, ulp::str::concat_strings(existing->value(), "; ", cookie_header));
+                    } else {
+                        req->set(boost::beast::http::field::cookie, cookie_header);
+                    }
+                }
+
+                const bool method_expects_payload =
+                    current_method != boost::beast::http::verb::get &&
+                    current_method != boost::beast::http::verb::delete_ &&
+                    current_method != boost::beast::http::verb::head;
+                if (method_expects_payload || (!body.empty() && current_method != boost::beast::http::verb::head)) {
+                    req->body() = body;
+                    req->prepare_payload();
+                }
             }
 
             auto& lowest = http::get_lowest_layer(*stream);
             lowest.expires_after(opts.request_timeout);
 
             auto write_handler = [self_ptr = std::move(self_ptr)](const boost::system::error_code& write_ec, std::size_t) mutable {
-                auto ptr = self_ptr.get();
+                auto* ptr = self_ptr.get();
                 if (write_ec) {
-                    if (ptr->is_reused && (write_ec == boost::beast::http::error::end_of_stream || 
-                                                write_ec == boost::asio::error::connection_reset ||
-                                                write_ec == boost::asio::error::broken_pipe)) {
-                        return ptr->step_loop_start(std::move(self_ptr));
+                    if (ptr->is_cancelled() || write_ec == boost::asio::error::operation_aborted) {
+                        return ptr->operation_cancelled(std::move(self_ptr));
                     }
-                    if (write_ec == boost::asio::error::operation_aborted) {
+                    if (write_ec == boost::beast::error::timeout) {
                         return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    }
+                    if (ptr->is_reused && is_stale_write_error(write_ec)) {
+                        ptr->close_stream_immediately();
+                        ptr->skip_pool = true;
+                        return ptr->step_acquire_connection(std::move(self_ptr));
                     }
                     return ptr->finish(std::move(self_ptr), write_ec);
                 }
@@ -768,17 +987,23 @@ private:
 
             parser.emplace();
             parser->body_limit(opts.body_limit);
+            if (current_method == boost::beast::http::verb::head) {
+                parser->skip(true);
+            }
 
             auto read_handler = [self_ptr = std::move(self_ptr)](const boost::system::error_code& read_ec, std::size_t) mutable {
-                auto ptr = self_ptr.get();
+                auto* ptr = self_ptr.get();
                 if (read_ec) {
-                    if (ptr->is_reused && (read_ec == boost::beast::http::error::end_of_stream || 
-                                                read_ec == boost::asio::error::connection_reset ||
-                                                read_ec == boost::asio::ssl::error::stream_truncated)) {
-                        return ptr->step_loop_start(std::move(self_ptr));
+                    if (ptr->is_cancelled() || read_ec == boost::asio::error::operation_aborted) {
+                        return ptr->operation_cancelled(std::move(self_ptr));
                     }
-                    if (read_ec == boost::asio::error::operation_aborted) {
+                    if (read_ec == boost::beast::error::timeout) {
                         return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    }
+                    if (ptr->is_reused && !ptr->parser->got_some() && is_stale_read_error(read_ec)) {
+                        ptr->close_stream_immediately();
+                        ptr->skip_pool = true;
+                        return ptr->step_acquire_connection(std::move(self_ptr));
                     }
                     return ptr->finish(std::move(self_ptr), read_ec);
                 }
@@ -798,59 +1023,82 @@ private:
             }, *stream);
         }
 
+        bool try_repool_connection(const bool res_keep_alive) {
+            if (!res_keep_alive || !req || !req->keep_alive() || !stream || buffer.size() != 0) {
+                return false;
+            }
+            http::pooled_connection candidate{.stream = std::move(stream), .buffer = std::move(buffer)};
+            if (self->checkin_connection(host, port, is_ssl, candidate)) {
+                buffer = boost::beast::flat_buffer{};
+                return true;
+            }
+            stream = std::move(candidate.stream);
+            buffer = std::move(candidate.buffer);
+            return false;
+        }
+
+        static void parse_set_cookie_headers(const boost::beast::http::response<boost::beast::http::string_body>& res, http::cookies& out) {
+            static constexpr auto trim = [](std::string_view s) noexcept -> std::string_view {
+                while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+                while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
+                return s;
+            };
+
+            for (const auto& field : res.base()) {
+                if (field.name() == boost::beast::http::field::set_cookie) {
+                    const std::string_view val{field.value().data(), field.value().size()};
+                    const auto semi = val.find(';');
+                    const std::string_view pair = (semi != std::string_view::npos) ? val.substr(0, semi) : val;
+                    const auto eq = pair.find('=');
+                    if (eq != std::string_view::npos) {
+                        const std::string_view name = trim(pair.substr(0, eq));
+                        const std::string_view value = trim(pair.substr(eq + 1));
+                        if (!name.empty()) {
+                            out.insert_or_assign(std::string{name}, std::string{value});
+                        }
+                    }
+                }
+            }
+        }
+
         void step_handle_response(std::shared_ptr<request_state> self_ptr) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+            if (!parser) return finish(std::move(self_ptr), boost::asio::error::fault);
 
             auto res = parser->release();
             const auto status = res.result_int();
             const bool is_redirect = (status == 301 || status == 302 || status == 303 || status == 307 || status == 308);
 
             if (opts.follow_redirects && is_redirect && (redirect_count < opts.max_redirects)) {
-                auto loc_it = res.find(boost::beast::http::field::location);
+                const auto loc_it = res.find(boost::beast::http::field::location);
                 if (loc_it != res.end()) {
-                    auto loc_ref = boost::urls::parse_uri_reference(loc_it->value());
-                    if (loc_ref) {
-                        boost::urls::url b_url = url_view;
-                        auto resolved = b_url.resolve(*loc_ref);
-                        if (resolved) {
-                            boost::urls::url boost_url = std::move(b_url);
-                            const bool new_is_ssl = (boost_url.scheme() == "https");
+                    const auto loc_ref = boost::urls::parse_uri_reference(loc_it->value());
+                    const auto cur_parsed = boost::urls::parse_uri(url);
+                    if (loc_ref && cur_parsed) {
+                        boost::urls::url resolved_url{*cur_parsed};
+                        if (resolved_url.resolve(*loc_ref)) {
+                            auto next_url = http::parse_http_url(resolved_url);
+                            if (!next_url) {
+                                return finish(std::move(self_ptr), boost::asio::error::invalid_argument);
+                            }
 
-                            if (is_ssl && !new_is_ssl && !opts.allow_http_downgrade) {
+                            if (is_ssl && !next_url->is_ssl && !opts.allow_http_downgrade) {
                                 #ifdef DISCUSY_LOGGING
-                                log::Logger{}("[http_client] Prevented HTTPS to HTTP downgrade redirect from {} to {}", url, boost_url.buffer());
+                                log::Logger{}("[http_client] Prevented HTTPS to HTTP downgrade redirect from {} to {}", url, resolved_url.buffer());
                                 #endif
                                 return finish(std::move(self_ptr), boost::asio::error::no_permission);
                             }
 
-                            const auto new_host = boost_url.host();
-                            const auto new_port = boost_url.has_port() ? boost_url.port() : (new_is_ssl ? "443" : "80");
-                            const bool origin_changed = (is_ssl != new_is_ssl) || (host != new_host) || (port != new_port);
+                            const bool origin_changed =
+                                (is_ssl != next_url->is_ssl) ||
+                                (host != next_url->host) ||
+                                (port != next_url->port);
 
-                            if (opts.include_cookies) {
-                                for (const auto& field : res.base()) {
-                                    if (field.name() == boost::beast::http::field::set_cookie || boost::beast::iequals(field.name_string(), "set-cookie")) {
-                                        std::string_view val = field.value();
-                                        auto semi = val.find(';');
-                                        std::string_view pair = (semi != std::string_view::npos) ? val.substr(0, semi) : val;
-                                        auto eq = pair.find('=');
-                                        if (eq != std::string_view::npos) {
-                                            static constexpr auto trim = [](std::string_view s) -> std::string_view {
-                                                while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-                                                while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
-                                                return s;
-                                            };
-                                            std::string_view name = trim(pair.substr(0, eq));
-                                            std::string_view value = trim(pair.substr(eq + 1));
-                                            if (!name.empty()) {
-                                                accumulated_cookies.insert_or_assign(std::string(name), std::string(value));
-                                            }
-                                        }
-                                    }
-                                }
+                            if (opts.include_cookies && !origin_changed) {
+                                parse_set_cookie_headers(res, accumulated_cookies);
                             }
 
-                            static constexpr auto is_hop_by_hop_header = [](std::string_view name) -> bool {
+                            static constexpr auto is_hop_by_hop_header = [](const std::string_view name) noexcept -> bool {
                                 return boost::beast::iequals(name, "connection") ||
                                        boost::beast::iequals(name, "keep-alive") ||
                                        boost::beast::iequals(name, "proxy-authenticate") ||
@@ -866,7 +1114,7 @@ private:
                             });
 
                             if (origin_changed) {
-                                static constexpr auto is_sensitive_header = [](std::string_view name) -> bool {
+                                static constexpr auto is_sensitive_header = [](const std::string_view name) noexcept -> bool {
                                     return boost::beast::iequals(name, "authorization") ||
                                            boost::beast::iequals(name, "cookie") ||
                                            boost::beast::iequals(name, "cookie2") ||
@@ -888,18 +1136,23 @@ private:
                                 accumulated_cookies.clear();
                             }
 
-                            if (res.keep_alive()) self->checkin_connection(host, port, is_ssl, {std::move(stream), std::move(buffer)});
-                            buffer.consume(buffer.size());
+                            if (!try_repool_connection(res.keep_alive())) {
+                                close_stream_immediately();
+                                buffer.clear();
+                            }
 
                             ++redirect_count;
-                            url.assign(boost_url.buffer());
+                            url.assign(resolved_url.buffer());
 
-                            const bool method_changed_to_get = (status == 303 || ((status == 301 || status == 302) && current_method != boost::beast::http::verb::get && current_method != boost::beast::http::verb::head));
+                            const bool method_changed_to_get =
+                                (status == 301 || status == 302 || status == 303) &&
+                                current_method != boost::beast::http::verb::get &&
+                                current_method != boost::beast::http::verb::head;
                             if (method_changed_to_get) {
                                 current_method = boost::beast::http::verb::get;
                                 body.clear();
 
-                                static constexpr auto is_payload_header = [](std::string_view name) -> bool {
+                                static constexpr auto is_payload_header = [](const std::string_view name) noexcept -> bool {
                                     return boost::beast::iequals(name, "content-length") ||
                                            boost::beast::iequals(name, "content-type") ||
                                            boost::beast::iequals(name, "content-encoding") ||
@@ -911,40 +1164,37 @@ private:
                                 });
                             }
 
-                            auto url_result = boost::urls::parse_uri(url);
-                            if (!url_result) {
-                                return finish(std::move(self_ptr), boost::asio::error::invalid_argument);
-                            }
-                            url_view = *url_result;
+                            is_ssl = next_url->is_ssl;
+                            host_is_name = next_url->host_is_name;
+                            host = std::move(next_url->host);
+                            host_header = std::move(next_url->host_header);
+                            port = std::move(next_url->port);
+                            target = std::move(next_url->target);
+                            req.reset();
+                            skip_pool = false;
 
-                            is_ssl = new_is_ssl;
-                            host.assign(url_view.host());
-                            port.assign(url_view.has_port() ? url_view.port() : (is_ssl ? "443" : "80"));
-                            target.assign(url_view.encoded_resource());
-                            if (target.empty()) target.assign("/");
-
-                            return step_loop_start(std::move(self_ptr));
+                            return step_acquire_connection(std::move(self_ptr));
                         }
                     }
                 }
             }
 
-            const bool repooled = res.keep_alive() && self->checkin_connection(host, port, is_ssl, {std::move(stream), std::move(buffer)});
+            const bool repooled = try_repool_connection(res.keep_alive());
 
             if constexpr (Api) {
                 if (!route_key.empty()) {
                     self->rate_limiter_.update(route_key, res);
 
-                    if (res.result_int() == 429) {
+                    if (status == 429) {
                         #ifdef DISCUSY_LOGGING
                         log::Logger{}("429 Rate limit hit for request: {}", url);
                         #endif
 
-                        auto delay = self->rate_limiter_.handle_429(res.body());
+                        const auto delay = self->rate_limiter_.handle_429(res.body());
 
                         if (!repooled && stream) {
                             close_connection_then(std::move(self_ptr), [delay](std::shared_ptr<request_state> self_ptr) {
-                                auto ptr = self_ptr.get();
+                                auto* ptr = self_ptr.get();
                                 ptr->step_wait_429(std::move(self_ptr), delay);
                             });
                             return;
@@ -960,11 +1210,11 @@ private:
             }
 
             #ifdef DISCUSY_LOGGING
-            log::Logger{}("Successful request to {} with code: {}", url, res.result_int());
+            log::Logger{}("Successful request to {} with code: {}", url, status);
             #endif
 
             http::response final_resp{
-                .status_code = static_cast<int>(res.result_int()),
+                .status_code = static_cast<int>(status),
                 .body = std::move(res.body()),
                 .method = current_method,
             };
@@ -972,32 +1222,13 @@ private:
             if (opts.include_headers) {
                 auto& hdrs = final_resp.headers.emplace();
                 for (const auto& field : res.base()) {
-                    hdrs.emplace(std::string(field.name_string()), std::string(field.value()));
+                    hdrs.emplace(std::string{field.name_string()}, std::string{field.value()});
                 }
             }
 
             if (opts.include_cookies) {
                 auto& cks = final_resp.cookies.emplace(std::move(accumulated_cookies));
-                for (const auto& field : res.base()) {
-                    if (field.name() == boost::beast::http::field::set_cookie || boost::beast::iequals(field.name_string(), "set-cookie")) {
-                        std::string_view val = field.value();
-                        auto semi = val.find(';');
-                        std::string_view pair = (semi != std::string_view::npos) ? val.substr(0, semi) : val;
-                        auto eq = pair.find('=');
-                        if (eq != std::string_view::npos) {
-                            static constexpr auto trim = [](std::string_view s) -> std::string_view {
-                                while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-                                while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
-                                return s;
-                            };
-                            std::string_view name = trim(pair.substr(0, eq));
-                            std::string_view value = trim(pair.substr(eq + 1));
-                            if (!name.empty()) {
-                                cks.insert_or_assign(std::string(name), std::string(value));
-                            }
-                        }
-                    }
-                }
+                parse_set_cookie_headers(res, cks);
             }
 
             if (opts.include_redirect_info || opts.follow_redirects) {
@@ -1006,14 +1237,21 @@ private:
             }
 
             if (!repooled && stream) {
-                close_connection_then(self_ptr, [](std::shared_ptr<request_state>) {});
+                close_connection_then(
+                    std::move(self_ptr),
+                    [final_resp = std::move(final_resp)](std::shared_ptr<request_state> self_ptr) mutable {
+                        auto* ptr = self_ptr.get();
+                        ptr->finish(std::move(self_ptr), boost::system::error_code{}, std::move(final_resp));
+                    }
+                );
+                return;
             }
 
             finish(std::move(self_ptr), boost::system::error_code{}, std::move(final_resp));
         }
 
         template <typename Rep, typename Period>
-        void step_wait_429(std::shared_ptr<request_state> self_ptr, std::chrono::duration<Rep, Period> delay) {
+        void step_wait_429(std::shared_ptr<request_state> self_ptr, const std::chrono::duration<Rep, Period> delay) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
             timer.expires_after(delay);
@@ -1023,8 +1261,14 @@ private:
                     boost::asio::bind_allocator(
                         allocator,
                         [self_ptr = std::move(self_ptr)](const boost::system::error_code& ec) mutable {
-                            auto ptr = self_ptr.get();
-                            if (ec) return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                            auto* ptr = self_ptr.get();
+                            if (ec) {
+                                if (ptr->is_cancelled() || ec == boost::asio::error::operation_aborted) {
+                                    return ptr->operation_cancelled(std::move(self_ptr));
+                                }
+                                return ptr->finish(std::move(self_ptr), ec);
+                            }
+                            ptr->skip_pool = false;
                             ptr->step_loop_start(std::move(self_ptr));
                         }
                     )
@@ -1034,13 +1278,33 @@ private:
     };
 
     template <bool Api, discusy::asio::ctf<http::response> CompletionToken>
-    auto request_impl_(http::method m, std::string&& url, std::string&& body, headers&& req_headers, http::options&& opts, CompletionToken&& token) {
+    auto request_impl_(const http::method m, std::string&& url, std::string&& body, headers&& req_headers, http::options&& opts, CompletionToken&& token) {
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code, http::response)>(
-            [](discusy::asio::chf<http::response> auto&& handler, http_client_callback* self, http::method m, auto&& url, auto&& body, auto&& req_headers, auto&& opts) {
+            [](discusy::asio::chf<http::response> auto&& handler, http_client_callback* self, const http::method m, auto&& url, auto&& body, auto&& req_headers, auto&& opts) {
+                auto parsed = http::parse_http_url(url);
+                if (!parsed) {
+                    const auto alloc = boost::asio::get_associated_allocator(
+                        handler,
+                        boost::asio::recycling_allocator<void>{}
+                    );
+                    const auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
+                    const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, ex);
+                    boost::asio::dispatch(
+                        ex_imm,
+                        boost::asio::bind_allocator(
+                            alloc,
+                            [h = std::forward<decltype(handler)>(handler)] mutable {
+                                std::move(h)(boost::asio::error::invalid_argument, http::response{});
+                            }
+                        )
+                    );
+                    return;
+                }
+
                 using handler_t = std::decay_t<decltype(handler)>;
                 using state_type = request_state<Api, handler_t>;
 
-                auto alloc = boost::asio::get_associated_allocator(
+                const auto alloc = boost::asio::get_associated_allocator(
                     handler,
                     boost::asio::recycling_allocator<void>{}
                 );
@@ -1048,14 +1312,18 @@ private:
                 std::shared_ptr<state_type> state = std::allocate_shared<state_type>(
                     alloc,
                     std::forward<decltype(handler)>(handler),
-                    self, m, std::forward<decltype(url)>(url), std::forward<decltype(body)>(body), std::forward<decltype(req_headers)>(req_headers), std::forward<decltype(opts)>(opts)
+                    self, m, std::forward<decltype(url)>(url), std::move(*parsed),
+                    std::forward<decltype(body)>(body), std::forward<decltype(req_headers)>(req_headers), std::forward<decltype(opts)>(opts)
                 );
 
                 auto slot = boost::asio::get_associated_cancellation_slot(state->handler);
 
                 if (slot.is_connected()) {
-                    slot.assign([weak_state = std::weak_ptr<state_type>{state}, raw = state.get()](boost::asio::cancellation_type type) {
-                        if (std::shared_ptr<state_type> st = weak_state.lock()) raw->handle_cancel(std::move(st), type);
+                    slot.assign([weak_state = std::weak_ptr<state_type>{state}](const boost::asio::cancellation_type type) {
+                        if (std::shared_ptr<state_type> st = weak_state.lock()) {
+                            auto* raw = st.get();
+                            raw->handle_cancel(std::move(st), type);
+                        }
                     });
                 }
 
@@ -1071,20 +1339,22 @@ public:
     using http_client_base::http_client_base;
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto request(const http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<false>(
-            m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
+            m, std::move(url), std::move(body), std::move(headers), std::move(opts),
             std::forward<CompletionToken>(token)
         );
     }
 
     template <discusy::asio::ctf<http::response> CompletionToken = ctx::io_context::dct_t>
-    auto api_request(http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
+    auto api_request(const http::method m, std::string url, std::string body = {}, headers headers = {}, http::options opts = http::options(), CompletionToken&& token = ctx::io_context::dct_t()) {
         return request_impl_<true>(
-            m, std::move(url), std::move(body), std::move(headers), std::move(opts), 
+            m, std::move(url), std::move(body), std::move(headers), std::move(opts),
             std::forward<CompletionToken>(token)
         );
     }
 };
+
+using http_client = http_client_callback;
 
 }

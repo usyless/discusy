@@ -14,6 +14,7 @@ FetchContent_MakeAvailable(Catch2)
 
 set(TEST_SOURCES
     unit/test_rate_limiter.cpp
+    unit/test_timers_and_http.cpp
     unit/test_cache.cpp
     unit/test_callbacks.cpp
     unit/test_multipart.cpp
