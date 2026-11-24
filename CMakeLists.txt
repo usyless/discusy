@@ -27,7 +27,6 @@ cmake_dependent_option(DISCUSY_ENABLE_PCH "Enable PCH for quicker compilation" O
 option(DISCUSY_LOGGING_ENABLED "Enable logging in release mode" OFF)
 option(DISCUSY_USE_MIMALLOC "Replace default allocator with mimalloc" OFF)
 option(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION "Enable FLTO/LTCG" ON)
-option(DISCUSY_USE_CORO_HTTP_CLIENT "Use co_composed coroutine-based HTTP client instead of callback-based HTTP client (EXPERIMENTAL - MIGHT HAVE SAFETY ISSUES)" OFF)
 cmake_dependent_option(DISCUSY_USE_STATIC_MSVCRT
     "Use the static release/debug MSVCRT - or set the flag yourself before including the project" OFF
     "MSVC" OFF
@@ -119,7 +118,6 @@ if(DISCUSY_ENABLE_VOICE)
     message(STATUS "[${PROJECT_NAME}] Dedicated voice thread disabled: ${DISCUSY_NO_DEDICATED_AUDIO_THREAD} (DISCUSY_NO_DEDICATED_AUDIO_THREAD)")
 endif()
 message(STATUS "[${PROJECT_NAME}] Using mimalloc: ${DISCUSY_USE_MIMALLOC} (DISCUSY_USE_MIMALLOC)")
-message(STATUS "[${PROJECT_NAME}] Using Coro HTTP Client (EXPERIMENTAL - MIGHT HAVE SAFETY ISSUES): ${DISCUSY_USE_CORO_HTTP_CLIENT} (DISCUSY_USE_CORO_HTTP_CLIENT)")
 message(STATUS "[${PROJECT_NAME}] Caches disabled: ${DISCUSY_NO_CACHES} (DISCUSY_NO_CACHES)")
 
 message(STATUS "[${PROJECT_NAME}] Using ASan: ${DISCUSY_ENABLE_ASAN} (DISCUSY_ENABLE_ASAN)")
@@ -254,7 +252,6 @@ target_include_directories(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
 
 target_compile_definitions(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
     $<$<OR:$<BOOL:${DISCUSY_LOGGING_ENABLED}>,$<CONFIG:Debug>>:DISCUSY_LOGGING>
-    $<$<BOOL:${DISCUSY_USE_CORO_HTTP_CLIENT}>:DISCUSY_USE_CORO_HTTP_CLIENT>
     $<$<BOOL:${DISCUSY_USE_ETF}>:DISCUSY_USE_ETF>
 )
 
@@ -740,16 +737,6 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy_exe_options
     )
 
-    set(HTTP_CLIENT_TEST_LIBRARY_NAME "${PROJECT_NAME}_http_client_test")
-    add_executable(${HTTP_CLIENT_TEST_LIBRARY_NAME}
-        "${PROJECT_SOURCE_DIR}/src/http_client_test.cpp"
-    )
-
-    target_link_libraries(${HTTP_CLIENT_TEST_LIBRARY_NAME} PRIVATE
-        discusy::discusy
-        discusy_exe_options
-    )
-
     set(BENCHMARK_JSON_ETF_LIBRARY_NAME "${PROJECT_NAME}_benchmark_json_etf")
     add_executable(${BENCHMARK_JSON_ETF_LIBRARY_NAME}
         "${PROJECT_SOURCE_DIR}/src/benchmark_json_etf.cpp"
@@ -771,12 +758,6 @@ if(PROJECT_IS_TOP_LEVEL)
                     ${DISCUSY_MAIN_OPENSSL_DLLS}
                     "$<TARGET_FILE_DIR:${TEST_LIBRARY_NAME}>"
                 COMMENT "Copying OpenSSL runtime DLLs to ${TEST_LIBRARY_NAME} output dir..."
-            )
-            add_custom_command(TARGET ${HTTP_CLIENT_TEST_LIBRARY_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${DISCUSY_MAIN_OPENSSL_DLLS}
-                    "$<TARGET_FILE_DIR:${HTTP_CLIENT_TEST_LIBRARY_NAME}>"
-                COMMENT "Copying OpenSSL runtime DLLs to ${HTTP_CLIENT_TEST_LIBRARY_NAME} output dir..."
             )
             add_custom_command(TARGET ${BENCHMARK_JSON_ETF_LIBRARY_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
