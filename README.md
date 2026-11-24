@@ -1,7 +1,5 @@
 # discusy
 
-**This library is still in development and may potentially have breaking changes from time to time**
-
 A modern, high-performance and stable C++23 Discord bot library built around **Boost.Asio** for its networking, asynchronous model and coroutine support.
 
 All of the bot facing Discord API is covered and accessible, with types matching it identically for documentation re-usability. Up to date with [discord-api-docs](https://github.com/discord/discord-api-docs) commit [`76e1eef`](https://github.com/discord/discord-api-docs/commit/76e1eef5145582fced5262e71afe6d448e48a3c5).
