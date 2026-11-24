@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -151,7 +152,7 @@ namespace glz
    struct parse<EETF>
    {
       template <auto Opts, class T, is_context Ctx, class It0, class It1>
-      GLZ_ALWAYS_INLINE static void op(T&& value, Ctx&& ctx, It0&& it, It1 end) noexcept
+      GLZ_ALWAYS_INLINE static void op(T&& value, Ctx&& ctx, It0&& it, It1 end)
       {
          if constexpr (!check_no_header(Opts)) {
             if (it >= end) [[unlikely]] {
@@ -249,7 +250,7 @@ namespace glz
    struct from<EETF, T> final
    {
       template <auto Opts>
-      static void op(auto& value, is_context auto& ctx, auto& it, auto end) noexcept
+      static void op(auto& value, is_context auto& ctx, auto& it, auto end)
       {
          std::string_view sv;
          if (!etf::detail::read_str(ctx, it, end, sv)) [[unlikely]] {
@@ -303,7 +304,12 @@ namespace glz
             }
          }
          else {
-            value.assign(sv.data(), sv.size());
+            if (sv.empty()) {
+               value.clear();
+            }
+            else {
+               value.assign(sv.data(), sv.size());
+            }
          }
       }
    };
@@ -328,7 +334,13 @@ namespace glz
             }
             const auto val = static_cast<uint8_t>(*(it + 1));
             using underlying = std::underlying_type_t<std::decay_t<T>>;
-            if constexpr (std::is_signed_v<underlying> && sizeof(underlying) == 1) {
+            if constexpr (std::same_as<underlying, bool>) {
+               if (val > 1) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+            }
+            else if constexpr (std::is_signed_v<underlying> && sizeof(underlying) == 1) {
                if (val > static_cast<uint64_t>((std::numeric_limits<underlying>::max)())) [[unlikely]] {
                   ctx.error = error_code::parse_number_failure;
                   return;
@@ -345,7 +357,13 @@ namespace glz
             }
             const int32_t val = etf::detail::read_be<int32_t>(it + 1);
             using underlying = std::underlying_type_t<std::decay_t<T>>;
-            if constexpr (std::is_unsigned_v<underlying>) {
+            if constexpr (std::same_as<underlying, bool>) {
+               if (val < 0 || val > 1) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+            }
+            else if constexpr (std::is_unsigned_v<underlying>) {
                if (val < 0) [[unlikely]] {
                   ctx.error = error_code::parse_number_failure;
                   return;
@@ -375,6 +393,12 @@ namespace glz
             using U = std::conditional_t<std::same_as<underlying, bool>, uint8_t, underlying>;
             U u{};
             if (!etf::detail::read_number(ctx, it, end, u)) return;
+            if constexpr (std::same_as<underlying, bool>) {
+               if (u > 1) [[unlikely]] {
+                  ctx.error = error_code::parse_number_failure;
+                  return;
+               }
+            }
             value = static_cast<std::decay_t<T>>(u);
             return;
          }
@@ -402,15 +426,24 @@ namespace glz
             }
 
             using underlying = std::underlying_type_t<std::decay_t<T>>;
-            underlying u{};
+            using U = std::conditional_t<std::same_as<underlying, bool>, uint8_t, underlying>;
+            U u{};
             if (etf::detail::parse_number_from_string(sv, u)) {
+               if constexpr (std::same_as<underlying, bool>) {
+                  if (u > 1) [[unlikely]] {
+                     ctx.error = error_code::parse_number_failure;
+                     return;
+                  }
+               }
                value = static_cast<std::decay_t<T>>(u);
                return;
             }
             ctx.error = error_code::unexpected_enum;
             return;
          }
-         ctx.error = error_code::syntax_error;
+         if (!bool(ctx.error)) {
+            ctx.error = error_code::syntax_error;
+         }
       }
    };
 
@@ -453,10 +486,7 @@ namespace glz
          }();
 
          if (!has_val) {
-            if constexpr (is_specialization_v<T, std::optional>) {
-               value.emplace();
-            }
-            else if constexpr (requires { value.emplace(); }) {
+            if constexpr (is_specialization_v<T, std::optional> || requires { value.emplace(); }) {
                value.emplace();
             }
             else if constexpr (is_specialization_v<T, std::unique_ptr>) {
@@ -497,15 +527,19 @@ namespace glz
       template <class T>
          requires(is_opts_wrapper<std::decay_t<T>>)
       struct is_numeric_like<T> {
-         using member_t = std::decay_t<T>::value_type;
-         static constexpr bool value = is_numeric_like<member_t>::value;
+         using raw_member_t = std::decay_t<T>::value_type;
+         static constexpr bool value = !std::is_const_v<raw_member_t> && is_numeric_like<raw_member_t>::value;
       };
 
       template <class T>
          requires(glaze_value_t<std::decay_t<T>> && !custom_read<std::decay_t<T>> && !is_opts_wrapper<std::decay_t<T>>)
       struct is_numeric_like<T> {
-         using member_t = std::decay_t<decltype(get_member(std::declval<T&>(), meta_wrapper_v<std::decay_t<T>>))>;
-         static constexpr bool value = is_numeric_like<member_t>::value;
+         using raw_member_t = decltype(get_member(std::declval<T&>(), meta_wrapper_v<std::decay_t<T>>));
+         using member_t = std::decay_t<raw_member_t>;
+         static constexpr bool safe_ref =
+            (std::is_lvalue_reference_v<raw_member_t> && !std::is_const_v<std::remove_reference_t<raw_member_t>>) ||
+            is_opts_wrapper<member_t>;
+         static constexpr bool value = safe_ref && is_numeric_like<member_t>::value;
       };
 
       template <class T>
@@ -765,6 +799,149 @@ namespace glz
             }
          }
       }
+      template <auto Opts, class T>
+      static void read_etf_sequence(T& value, uint32_t len, is_context auto& ctx, auto& it, auto end)
+      {
+         using V = range_value_t<std::remove_cvref_t<T>>;
+         constexpr bool set_like = !resizable<T> && !emplace_backable<T> && emplaceable<T>;
+
+         if constexpr (resizable<T>) {
+            const size_t orig_size = check_append_arrays(Opts) ? value.size() : 0;
+            if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+            if constexpr (sizeof(V) > 64) {
+               if (len > 4096) {
+                  if constexpr (!check_append_arrays(Opts)) {
+                     value.clear();
+                  }
+                  size_t cap_step = 4096;
+                  value.resize(orig_size + cap_step);
+                  for (size_t i = 0; i < len; ++i) {
+                     if (orig_size + i >= value.size()) {
+                        cap_step = (cap_step > len / 2) ? len : (cap_step * 2);
+                        value.resize(orig_size + std::min<size_t>(len, cap_step));
+                     }
+                     parse<EETF>::op<Opts>(value[orig_size + i], ctx, it, end);
+                     if (bool(ctx.error)) [[unlikely]] {
+                        value.resize(orig_size + i);
+                        return;
+                     }
+                  }
+                  return;
+               }
+            }
+            constexpr bool unfilled =
+               (etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
+               std::is_trivially_copyable_v<V>;
+            if constexpr (unfilled) {
+               resize_unfilled(value, orig_size + len);
+            }
+            else {
+               value.resize(orig_size + len);
+            }
+            if constexpr (requires { value.data(); }) {
+               etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] {
+                  if constexpr (unfilled) {
+                     value.resize(orig_size);
+                  }
+                  return;
+               }
+            }
+            else {
+               for (size_t i = orig_size; i < orig_size + len; ++i) {
+                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                  if (bool(ctx.error)) [[unlikely]] {
+                     if constexpr (unfilled) {
+                        value.resize(i);
+                     }
+                     return;
+                  }
+               }
+            }
+         }
+         else if constexpr (emplace_backable<T>) {
+            const size_t orig_size = check_append_arrays(Opts) ? value.size() : 0;
+            if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+            if constexpr (!check_append_arrays(Opts)) {
+               value.clear();
+            }
+            size_t next_reserve = std::min<size_t>(len, 4096);
+            if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+               value.reserve(orig_size + next_reserve);
+            }
+            for (size_t i = 0; i < len; ++i) {
+               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+                  if (i == next_reserve) {
+                     next_reserve = (next_reserve > len / 2) ? len : (next_reserve * 2);
+                     value.reserve(orig_size + next_reserve);
+                  }
+               }
+               auto& elem = value.emplace_back();
+               parse<EETF>::op<Opts>(elem, ctx, it, end);
+               if (parse_failed(ctx.error)) [[unlikely]] {
+                  if constexpr (requires { value.pop_back(); }) {
+                     value.pop_back();
+                  }
+                  return;
+               }
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+         }
+         else if constexpr (set_like) {
+            const size_t orig_size = check_append_arrays(Opts) ? value.size() : 0;
+            if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
+            if constexpr (!check_append_arrays(Opts)) {
+               value.clear();
+            }
+            if constexpr (has_reserve<std::remove_cvref_t<T>>) {
+               size_t next_reserve = std::min<size_t>(len, 4096);
+               value.reserve(orig_size + next_reserve);
+               for (size_t i = 0; i < len; ++i) {
+                  if (i == next_reserve) {
+                     next_reserve = (next_reserve > len / 2) ? len : (next_reserve * 2);
+                     value.reserve(orig_size + next_reserve);
+                  }
+                  V elem{};
+                  parse<EETF>::op<Opts>(elem, ctx, it, end);
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
+                  value.emplace(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
+               }
+            }
+            else {
+               for (size_t i = 0; i < len; ++i) {
+                  V elem{};
+                  parse<EETF>::op<Opts>(elem, ctx, it, end);
+                  if (parse_failed(ctx.error)) [[unlikely]] return;
+                  value.emplace(std::move(elem));
+                  if (bool(ctx.error)) [[unlikely]] return;
+               }
+            }
+         }
+         else {
+            if constexpr (not check_partial_read(Opts)) {
+               if (len > value.size()) [[unlikely]] {
+                  ctx.error = error_code::exceeded_static_array_size;
+                  return;
+               }
+            }
+            const size_t parse_len = (len < value.size()) ? len : value.size();
+            if constexpr (requires { value.data(); }) {
+               etf::detail::decode_etf_elements<Opts>(value.data(), parse_len, ctx, it, end);
+               if (bool(ctx.error)) [[unlikely]] return;
+            }
+            else {
+               for (size_t i = 0; i < parse_len; ++i) {
+                  parse<EETF>::op<Opts>(value[i], ctx, it, end);
+                  if (bool(ctx.error)) [[unlikely]] return;
+               }
+            }
+            for (size_t i = parse_len; i < len; ++i) {
+               etf::detail::skip_nested_value<Opts>(ctx, it, end);
+               if (parse_failed(ctx.error)) [[unlikely]] return;
+            }
+         }
+      }
    }
 
    // Arrays (std::vector, std::deque, std::span, etc.)
@@ -794,6 +971,9 @@ namespace glz
          }
 
          if (tag == etf::tag::LIST_EXT) {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
+
             if (end - it < 4) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return;
@@ -821,210 +1001,8 @@ namespace glz
                }
             }
 
-            if constexpr (resizable<T>) {
-               if constexpr (check_append_arrays(Opts)) {
-                  const auto orig_size = value.size();
-                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
-                  if constexpr (sizeof(V) > 64) {
-                     if (len > 4096) {
-                        value.resize(orig_size + 4096);
-                        for (size_t i = 0; i < len; ++i) {
-                           if (orig_size + i >= value.size()) {
-                              value.resize(std::min<size_t>(orig_size + len, value.size() + 4096));
-                           }
-                           parse<EETF>::op<Opts>(value[orig_size + i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                     else {
-                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                      std::is_trivially_copyable_v<V>) {
-                           resize_unfilled(value, orig_size + len);
-                        }
-                        else {
-                           value.resize(orig_size + len);
-                        }
-                        if constexpr (requires { value.data(); }) {
-                           etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                        else {
-                           for (size_t i = orig_size; i < orig_size + len; ++i) {
-                              parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                              if (bool(ctx.error)) [[unlikely]] return;
-                           }
-                        }
-                     }
-                  }
-                  else {
-                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                   std::is_trivially_copyable_v<V>) {
-                        resize_unfilled(value, orig_size + len);
-                     }
-                     else {
-                        value.resize(orig_size + len);
-                     }
-                     if constexpr (requires { value.data(); }) {
-                        etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
-                        if (bool(ctx.error)) [[unlikely]] return;
-                     }
-                     else {
-                        for (size_t i = orig_size; i < orig_size + len; ++i) {
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                  }
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  if constexpr (sizeof(V) > 64) {
-                     if (len > 4096) {
-                        value.clear();
-                        value.resize(4096);
-                        for (size_t i = 0; i < len; ++i) {
-                           if (i >= value.size()) {
-                              value.resize(std::min<size_t>(len, value.size() + 4096));
-                           }
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                     else {
-                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                      std::is_trivially_copyable_v<V>) {
-                           resize_unfilled(value, len);
-                        }
-                        else {
-                           value.resize(len);
-                        }
-                        if constexpr (requires { value.data(); }) {
-                           etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                        else {
-                           for (auto&& elem : value) {
-                              parse<EETF>::op<Opts>(elem, ctx, it, end);
-                              if (bool(ctx.error)) [[unlikely]] return;
-                           }
-                        }
-                     }
-                  }
-                  else {
-                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                   std::is_trivially_copyable_v<V>) {
-                        resize_unfilled(value, len);
-                     }
-                     else {
-                        value.resize(len);
-                     }
-                     if constexpr (requires { value.data(); }) {
-                        etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
-                        if (bool(ctx.error)) [[unlikely]] return;
-                     }
-                     else {
-                        for (auto&& elem : value) {
-                           parse<EETF>::op<Opts>(elem, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                  }
-               }
-            }
-            else if constexpr (emplace_backable<T>) {
-               if constexpr (check_append_arrays(Opts)) {
-                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(std::min<size_t>(value.size() + len, value.size() + 4096));
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        if (i > 0 && (i % 4096 == 0)) {
-                           value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
-                        }
-                     }
-                     auto& elem = value.emplace_back();
-                     parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] {
-                        if constexpr (requires { value.pop_back(); }) {
-                           value.pop_back();
-                        }
-                        return;
-                     }
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(std::min<size_t>(len, 4096));
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        if (i > 0 && (i % 4096 == 0)) {
-                           value.reserve(std::min<size_t>(len, i + 4096));
-                        }
-                     }
-                     auto& elem = value.emplace_back();
-                     parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] {
-                        if constexpr (requires { value.pop_back(); }) {
-                           value.pop_back();
-                        }
-                        return;
-                     }
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-            }
-            else if constexpr (set_like) {
-               if constexpr (check_append_arrays(Opts)) {
-                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
-               }
-               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(std::min<size_t>(len, 4096));
-               }
-               for (size_t i = 0; i < len; ++i) {
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     if (i > 0 && (i % 4096 == 0)) {
-                        value.reserve(std::min<size_t>(len, i + 4096));
-                     }
-                  }
-                  V elem{};
-                  parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-                  value.emplace(std::move(elem));
-                  if (bool(ctx.error)) [[unlikely]] return;
-               }
-            }
-            else {
-               if constexpr (not check_partial_read(Opts)) {
-                  if (len > value.size()) [[unlikely]] {
-                     ctx.error = error_code::exceeded_static_array_size;
-                     return;
-                  }
-               }
-               const size_t parse_len = (len < value.size()) ? len : value.size();
-               if constexpr (requires { value.data(); }) {
-                  etf::detail::decode_etf_elements<Opts>(value.data(), parse_len, ctx, it, end);
-                  if (bool(ctx.error)) [[unlikely]] return;
-               }
-               else {
-                  for (size_t i = 0; i < parse_len; ++i) {
-                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-               for (size_t i = parse_len; i < len; ++i) {
-                  etf::detail::skip_nested_value<Opts>(ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-               }
-            }
+            etf::detail::read_etf_sequence<Opts>(value, len, ctx, it, end);
+            if (bool(ctx.error)) [[unlikely]] return;
 
             // Consume tail term (typically NIL_EXT)
             if (it < end && static_cast<uint8_t>(*it) == etf::tag::NIL_EXT) [[likely]] {
@@ -1294,6 +1272,9 @@ namespace glz
          }
 
          if (tag == etf::tag::SMALL_TUPLE_EXT || tag == etf::tag::LARGE_TUPLE_EXT) {
+            depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
+
             uint32_t len = 0;
             if (tag == etf::tag::SMALL_TUPLE_EXT) {
                if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
@@ -1323,210 +1304,7 @@ namespace glz
                }
             }
 
-            if constexpr (resizable<T>) {
-               if constexpr (check_append_arrays(Opts)) {
-                  const auto orig_size = value.size();
-                  if (exceeds_capacity(value, orig_size + len, ctx)) [[unlikely]] return;
-                  if constexpr (sizeof(V) > 64) {
-                     if (len > 4096) {
-                        value.resize(orig_size + 4096);
-                        for (size_t i = 0; i < len; ++i) {
-                           if (orig_size + i >= value.size()) {
-                              value.resize(std::min<size_t>(orig_size + len, value.size() + 4096));
-                           }
-                           parse<EETF>::op<Opts>(value[orig_size + i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                     else {
-                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                      std::is_trivially_copyable_v<V>) {
-                           resize_unfilled(value, orig_size + len);
-                        }
-                        else {
-                           value.resize(orig_size + len);
-                        }
-                        if constexpr (requires { value.data(); }) {
-                           etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                        else {
-                           for (size_t i = orig_size; i < orig_size + len; ++i) {
-                              parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                              if (bool(ctx.error)) [[unlikely]] return;
-                           }
-                        }
-                     }
-                  }
-                  else {
-                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                   std::is_trivially_copyable_v<V>) {
-                        resize_unfilled(value, orig_size + len);
-                     }
-                     else {
-                        value.resize(orig_size + len);
-                     }
-                     if constexpr (requires { value.data(); }) {
-                        etf::detail::decode_etf_elements<Opts>(value.data() + orig_size, len, ctx, it, end);
-                        if (bool(ctx.error)) [[unlikely]] return;
-                     }
-                     else {
-                        for (size_t i = orig_size; i < orig_size + len; ++i) {
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                  }
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  if constexpr (sizeof(V) > 64) {
-                     if (len > 4096) {
-                        value.clear();
-                        value.resize(4096);
-                        for (size_t i = 0; i < len; ++i) {
-                           if (i >= value.size()) {
-                              value.resize(std::min<size_t>(len, value.size() + 4096));
-                           }
-                           parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                     else {
-                        if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                      std::is_trivially_copyable_v<V>) {
-                           resize_unfilled(value, len);
-                        }
-                        else {
-                           value.resize(len);
-                        }
-                        if constexpr (requires { value.data(); }) {
-                           etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                        else {
-                           for (auto&& elem : value) {
-                              parse<EETF>::op<Opts>(elem, ctx, it, end);
-                              if (bool(ctx.error)) [[unlikely]] return;
-                           }
-                        }
-                     }
-                  }
-                  else {
-                     if constexpr ((etf::detail::is_numeric_like_v<V> || std::is_enum_v<V> || std::is_same_v<V, std::byte>) &&
-                                   std::is_trivially_copyable_v<V>) {
-                        resize_unfilled(value, len);
-                     }
-                     else {
-                        value.resize(len);
-                     }
-                     if constexpr (requires { value.data(); }) {
-                        etf::detail::decode_etf_elements<Opts>(value.data(), len, ctx, it, end);
-                        if (bool(ctx.error)) [[unlikely]] return;
-                     }
-                     else {
-                        for (auto&& elem : value) {
-                           parse<EETF>::op<Opts>(elem, ctx, it, end);
-                           if (bool(ctx.error)) [[unlikely]] return;
-                        }
-                     }
-                  }
-               }
-            }
-            else if constexpr (emplace_backable<T>) {
-               if constexpr (check_append_arrays(Opts)) {
-                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(std::min<size_t>(value.size() + len, value.size() + 4096));
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        if (i > 0 && (i % 4096 == 0)) {
-                           value.reserve(std::min<size_t>(value.size() + len - i, value.size() + 4096));
-                        }
-                     }
-                     auto& elem = value.emplace_back();
-                     parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] {
-                        if constexpr (requires { value.pop_back(); }) {
-                           value.pop_back();
-                        }
-                        return;
-                     }
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     value.reserve(std::min<size_t>(len, 4096));
-                  }
-                  for (size_t i = 0; i < len; ++i) {
-                     if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                        if (i > 0 && (i % 4096 == 0)) {
-                           value.reserve(std::min<size_t>(len, i + 4096));
-                        }
-                     }
-                     auto& elem = value.emplace_back();
-                     parse<EETF>::op<Opts>(elem, ctx, it, end);
-                     if (parse_failed(ctx.error)) [[unlikely]] {
-                        if constexpr (requires { value.pop_back(); }) {
-                           value.pop_back();
-                        }
-                        return;
-                     }
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-            }
-            else if constexpr (set_like) {
-               if constexpr (check_append_arrays(Opts)) {
-                  if (exceeds_capacity(value, value.size() + len, ctx)) [[unlikely]] return;
-               }
-               else {
-                  if (exceeds_capacity(value, len, ctx)) [[unlikely]] return;
-                  value.clear();
-               }
-               if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                  value.reserve(std::min<size_t>(len, 4096));
-               }
-               for (size_t i = 0; i < len; ++i) {
-                  if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-                     if (i > 0 && (i % 4096 == 0)) {
-                        value.reserve(std::min<size_t>(len, i + 4096));
-                     }
-                  }
-                  V elem{};
-                  parse<EETF>::op<Opts>(elem, ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-                  value.emplace(std::move(elem));
-                  if (bool(ctx.error)) [[unlikely]] return;
-               }
-            }
-            else {
-               if constexpr (not check_partial_read(Opts)) {
-                  if (len > value.size()) [[unlikely]] {
-                     ctx.error = error_code::exceeded_static_array_size;
-                     return;
-                  }
-               }
-               const size_t parse_len = (len < value.size()) ? len : value.size();
-               if constexpr (requires { value.data(); }) {
-                  etf::detail::decode_etf_elements<Opts>(value.data(), parse_len, ctx, it, end);
-                  if (bool(ctx.error)) [[unlikely]] return;
-               }
-               else {
-                  for (size_t i = 0; i < parse_len; ++i) {
-                     parse<EETF>::op<Opts>(value[i], ctx, it, end);
-                     if (bool(ctx.error)) [[unlikely]] return;
-                  }
-               }
-               for (size_t i = parse_len; i < len; ++i) {
-                  etf::detail::skip_nested_value<Opts>(ctx, it, end);
-                  if (parse_failed(ctx.error)) [[unlikely]] return;
-               }
-            }
+            etf::detail::read_etf_sequence<Opts>(value, len, ctx, it, end);
             return;
          }
 
@@ -1542,6 +1320,9 @@ namespace glz
       template <auto Opts>
       static void op(auto& value, is_context auto& ctx, auto& it, auto end)
       {
+         depth_guard guard{ctx};
+         if (!guard) [[unlikely]] return;
+
          if (it >= end) [[unlikely]] { ctx.error = error_code::unexpected_end; return; }
          const auto tag = static_cast<uint8_t>(*it++);
          uint32_t arity = 0;
@@ -1554,8 +1335,22 @@ namespace glz
             arity = etf::detail::read_be<uint32_t>(it);
             it += 4;
          }
+         else if (tag == etf::tag::NIL_EXT) {
+            arity = 0;
+         }
          else {
             ctx.error = error_code::syntax_error;
+            return;
+         }
+
+         if (tag == etf::tag::LIST_EXT) {
+            if (end - it < 1 || static_cast<size_t>(end - it - 1) < arity) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
+         }
+         else if (arity > static_cast<size_t>(end - it)) [[unlikely]] {
+            ctx.error = error_code::unexpected_end;
             return;
          }
 
@@ -1611,6 +1406,9 @@ namespace glz
       template <auto Opts>
       static void op(auto& value, is_context auto& ctx, auto& it, auto end)
       {
+         depth_guard guard{ctx};
+         if (!guard) [[unlikely]] return;
+
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return;
@@ -1650,20 +1448,34 @@ namespace glz
          if (exceeds_capacity(value, arity, ctx)) [[unlikely]] return;
 
          value.clear();
+         size_t next_reserve = std::min<size_t>(arity, 4096);
          if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-            value.reserve(std::min<size_t>(arity, 4096));
+            value.reserve(next_reserve);
          }
          using Key = std::remove_cvref_t<T>::key_type;
          for (uint32_t i = 0; i < arity; ++i) {
             if constexpr (has_reserve<std::remove_cvref_t<T>>) {
-               if (i > 0 && (i % 4096 == 0)) {
-                  value.reserve(std::min<size_t>(arity, i + 4096));
+               if (i == next_reserve) {
+                  next_reserve = (next_reserve > arity / 2) ? arity : (next_reserve * 2);
+                  value.reserve(next_reserve);
                }
             }
             Key key{};
             if constexpr (str_t<Key>) {
                std::string_view sv{};
                if (!etf::detail::read_key(ctx, it, end, sv)) [[unlikely]] return;
+               if constexpr (check_max_string_length(Opts) > 0) {
+                  if (sv.size() > check_max_string_length(Opts)) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
+               }
+               if constexpr (has_runtime_max_string_length<std::decay_t<decltype(ctx)>>) {
+                  if (ctx.max_string_length > 0 && sv.size() > ctx.max_string_length) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
+               }
                key = Key(sv);
             }
             else {
@@ -1684,6 +1496,9 @@ namespace glz
       template <auto Opts, class Value, is_context Ctx, class It0, class It1>
       static void op(Value&& value, Ctx&& ctx, It0&& it, It1 end)
       {
+         depth_guard guard{ctx};
+         if (!guard) [[unlikely]] return;
+
          if (end - it < 5) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
             return;
@@ -1922,10 +1737,7 @@ namespace glz
       template <class V>
       inline constexpr bool variant_is_integer_alt = [] {
          using X = remove_meta_wrapper_t<std::decay_t<V>>;
-         if constexpr (is_variant<X> || bool_t<X> || mimics_bool_t<X> || custom_bool_t<X> || always_null_t<X>) {
-            return false;
-         }
-         else if constexpr (std::floating_point<X>) {
+         if constexpr (is_variant<X> || bool_t<X> || mimics_bool_t<X> || custom_bool_t<X> || always_null_t<X> || std::floating_point<X>) {
             return false;
          }
          else if constexpr (int_t<X>) {
@@ -1937,7 +1749,7 @@ namespace glz
          else if constexpr (has_custom_meta_v<X>) {
             return custom_num_t<X> && !std::floating_point<custom_read_input_t<X>>;
          }
-         else {
+         else { // NOLINT(bugprone-branch-clone)
             return false;
          }
       }();
@@ -1957,7 +1769,7 @@ namespace glz
          else if constexpr (has_custom_meta_v<X>) {
             return custom_num_t<X> && std::floating_point<custom_read_input_t<X>>;
          }
-         else {
+         else { // NOLINT(bugprone-branch-clone)
             return false;
          }
       }();
@@ -2088,7 +1900,7 @@ namespace glz
                    tag == etf::tag::SMALL_ATOM_UTF8_EXT || tag == etf::tag::ATOM_UTF8_EXT ||
                    tag == etf::tag::SMALL_ATOM_EXT || tag == etf::tag::ATOM_EXT;
          }
-         else {
+         else { // NOLINT(bugprone-branch-clone)
             return true;
          }
       }
@@ -2111,13 +1923,17 @@ namespace glz
          }
       };
 
-      // Specialization for Integrals
+      // Specialization for Integrals (verifies exact match against ids_v<T> to guard modular hashes)
       template <class T, class IdType>
       struct variant_id_resolver<T, IdType, false, true>
       {
          GLZ_ALWAYS_INLINE static size_t resolve(IdType id) noexcept
          {
-            return variant_id_to_index<T>::op(id);
+            const auto idx = variant_id_to_index<T>::op(id);
+            if (idx < ids_v<T>.size() && ids_v<T>[idx] == id) [[likely]] {
+               return idx;
+            }
+            return ids_v<T>.size();
          }
       };
 
@@ -2268,7 +2084,7 @@ namespace glz
       }();
 
       template <auto Opts>
-      static void op(auto& value, is_context auto& ctx, auto& it, auto end) noexcept
+      static void op(auto& value, is_context auto& ctx, auto& it, auto end)
       {
          if (it >= end) [[unlikely]] {
             ctx.error = error_code::unexpected_end;
@@ -2277,6 +2093,29 @@ namespace glz
 
          const auto start = it;
          const auto depth = ctx.depth;
+         bit_array<variant_size> tried{};
+         bool exhausted = false;
+         error_code fatal_error = error_code::none;
+
+         auto record_miss = [&](size_t idx) noexcept {
+            tried[idx] = true;
+            if (ctx.error == error_code::exceeded_max_recursive_depth) [[unlikely]] {
+               fatal_error = ctx.error;
+               exhausted = true;
+               return;
+            }
+            if (!charge_speculation(ctx, static_cast<size_t>(it - start))) [[unlikely]] {
+               fatal_error = ctx.error;
+               exhausted = true;
+            }
+         };
+
+         auto rewind = [&]() noexcept {
+            it = start;
+            ctx.depth = depth;
+            ctx.error = error_code::none;
+            ctx.custom_error_message = {};
+         };
 
          // Check if input is an ETF map (object) and the variant has object alternatives
          if (static_cast<uint8_t>(*it) == etf::tag::MAP_EXT) {
@@ -2303,10 +2142,14 @@ namespace glz
                   if (!parse_failed(ctx.error)) {
                      return;
                   }
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  record_miss(target_idx);
+                  if (exhausted) {
+                     it = start;
+                     ctx.depth = depth;
+                     ctx.error = fatal_error;
+                     return;
+                  }
+                  rewind();
                }
                else {
                   auto scan = it;
@@ -2317,6 +2160,10 @@ namespace glz
                   }
                   const uint32_t arity = etf::detail::read_be<uint32_t>(scan);
                   scan += 4;
+                  if (arity > static_cast<size_t>(end - scan) / 2) [[unlikely]] {
+                     ctx.error = error_code::unexpected_end;
+                     return;
+                  }
 
                   constexpr bool tagged = not tag_v<T>.empty();
 
@@ -2449,7 +2296,7 @@ namespace glz
                               if constexpr (glaze_object_t<X> || reflectable<X>) {
                                  f = reflect<X>::size;
                               }
-                              if (f < best_fields) {
+                              if (best == variant_size || f < best_fields) {
                                  best_fields = f;
                                  best = I;
                               }
@@ -2479,15 +2326,24 @@ namespace glz
                      if (deduced_matched) {
                         return;
                      }
+                     if constexpr (tagged) {
+                        if (tag_decoded) {
+                           return;
+                        }
+                     }
+                     record_miss(resolved);
+                     if (exhausted) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = fatal_error;
+                        return;
+                     }
 
                      // If the resolved candidate failed, try other candidates that were also possible
                      bool matched = false;
                      for_each<variant_size>([&]<size_t I>() {
-                        if (matched || I == resolved || !possible[I]) return;
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
+                        if (matched || exhausted || I == resolved || !possible[I]) return;
+                        rewind();
                         using V = std::variant_alternative_t<I, T>;
                         V v{};
                         parse<EETF>::template op<Opts>(v, ctx, it, end);
@@ -2495,14 +2351,20 @@ namespace glz
                            value.template emplace<I>(std::move(v));
                            matched = true;
                         }
+                        else {
+                           record_miss(I);
+                        }
                      });
                      if (matched) {
                         return;
                      }
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
+                     if (exhausted) {
+                        it = start;
+                        ctx.depth = depth;
+                        ctx.error = fatal_error;
+                        return;
+                     }
+                     rewind();
                   }
                }
             }
@@ -2511,121 +2373,74 @@ namespace glz
          bool matched = false;
          const auto tag = static_cast<uint8_t>(*it);
 
+         auto try_unique = [&]<size_t Idx>() -> bool {
+            if (value.index() != Idx) {
+               value.template emplace<Idx>();
+            }
+            parse<EETF>::template op<Opts>(std::get<Idx>(value), ctx, it, end);
+            if (!parse_failed(ctx.error)) {
+               return true;
+            }
+            record_miss(Idx);
+            if (!exhausted) {
+               rewind();
+            }
+            return false;
+         };
+
+         auto try_group = [&](auto pred) -> bool {
+            for_each<variant_size>([&]<size_t I>() {
+               if (matched || exhausted || tried[I]) return;
+               using V = std::variant_alternative_t<I, T>;
+               if constexpr (decltype(pred){}(std::type_identity<V>{})) {
+                  rewind();
+                  V v{};
+                  parse<EETF>::template op<Opts>(v, ctx, it, end);
+                  if (!parse_failed(ctx.error)) {
+                     value.template emplace<I>(std::move(v));
+                     matched = true;
+                  }
+                  else {
+                     record_miss(I);
+                  }
+               }
+            });
+            if (matched) return true;
+            if (!exhausted) {
+               rewind();
+            }
+            return false;
+         };
+
          switch (tag) {
          case etf::tag::SMALL_INTEGER_EXT:
          case etf::tag::INTEGER_EXT:
          case etf::tag::SMALL_BIG_EXT:
          case etf::tag::LARGE_BIG_EXT: {
             if constexpr (n_int == 1) {
-               if (value.index() != unique_int_idx) {
-                  value.template emplace<unique_int_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_int_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_int_idx>()) return;
             }
             else if constexpr (n_int > 1) {
-               for_each<variant_size>([&]<size_t I>() {
-                  if (matched) return;
-                  using V = std::variant_alternative_t<I, T>;
-                  if constexpr (etf::detail::variant_is_integer_alt<V>) {
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
-                     V v{};
-                     parse<EETF>::template op<Opts>(v, ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        value.template emplace<I>(std::move(v));
-                        matched = true;
-                     }
-                  }
-               });
-               if (matched) return;
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_integer_alt<V>; })) return;
             }
             if constexpr (n_enum > 0) {
-               if constexpr (n_enum == 1) {
-                  if (value.index() != unique_enum_idx) {
-                     value.template emplace<unique_enum_idx>();
+               if (!exhausted) {
+                  if constexpr (n_enum == 1) {
+                     if (try_unique.template operator()<unique_enum_idx>()) return;
                   }
-                  parse<EETF>::template op<Opts>(std::get<unique_enum_idx>(value), ctx, it, end);
-                  if (!parse_failed(ctx.error)) {
-                     return;
+                  else {
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_enum_alt<V>; })) return;
                   }
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
-               }
-               else {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_enum_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
                }
             }
             if constexpr (n_float > 0) {
-               if constexpr (n_float == 1) {
-                  if (value.index() != unique_float_idx) {
-                     value.template emplace<unique_float_idx>();
+               if (!exhausted) {
+                  if constexpr (n_float == 1) {
+                     if (try_unique.template operator()<unique_float_idx>()) return;
                   }
-                  parse<EETF>::template op<Opts>(std::get<unique_float_idx>(value), ctx, it, end);
-                  if (!parse_failed(ctx.error)) {
-                     return;
+                  else {
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_float_alt<V>; })) return;
                   }
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
-               }
-               else {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_float_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
                }
             }
             break;
@@ -2633,40 +2448,10 @@ namespace glz
          case etf::tag::NEW_FLOAT_EXT:
          case etf::tag::FLOAT_EXT: {
             if constexpr (n_float == 1) {
-               if (value.index() != unique_float_idx) {
-                  value.template emplace<unique_float_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_float_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_float_idx>()) return;
             }
             else if constexpr (n_float > 1) {
-               for_each<variant_size>([&]<size_t I>() {
-                  if (matched) return;
-                  using V = std::variant_alternative_t<I, T>;
-                  if constexpr (etf::detail::variant_is_float_alt<V>) {
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
-                     V v{};
-                     parse<EETF>::template op<Opts>(v, ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        value.template emplace<I>(std::move(v));
-                        matched = true;
-                     }
-                  }
-               });
-               if (matched) return;
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_float_alt<V>; })) return;
             }
             break;
          }
@@ -2680,430 +2465,95 @@ namespace glz
                ctx.error = error_code::none;
                if (atom_view == "true" || atom_view == "false") {
                   if constexpr (n_bool == 1) {
-                     if (value.index() != unique_bool_idx) {
-                        value.template emplace<unique_bool_idx>();
-                     }
-                     parse<EETF>::template op<Opts>(std::get<unique_bool_idx>(value), ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        return;
-                     }
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
+                     if (try_unique.template operator()<unique_bool_idx>()) return;
                   }
                   else if constexpr (n_bool > 1) {
-                     for_each<variant_size>([&]<size_t I>() {
-                        if (matched) return;
-                        using V = std::variant_alternative_t<I, T>;
-                        if constexpr (etf::detail::variant_is_bool_alt<V>) {
-                           it = start;
-                           ctx.depth = depth;
-                           ctx.error = error_code::none;
-                           ctx.custom_error_message = {};
-                           V v{};
-                           parse<EETF>::template op<Opts>(v, ctx, it, end);
-                           if (!parse_failed(ctx.error)) {
-                              value.template emplace<I>(std::move(v));
-                              matched = true;
-                           }
-                        }
-                     });
-                     if (matched) return;
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_bool_alt<V>; })) return;
                   }
                }
                else if (atom_view == "nil" || atom_view == "null" || atom_view == "undefined") {
                   if constexpr (n_null == 1) {
-                     if (value.index() != unique_null_idx) {
-                        value.template emplace<unique_null_idx>();
-                     }
-                     parse<EETF>::template op<Opts>(std::get<unique_null_idx>(value), ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        return;
-                     }
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
+                     if (try_unique.template operator()<unique_null_idx>()) return;
                   }
                   else if constexpr (n_null > 1) {
-                     for_each<variant_size>([&]<size_t I>() {
-                        if (matched) return;
-                        using V = std::variant_alternative_t<I, T>;
-                        if constexpr (etf::detail::variant_is_null_alt<V>) {
-                           it = start;
-                           ctx.depth = depth;
-                           ctx.error = error_code::none;
-                           ctx.custom_error_message = {};
-                           V v{};
-                           parse<EETF>::template op<Opts>(v, ctx, it, end);
-                           if (!parse_failed(ctx.error)) {
-                              value.template emplace<I>(std::move(v));
-                              matched = true;
-                           }
-                        }
-                     });
-                     if (matched) return;
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_null_alt<V>; })) return;
                   }
                }
                else {
                   if constexpr (n_enum > 0) {
                      if constexpr (n_enum == 1) {
-                        if (value.index() != unique_enum_idx) {
-                           value.template emplace<unique_enum_idx>();
-                        }
-                        parse<EETF>::template op<Opts>(std::get<unique_enum_idx>(value), ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           return;
-                        }
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
+                        if (try_unique.template operator()<unique_enum_idx>()) return;
                      }
                      else {
-                        for_each<variant_size>([&]<size_t I>() {
-                           if (matched) return;
-                           using V = std::variant_alternative_t<I, T>;
-                           if constexpr (etf::detail::variant_is_enum_alt<V>) {
-                              it = start;
-                              ctx.depth = depth;
-                              ctx.error = error_code::none;
-                              ctx.custom_error_message = {};
-                              V v{};
-                              parse<EETF>::template op<Opts>(v, ctx, it, end);
-                              if (!parse_failed(ctx.error)) {
-                                 value.template emplace<I>(std::move(v));
-                                 matched = true;
-                              }
-                           }
-                        });
-                        if (matched) return;
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
+                        if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_enum_alt<V>; })) return;
                      }
                   }
                   if constexpr (n_str > 0) {
-                     if constexpr (n_str == 1) {
-                        if (value.index() != unique_str_idx) {
-                           value.template emplace<unique_str_idx>();
+                     if (!exhausted) {
+                        if constexpr (n_str == 1) {
+                           if (try_unique.template operator()<unique_str_idx>()) return;
                         }
-                        parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           return;
+                        else {
+                           if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_str_alt<V>; })) return;
                         }
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                     }
-                     else {
-                        for_each<variant_size>([&]<size_t I>() {
-                           if (matched) return;
-                           using V = std::variant_alternative_t<I, T>;
-                           if constexpr (etf::detail::variant_is_str_alt<V>) {
-                              it = start;
-                              ctx.depth = depth;
-                              ctx.error = error_code::none;
-                              ctx.custom_error_message = {};
-                              V v{};
-                              parse<EETF>::template op<Opts>(v, ctx, it, end);
-                              if (!parse_failed(ctx.error)) {
-                                 value.template emplace<I>(std::move(v));
-                                 matched = true;
-                              }
-                           }
-                        });
-                        if (matched) return;
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
                      }
                   }
                }
+            }
+            else if (ctx.error == error_code::unexpected_end) [[unlikely]] {
+               it = start;
+               ctx.depth = depth;
+               return;
             }
             else {
                ctx.error = error_code::none;
             }
             break;
          }
-         case etf::tag::BINARY_EXT: {
-            if constexpr (n_str == 1 && n_array == 0) {
-               if (value.index() != unique_str_idx) {
-                  value.template emplace<unique_str_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
-            }
-            else if constexpr (n_str == 0 && n_array == 1) {
-               if (value.index() != unique_array_idx) {
-                  value.template emplace<unique_array_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
-            }
-            else if constexpr (n_str > 0 || n_array > 0) {
-               if constexpr (n_str > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_str_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
-               }
-               if constexpr (n_array > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_array_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
-               }
-            }
-            break;
-         }
+         case etf::tag::BINARY_EXT:
          case etf::tag::STRING_EXT: {
             if constexpr (n_str == 1 && n_array == 0) {
-               if (value.index() != unique_str_idx) {
-                  value.template emplace<unique_str_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_str_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_str_idx>()) return;
             }
             else if constexpr (n_str == 0 && n_array == 1) {
-               if (value.index() != unique_array_idx) {
-                  value.template emplace<unique_array_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_array_idx>()) return;
             }
             else if constexpr (n_str > 0 || n_array > 0) {
                if constexpr (n_str > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_str_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_str_alt<V>; })) return;
                }
                if constexpr (n_array > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_array_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  if (!exhausted) {
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_array_alt<V>; })) return;
+                  }
                }
             }
             break;
          }
          case etf::tag::LIST_EXT: {
             if constexpr (n_array == 1) {
-               if (value.index() != unique_array_idx) {
-                  value.template emplace<unique_array_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_array_idx>()) return;
             }
             else if constexpr (n_array > 1) {
-               for_each<variant_size>([&]<size_t I>() {
-                  if (matched) return;
-                  using V = std::variant_alternative_t<I, T>;
-                  if constexpr (etf::detail::variant_is_array_alt<V>) {
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
-                     V v{};
-                     parse<EETF>::template op<Opts>(v, ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        value.template emplace<I>(std::move(v));
-                        matched = true;
-                     }
-                  }
-               });
-               if (matched) return;
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_array_alt<V>; })) return;
             }
             break;
          }
          case etf::tag::NIL_EXT: {
             if constexpr (n_null == 1 && n_array == 0) {
-               if (value.index() != unique_null_idx) {
-                  value.template emplace<unique_null_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_null_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_null_idx>()) return;
             }
             else if constexpr (n_array == 1 && n_null == 0) {
-               if (value.index() != unique_array_idx) {
-                  value.template emplace<unique_array_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_array_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_array_idx>()) return;
             }
             else if constexpr (n_null > 0 || n_array > 0) {
                if constexpr (n_null > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_null_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_null_alt<V>; })) return;
                }
                if constexpr (n_array > 0) {
-                  for_each<variant_size>([&]<size_t I>() {
-                     if (matched) return;
-                     using V = std::variant_alternative_t<I, T>;
-                     if constexpr (etf::detail::variant_is_array_alt<V>) {
-                        it = start;
-                        ctx.depth = depth;
-                        ctx.error = error_code::none;
-                        ctx.custom_error_message = {};
-                        V v{};
-                        parse<EETF>::template op<Opts>(v, ctx, it, end);
-                        if (!parse_failed(ctx.error)) {
-                           value.template emplace<I>(std::move(v));
-                           matched = true;
-                        }
-                     }
-                  });
-                  if (matched) return;
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  if (!exhausted) {
+                     if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_array_alt<V>; })) return;
+                  }
                }
             }
             break;
@@ -3111,40 +2561,10 @@ namespace glz
          case etf::tag::SMALL_TUPLE_EXT:
          case etf::tag::LARGE_TUPLE_EXT: {
             if constexpr (n_tuple == 1) {
-               if (value.index() != unique_tuple_idx) {
-                  value.template emplace<unique_tuple_idx>();
-               }
-               parse<EETF>::template op<Opts>(std::get<unique_tuple_idx>(value), ctx, it, end);
-               if (!parse_failed(ctx.error)) {
-                  return;
-               }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_unique.template operator()<unique_tuple_idx>()) return;
             }
             else if constexpr (n_tuple > 1) {
-               for_each<variant_size>([&]<size_t I>() {
-                  if (matched) return;
-                  using V = std::variant_alternative_t<I, T>;
-                  if constexpr (etf::detail::variant_is_tuple_alt<V>) {
-                     it = start;
-                     ctx.depth = depth;
-                     ctx.error = error_code::none;
-                     ctx.custom_error_message = {};
-                     V v{};
-                     parse<EETF>::template op<Opts>(v, ctx, it, end);
-                     if (!parse_failed(ctx.error)) {
-                        value.template emplace<I>(std::move(v));
-                        matched = true;
-                     }
-                  }
-               });
-               if (matched) return;
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               if (try_group([]<class V>(std::type_identity<V>) { return etf::detail::variant_is_tuple_alt<V>; })) return;
             }
             break;
          }
@@ -3152,42 +2572,49 @@ namespace glz
             break;
          }
 
-         // Pass 1: Try all tag-compatible non-skip alternatives first
+         if (exhausted) [[unlikely]] {
+            it = start;
+            ctx.depth = depth;
+            ctx.error = fatal_error;
+            return;
+         }
+
+         // Pass 1: Try all remaining tag-compatible non-skip alternatives first
          for_each<variant_size>([&]<size_t I>() {
-            if (matched) return;
+            if (matched || exhausted || tried[I]) return;
             using V = std::variant_alternative_t<I, T>;
             if constexpr (!std::same_as<V, skip>) {
                if (!etf::detail::variant_alt_can_match_tag<V>(tag)) {
                   return;
                }
-               it = start;
-               ctx.depth = depth;
-               ctx.error = error_code::none;
-               ctx.custom_error_message = {};
+               rewind();
                V v{};
                parse<EETF>::template op<Opts>(v, ctx, it, end);
                if (!parse_failed(ctx.error)) {
                   value.template emplace<I>(std::move(v));
                   matched = true;
                }
+               else {
+                  record_miss(I);
+               }
             }
          });
 
          // Pass 2: Fall back to skip if present and no concrete alternative matched
-         if (!matched) {
+         if (!matched && !exhausted) {
             for_each<variant_size>([&]<size_t I>() {
-               if (matched) return;
+               if (matched || exhausted || tried[I]) return;
                using V = std::variant_alternative_t<I, T>;
                if constexpr (std::same_as<V, skip>) {
-                  it = start;
-                  ctx.depth = depth;
-                  ctx.error = error_code::none;
-                  ctx.custom_error_message = {};
+                  rewind();
                   V v{};
                   parse<EETF>::template op<Opts>(v, ctx, it, end);
                   if (!parse_failed(ctx.error)) {
                      value.template emplace<I>(std::move(v));
                      matched = true;
+                  }
+                  else {
+                     record_miss(I);
                   }
                }
             });
@@ -3196,7 +2623,7 @@ namespace glz
          if (!matched) {
             it = start;
             ctx.depth = depth;
-            ctx.error = error_code::no_matching_variant_type;
+            ctx.error = (fatal_error != error_code::none) ? fatal_error : error_code::no_matching_variant_type;
          }
       }
    };
@@ -3332,8 +2759,6 @@ namespace glz
          case etf::tag::LIST_EXT:
          case etf::tag::SMALL_TUPLE_EXT:
          case etf::tag::LARGE_TUPLE_EXT: {
-            depth_guard guard{ctx};
-            if (!guard) [[unlikely]] return;
             typename generic_json<Mode, MapType>::array_t arr;
             from<EETF, decltype(arr)>::template op<Opts>(arr, ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -3341,8 +2766,6 @@ namespace glz
             break;
          }
          case etf::tag::MAP_EXT: {
-            depth_guard guard{ctx};
-            if (!guard) [[unlikely]] return;
             typename generic_json<Mode, MapType>::object_t obj;
             from<EETF, decltype(obj)>::template op<Opts>(obj, ctx, it, end);
             if (parse_failed(ctx.error)) [[unlikely]] return;
@@ -3419,7 +2842,9 @@ namespace glz
             }
          }
 
-         ctx.error = error_code::syntax_error;
+         if (!bool(ctx.error)) {
+            ctx.error = error_code::syntax_error;
+         }
       }
    };
 
@@ -3433,7 +2858,9 @@ namespace glz
       {
          std::string_view str{};
          if (!etf::detail::read_str(ctx, it, end, str)) {
-            ctx.error = error_code::syntax_error;
+            if (!bool(ctx.error)) {
+               ctx.error = error_code::syntax_error;
+            }
             return;
          }
          chrono_detail::parse_ymd(str, value, ctx.error);

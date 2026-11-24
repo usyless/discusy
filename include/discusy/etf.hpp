@@ -43,7 +43,7 @@ inline constexpr glz::etf::etf_opts glz_opts_not_null_term{
 // On true return: failure
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, [[maybe_unused]] const F& logger = log::Logger{}) {
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data)) {
         logger("ETF parsing failed: {}", glz::format_error(err, etf_data));
@@ -57,7 +57,7 @@ requires ( log::IsLogger<F> )
 
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf(T& object, std::string_view etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) {
     detail::reset_ctx(ctx);
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data, ctx)) {
@@ -73,7 +73,7 @@ requires ( log::IsLogger<F> )
 // On true return: failure
 template <auto opts = glz_opts_not_null_term, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf_view(T& object, std::string_view etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf_view(T& object, std::string_view etf_data, [[maybe_unused]] const F& logger = log::Logger{}) {
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data)) {
         logger("ETF parsing failed: {}", glz::format_error(err, etf_data));
@@ -88,7 +88,7 @@ requires ( log::IsLogger<F> )
 // On true return: failure
 template <auto opts = glz_opts_not_null_term, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool parse_etf_view(T& object, std::string_view etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool parse_etf_view(T& object, std::string_view etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) {
     detail::reset_ctx(ctx);
     #ifdef DISCUSY_LOGGING
     if (const auto err = glz::read<opts>(object, etf_data, ctx)) {
@@ -104,7 +104,7 @@ requires ( log::IsLogger<F> )
 // On true return: failure
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, [[maybe_unused]] const F& logger = log::Logger{}) {
     auto& scratch = detail::tls_scratch;
     scratch.buffer.clear();
     detail::reset_ctx(scratch.ctx);
@@ -127,7 +127,7 @@ requires ( log::IsLogger<F> )
 // On true return: failure
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline bool write_etf(const T& object, std::string& etf_data, glz::context& ctx, [[maybe_unused]] const F& logger = log::Logger{}) {
     auto& scratch = detail::tls_scratch;
     scratch.buffer.clear();
     detail::reset_ctx(ctx);
@@ -150,7 +150,7 @@ requires ( log::IsLogger<F> )
 // Writes directly to the thread-local scratch buffer, returning a string_view
 template <auto opts = glz_opts, typename T, typename F = log::Logger>
 requires ( log::IsLogger<F> )
-[[nodiscard]] inline std::optional<std::string_view> write_scratch_etf(const T& object, [[maybe_unused]] const F& logger = log::Logger{}) noexcept {
+[[nodiscard]] inline std::optional<std::string_view> write_scratch_etf(const T& object, [[maybe_unused]] const F& logger = log::Logger{}) {
     auto& scratch = detail::tls_scratch;
     scratch.buffer.clear();
     detail::reset_ctx(scratch.ctx);
@@ -203,7 +203,11 @@ requires ( log::IsLogger<F> )
         return true;
     }
 
+    object.s.reset();
+    object.t.reset();
+
     glz::context ctx{};
+    const glz::depth_guard root_guard{ctx};
     bool has_op = false;
     bool has_s = false;
     bool has_t = false;
@@ -228,8 +232,7 @@ requires ( log::IsLogger<F> )
             has_op = true;
         }
         else if (key == "s") {
-            if (glz::etf::detail::is_nil(it, end)) {
-                glz::etf::detail::skip_nil(it, end);
+            if (glz::etf::detail::read_nil(it, end)) {
                 object.s.reset();
             }
             else {
@@ -244,13 +247,16 @@ requires ( log::IsLogger<F> )
             has_s = true;
         }
         else if (key == "t") {
-            if (glz::etf::detail::is_nil(it, end)) {
-                glz::etf::detail::skip_nil(it, end);
+            if (glz::etf::detail::read_nil(it, end)) {
                 object.t.reset();
             }
             else {
                 glz::parse<glz::EETF>::template op<glz::no_header_on<glz_opts>()>(object.t, ctx, it, end);
-                if (static_cast<bool>(ctx.error)) [[unlikely]] {
+                if (ctx.error == glz::error_code::unexpected_enum) [[unlikely]] {
+                    ctx.error = glz::error_code::none;
+                    object.t.reset();
+                }
+                else if (static_cast<bool>(ctx.error)) [[unlikely]] {
                     #ifdef DISCUSY_LOGGING
                     logger("ETF parsing failed: failed to parse \"t\"");
                     #endif
@@ -290,22 +296,22 @@ requires ( log::IsLogger<F> )
 }
 
 template <auto opts = glz_opts, typename T, typename... Args>
-[[nodiscard]] inline bool parse(T& obj, Args&&... args) noexcept {
+[[nodiscard]] inline bool parse(T& obj, Args&&... args) {
     return parse_etf<opts>(obj, std::forward<Args>(args)...);
 }
 
 template <auto opts = glz_opts_not_null_term, typename T, typename... Args>
-[[nodiscard]] inline bool parse_view(T& obj, Args&&... args) noexcept {
+[[nodiscard]] inline bool parse_view(T& obj, Args&&... args) {
     return parse_etf_view<opts>(obj, std::forward<Args>(args)...);
 }
 
 template <auto opts = glz_opts, typename T, typename... Args>
-[[nodiscard]] inline decltype(auto) write(const T& obj, Args&&... args) noexcept {
+[[nodiscard]] inline decltype(auto) write(const T& obj, Args&&... args) {
     return write_etf<opts>(obj, std::forward<Args>(args)...);
 }
 
 template <auto opts = glz_opts, typename T, typename... Args>
-[[nodiscard]] inline decltype(auto) write_scratch(const T& obj, Args&&... args) noexcept {
+[[nodiscard]] inline decltype(auto) write_scratch(const T& obj, Args&&... args) {
     return write_scratch_etf<opts>(obj, std::forward<Args>(args)...);
 }
 

@@ -1238,13 +1238,18 @@ private:
         }
 
         auto& d = obj.d.get_object();
-        auto *const d_end = d.end();
+        const auto *const d_end = d.end();
 
         auto *const g_id_it = d.find("guild_id");
         uint64_t g_id_val = 0;
         if (g_id_it != d_end) {
             if (g_id_it->second.is_string()) {
                 g_id_val = ulp::str::to_number_or_default<decltype(snowflake::value)>(g_id_it->second.get_string());
+            } else if (g_id_it->second.holds<uint64_t>()) {
+                g_id_val = g_id_it->second.get<uint64_t>();
+            } else if (g_id_it->second.holds<int64_t>()) {
+                const auto v = g_id_it->second.get<int64_t>();
+                if (v > 0) g_id_val = static_cast<uint64_t>(v);
             } else if (g_id_it->second.is_number()) {
                 g_id_val = static_cast<decltype(snowflake::value)>(g_id_it->second.get_number());
             }
@@ -1257,8 +1262,16 @@ private:
             for (const auto& j : g_ids_it->second.get_array()) {
                 if (j.is_string()) {
                     const auto num = ulp::str::to_number<decltype(snowflake::value)>(j.get_string());
-                    if (num.value_or(0) == 0ULL) continue;
+                    if (!num || *num == 0ULL) continue;
                     guild_ids.emplace_back(*num);
+                } else if (j.holds<uint64_t>()) {
+                    const auto num = j.get<uint64_t>();
+                    if (num == 0ULL) continue;
+                    guild_ids.emplace_back(num);
+                } else if (j.holds<int64_t>()) {
+                    const auto num = j.get<int64_t>();
+                    if (num <= 0) continue;
+                    guild_ids.emplace_back(static_cast<uint64_t>(num));
                 } else if (j.is_number()) {
                     const auto num = static_cast<decltype(snowflake::value)>(j.get_number());
                     if (num == 0ULL) continue;
@@ -1298,11 +1311,16 @@ private:
                 if (shard_id >= total_shards) continue;
 
                 if (!shard_requests[shard_id].d.is_object()) {
+                    shard_requests[shard_id].op = obj.op;
                     shard_requests[shard_id].d = d;
                 }
 
                 // these will all exist
+                #ifdef DISCUSY_USE_ETF
+                shard_requests[shard_id].d.at("guild_ids").get_array().emplace_back(id.value);
+                #else
                 shard_requests[shard_id].d.at("guild_ids").get_array().emplace_back(id.str());
+                #endif
             }
 
             std::string encoded;

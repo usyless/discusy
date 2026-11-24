@@ -971,12 +971,14 @@ struct payload_base {
 
 // for sharding required re-routing
 struct rescue_payload {
-    glz::generic d{};
+    Opcode op{};
+    glz::generic_u64 d{};
 
-    static rescue_payload create(glz::generic d_ = {}) {
-        return rescue_payload{.d = std::move(d_)};
+    static rescue_payload create(glz::generic_u64 d_ = {}, Opcode op_ = {}) {
+        return rescue_payload{.op = op_, .d = std::move(d_)};
     }
-    decltype(auto) set_d(this auto&& self, glz::generic d_) { self.d = std::move(d_); return std::forward<decltype(self)>(self); }
+    decltype(auto) set_op(this auto&& self, Opcode op_) noexcept { self.op = op_; return std::forward<decltype(self)>(self); }
+    decltype(auto) set_d(this auto&& self, glz::generic_u64 d_) { self.d = std::move(d_); return std::forward<decltype(self)>(self); }
 };
 
 struct update_presence {

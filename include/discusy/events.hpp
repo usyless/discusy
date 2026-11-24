@@ -5938,6 +5938,8 @@ namespace discusy::components::detail {
 
 template <auto Opts, typename It0, typename It1>
 [[nodiscard]] inline bool extract_component_type(glz::is_context auto& ctx, It0& it, It1 end, component_type& out_type) noexcept {
+    const glz::depth_guard guard{ctx};
+    if (!guard) [[unlikely]] return false;
     if (it >= end) [[unlikely]] {
         ctx.error = glz::error_code::unexpected_end;
         return false;
@@ -5951,8 +5953,12 @@ template <auto Opts, typename It0, typename It1>
         ctx.error = glz::error_code::unexpected_end;
         return false;
     }
-    const uint32_t arity = glz::etf::detail::read_be<uint32_t>(it);
+    const auto arity = glz::etf::detail::read_be<uint32_t>(it);
     it += 4;
+    if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
 
     for (uint32_t i = 0; i < arity; ++i) {
         std::string_view key;
@@ -5972,6 +5978,8 @@ template <auto Opts, typename It0, typename It1>
 
 template <auto Opts, typename It0, typename It1>
 [[nodiscard]] inline bool extract_ir_component_type(glz::is_context auto& ctx, It0& it, It1 end, component_type& out_type) noexcept {
+    const glz::depth_guard guard{ctx};
+    if (!guard) [[unlikely]] return false;
     if (it >= end) [[unlikely]] {
         ctx.error = glz::error_code::unexpected_end;
         return false;
@@ -5985,8 +5993,12 @@ template <auto Opts, typename It0, typename It1>
         ctx.error = glz::error_code::unexpected_end;
         return false;
     }
-    const uint32_t arity = glz::etf::detail::read_be<uint32_t>(it);
+    const auto arity = glz::etf::detail::read_be<uint32_t>(it);
     it += 4;
+    if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
+        ctx.error = glz::error_code::unexpected_end;
+        return false;
+    }
 
     opt<component_type> t{};
     opt<component_type> ct{};
@@ -6115,10 +6127,11 @@ case discusy::components::component_type::name: { \
 template <> \
 struct glz::from<glz::EETF, discusy::components::name> { \
     template <auto Opts> \
-    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) noexcept { \
+    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) { \
         auto start_it = it; \
         discusy::components::component_type ext_type{}; \
         if (!discusy::components::detail::extract_component_type<Opts>(ctx, it, end, ext_type)) { \
+            it = start_it; \
             if (!static_cast<bool>(ctx.error)) { \
                 ctx.error = glz::error_code::parse_error; \
                 ctx.custom_error_message = "Failed to parse ETF for type extraction"; \
@@ -6129,6 +6142,7 @@ struct glz::from<glz::EETF, discusy::components::name> { \
         switch (ext_type) { \
             macro \
             default: { \
+                it = start_it; \
                 ctx.error = glz::error_code::parse_error; \
                 ctx.custom_error_message = "Unknown component type"; \
                 return; \
@@ -6140,14 +6154,14 @@ struct glz::from<glz::EETF, discusy::components::name> { \
 template <> \
 struct glz::to<glz::EETF, discusy::components::name> { \
     template <auto Opts> \
-    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept { \
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) { \
         glz::to<glz::EETF, discusy::components::name::variant_base>::template op<Opts>( \
             static_cast<const discusy::components::name::variant_base&>(wrapper), \
             ctx, b, ix \
         ); \
     } \
     template <auto Opts> \
-    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept { \
+    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) { \
         glz::to<glz::EETF, discusy::components::name::variant_base>::template no_header<Opts>( \
             static_cast<const discusy::components::name::variant_base&>(wrapper), \
             ctx, b, ix \
@@ -6256,10 +6270,11 @@ struct glz::to<glz::JSON, discusy::interaction::component_interaction_response> 
 template <>
 struct glz::from<glz::EETF, discusy::interaction::component_interaction_response> {
     template <auto Opts>
-    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) noexcept {
+    static void op(auto& wrapper, glz::is_context auto& ctx, auto& it, auto end) {
         auto start_it = it;
         discusy::components::component_type ext_type{};
         if (!discusy::components::detail::extract_ir_component_type<Opts>(ctx, it, end, ext_type)) {
+            it = start_it;
             if (!static_cast<bool>(ctx.error)) {
                 ctx.error = glz::error_code::parse_error;
                 ctx.custom_error_message = "Failed to get type for component interaction response";
@@ -6291,6 +6306,7 @@ struct glz::from<glz::EETF, discusy::interaction::component_interaction_response
             #undef DISCUSY_D
             #pragma pop_macro("DISCUSY_D")
             default: {
+                it = start_it;
                 ctx.error = glz::error_code::parse_error;
                 ctx.custom_error_message = "Unknown component interaction response type";
                 return;
@@ -6302,14 +6318,14 @@ struct glz::from<glz::EETF, discusy::interaction::component_interaction_response
 template <>
 struct glz::to<glz::EETF, discusy::interaction::component_interaction_response> {
     template <auto Opts>
-    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept {
+    static void op(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) {
         glz::to<glz::EETF, discusy::interaction::component_interaction_response::variant_base>::template op<Opts>(
             static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
             ctx, b, ix
         );
     }
     template <auto Opts>
-    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) noexcept {
+    static void no_header(auto&& wrapper, glz::is_context auto&& ctx, auto&& b, auto& ix) {
         glz::to<glz::EETF, discusy::interaction::component_interaction_response::variant_base>::template no_header<Opts>(
             static_cast<const discusy::interaction::component_interaction_response::variant_base&>(wrapper),
             ctx, b, ix

@@ -17,7 +17,7 @@ namespace glz
       {
          using etf::detail::read_be;
 
-         depth_guard guard{ctx};
+         const depth_guard guard{ctx};
          if (!guard) [[unlikely]] return;
 
          if (it >= end) [[unlikely]] {
@@ -176,6 +176,10 @@ namespace glz
                return;
             }
             const auto arity = static_cast<uint8_t>(*it++);
+            if (arity > static_cast<size_t>(end - it)) [[unlikely]] {
+               ctx.error = error_code::unexpected_end;
+               return;
+            }
             for (uint8_t i = 0; i < arity; ++i) {
                op<Opts>(ctx, it, end);
                if (static_cast<bool>(ctx.error)) [[unlikely]] return;
@@ -401,8 +405,12 @@ namespace glz
       template <auto Opts>
       GLZ_ALWAYS_INLINE void skip_nested_value(is_context auto& ctx, auto& it, auto end) noexcept
       {
-         depth_guard guard{ctx};
-         if (!guard) [[unlikely]] return;
+         if (ctx.depth == 0) [[unlikely]] {
+            const depth_guard guard{ctx};
+            if (!guard) [[unlikely]] return;
+            skip_value<EETF>::op<Opts>(ctx, it, end);
+            return;
+         }
          skip_value<EETF>::op<Opts>(ctx, it, end);
       }
    } // namespace etf::detail

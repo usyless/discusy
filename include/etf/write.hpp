@@ -3,6 +3,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -30,6 +31,18 @@ namespace glz
 {
    namespace etf::detail
    {
+      template <class V>
+      consteval bool etf_glaze_value_is_nullable()
+      {
+         if constexpr (glaze_value_t<V>) {
+            using Inner = std::decay_t<decltype(get_member(std::declval<const V&>(), meta_wrapper_v<V>))>;
+            return null_t<Inner>;
+         }
+         else {
+            return false;
+         }
+      }
+
       template <class T>
       consteval size_t min_etf_val_size();
 
@@ -41,10 +54,10 @@ namespace glz
          }
          else {
             using field_val_t = std::decay_t<field_t<V, I>>;
-            if constexpr (never_written<etf_opts{}, field_val_t> || null_t<field_val_t> ||
+            if constexpr (never_written<glz::etf_opts, field_val_t> || null_t<field_val_t> ||
                           nullable_like<field_val_t> || nullable_value_t<field_val_t> ||
                           is_specialization_v<field_val_t, custom_t> ||
-                          glaze_value_is_nullable<field_val_t>()) { // NOLINT(readability-trailing-comma)
+                          etf_glaze_value_is_nullable<field_val_t>()) {
                return 0;
             }
             else {
@@ -78,14 +91,11 @@ namespace glz
       consteval size_t min_etf_val_size()
       {
          using V = std::decay_t<T>;
-         if constexpr (custom_write<V> || has_custom_meta_v<V>) {
+         if constexpr (custom_write<V> || has_custom_meta_v<V> || std::is_pointer_v<V>) {
             return 1;
          }
          else if constexpr (std::is_void_v<V>) {
             return 0;
-         }
-         else if constexpr (std::is_pointer_v<V>) {
-            return 1;
          }
          else if constexpr (std::same_as<V, std::nullptr_t> || always_null_t<V>) {
             return 5; // \x77\x03nil
@@ -173,10 +183,7 @@ namespace glz
       constexpr size_t max_scalar_etf_val_size()
       {
          using V = std::decay_t<T>;
-         if constexpr (custom_write<V> || has_custom_meta_v<V>) {
-            return 0;
-         }
-         else if constexpr (std::is_void_v<V> || is_indirect_v<V>) {
+         if constexpr (custom_write<V> || has_custom_meta_v<V> || std::is_void_v<V> || is_indirect_v<V>) {
             return 0;
          }
          else if constexpr (std::same_as<V, std::nullptr_t> || always_null_t<V>) {
@@ -203,8 +210,11 @@ namespace glz
                   return 7; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 4 bytes = 7 bytes
                }
             }
-            else {
+            else if constexpr (sizeof(V) <= 8) {
                return 11; // SMALL_BIG_EXT: tag(1) + len(1) + sign(1) + 8 = 11 bytes
+            }
+            else {
+               return 0;
             }
          }
          else if constexpr (std::is_enum_v<V>) {
@@ -309,10 +319,11 @@ namespace glz
             return true;
          }
          else if constexpr (glaze_value_t<V>) {
-            using M = std::decay_t<decltype(get_member(std::declval<V&>(), meta_wrapper_v<V>))>;
-            return str_t<M> && !custom_write<M>;
+            using RawM = decltype(get_member(std::declval<const V&>(), meta_wrapper_v<V>));
+            using M = std::decay_t<RawM>;
+            return str_t<M> && !custom_write<M> && (std::is_reference_v<RawM> || string_view_t<M>);
          }
-         else {
+         else { // NOLINT(bugprone-branch-clone)
             return false;
          }
       }();
@@ -458,19 +469,26 @@ namespace glz
          GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
          {
             if constexpr (!check_no_header(Opts)) {
-               constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
-               etf::detail::ensure_space(b, ix + prealloc);
-               etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
-               constexpr auto next_opts = [] {
-                  if constexpr (etf::detail::fixed_etf_padding<std::decay_t<T>> > 0) {
-                     return write_unchecked_on<no_header_on<Opts>()>();
-                  }
-                  else {
-                     return no_header_on<Opts>();
-                  }
-               }();
-               Derived::template no_header<next_opts>(
-                  std::forward<decltype(value)>(value), ctx, b, ix);
+               if constexpr (has_bounded_capacity<std::remove_cvref_t<decltype(b)>>) {
+                  if (!etf::detail::dump_byte(ctx, etf::magic_version, b, ix)) [[unlikely]] return;
+                  Derived::template no_header<no_header_on<Opts>()>(
+                     std::forward<decltype(value)>(value), ctx, b, ix);
+               }
+               else {
+                  constexpr size_t prealloc = etf::detail::min_etf_size<std::decay_t<T>>;
+                  if (!etf::detail::ensure_space(ctx, b, ix + prealloc)) [[unlikely]] return;
+                  etf::detail::dump_byte_unchecked(etf::magic_version, b, ix);
+                  constexpr auto next_opts = [] {
+                     if constexpr (etf::detail::fixed_etf_padding<std::decay_t<T>> > 0) {
+                        return write_unchecked_on<no_header_on<Opts>()>();
+                     }
+                     else {
+                        return no_header_on<Opts>();
+                     }
+                  }();
+                  Derived::template no_header<next_opts>(
+                     std::forward<decltype(value)>(value), ctx, b, ix);
+               }
             }
             else {
                Derived::template no_header<Opts>(
@@ -503,13 +521,13 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&&, is_context auto&, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&&, is_context auto& ctx, auto& b, auto& ix)
       {
          if constexpr (check_write_unchecked(Opts)) {
             etf::detail::dump_bytes_unchecked<5>("\x77\x03" "nil", b, ix);
          }
          else {
-            etf::detail::dump_bytes("\x77\x03" "nil", 5, b, ix);
+            (void)etf::detail::dump_bytes(ctx, "\x77\x03" "nil", 5, b, ix);
          }
       }
    };
@@ -529,7 +547,7 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(const bool value, is_context auto&, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(const bool value, is_context auto& ctx, auto& b, auto& ix)
       {
          if constexpr (check_write_unchecked(Opts)) {
             if (value) {
@@ -541,10 +559,10 @@ namespace glz
          }
          else {
             if (value) {
-               etf::detail::dump_bytes("\x77\x04" "true", 6, b, ix);
+               (void)etf::detail::dump_bytes(ctx, "\x77\x04" "true", 6, b, ix);
             }
             else {
-               etf::detail::dump_bytes("\x77\x05" "false", 7, b, ix);
+               (void)etf::detail::dump_bytes(ctx, "\x77\x05" "false", 7, b, ix);
             }
          }
       }
@@ -556,7 +574,7 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, [[maybe_unused]] is_context auto& ctx, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, [[maybe_unused]] is_context auto& ctx, auto& b, auto& ix)
       {
          if constexpr (std::floating_point<std::decay_t<T>>) {
             const auto d = static_cast<double>(value);
@@ -566,16 +584,16 @@ namespace glz
                etf::detail::dump_tag_be_unchecked<uint64_t>(etf::tag::NEW_FLOAT_EXT, bits, b, ix);
             }
             else {
-               etf::detail::dump_tag_be<uint64_t>(etf::tag::NEW_FLOAT_EXT, bits, b, ix);
+               (void)etf::detail::dump_tag_be<uint64_t>(ctx, etf::tag::NEW_FLOAT_EXT, bits, b, ix);
             }
          }
          else if constexpr (std::integral<std::decay_t<T>>) {
             using U = std::decay_t<T>;
             if constexpr (std::is_unsigned_v<U>) {
                if constexpr (sizeof(U) == 8) {
-                  if (value >= (1ULL << 56)) [[likely]] { // 8-byte Snowflake fast path (no countl_zero needed)
+                  if (value >= (1ULL << 56U)) [[likely]] { // 8-byte Snowflake fast path (no countl_zero needed)
                      if constexpr (!check_write_unchecked(Opts)) {
-                        etf::detail::ensure_space(b, ix + 11);
+                        if (!etf::detail::ensure_space(ctx, b, ix + 11)) [[unlikely]] return;
                      }
                      b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                      b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(8);
@@ -594,7 +612,7 @@ namespace glz
                      etf::detail::dump_tag_be_unchecked<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                   }
                   else {
-                     etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                     (void)etf::detail::dump_tag_be<uint8_t>(ctx, etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                   }
                }
                else if (value <= 2147483647ULL) {
@@ -602,13 +620,13 @@ namespace glz
                      etf::detail::dump_tag_be_unchecked<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
                   }
                   else {
-                     etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                     (void)etf::detail::dump_tag_be<int32_t>(ctx, etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
                   }
                }
                else if constexpr (sizeof(U) <= 4) {
                   // uint32_t > 2147483647 always has bit 31 set -> n is always 4 (7 bytes total)
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + 7);
+                     if (!etf::detail::ensure_space(ctx, b, ix + 7)) [[unlikely]] return;
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(4);
@@ -623,9 +641,9 @@ namespace glz
                else {
                   // 64-bit integer (e.g. Snowflake) -> SMALL_BIG_EXT (stripped little-endian bytes)
                   const auto uval = static_cast<uint64_t>(value);
-                  const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
+                  const auto n = static_cast<uint8_t>(8U - (static_cast<unsigned>(std::countl_zero(uval)) >> 3U));
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + 11);
+                     if (!etf::detail::ensure_space(ctx, b, ix + 3 + n)) [[unlikely]] return;
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
@@ -644,7 +662,7 @@ namespace glz
                      etf::detail::dump_tag_be_unchecked<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                   }
                   else {
-                     etf::detail::dump_tag_be<uint8_t>(etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
+                     (void)etf::detail::dump_tag_be<uint8_t>(ctx, etf::tag::SMALL_INTEGER_EXT, static_cast<uint8_t>(value), b, ix);
                   }
                }
                else if (value >= -2147483648LL && value <= 2147483647LL) {
@@ -652,16 +670,16 @@ namespace glz
                      etf::detail::dump_tag_be_unchecked<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
                   }
                   else {
-                     etf::detail::dump_tag_be<int32_t>(etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
+                     (void)etf::detail::dump_tag_be<int32_t>(ctx, etf::tag::INTEGER_EXT, static_cast<int32_t>(value), b, ix);
                   }
                }
                else {
                   // 64-bit signed integer -> SMALL_BIG_EXT (stripped little-endian bytes)
                   const bool is_negative = value < 0;
                   const uint64_t uval = is_negative ? (0ULL - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
-                  const auto n = static_cast<uint8_t>(8 - (std::countl_zero(uval) >> 3));
+                  const auto n = static_cast<uint8_t>(8U - (static_cast<unsigned>(std::countl_zero(uval)) >> 3U));
                   if constexpr (!check_write_unchecked(Opts)) {
-                     etf::detail::ensure_space(b, ix + 11);
+                     if (!etf::detail::ensure_space(ctx, b, ix + 3 + n)) [[unlikely]] return;
                   }
                   b[ix] = static_cast<std::decay_t<decltype(b)>::value_type>(etf::tag::SMALL_BIG_EXT);
                   b[ix + 1] = static_cast<std::decay_t<decltype(b)>::value_type>(n);
@@ -684,15 +702,19 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix)
       {
          const auto sv = str_view<T>(value);
+         if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+            ctx.error = error_code::invalid_length;
+            return;
+         }
          const auto len = static_cast<uint32_t>(sv.size());
          if constexpr (check_write_unchecked(Opts)) {
             etf::detail::dump_binary_unchecked(sv.data(), len, b, ix);
          }
          else {
-            etf::detail::dump_binary(sv.data(), len, b, ix);
+            (void)etf::detail::dump_binary(ctx, sv.data(), len, b, ix);
          }
       }
    };
@@ -703,14 +725,18 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&, auto& b, auto& ix) noexcept
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix)
       {
+         if (value.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+            ctx.error = error_code::invalid_length;
+            return;
+         }
          const auto len = static_cast<uint32_t>(value.size());
          if constexpr (check_write_unchecked(Opts)) {
             etf::detail::dump_binary_unchecked(value.data(), len, b, ix);
          }
          else {
-            etf::detail::dump_binary(value.data(), len, b, ix);
+            (void)etf::detail::dump_binary(ctx, value.data(), len, b, ix);
          }
       }
    };
@@ -782,30 +808,42 @@ namespace glz
                etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
             }
             else {
-               etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
+               (void)etf::detail::dump_byte(ctx, etf::tag::NIL_EXT, b, ix);
             }
+            return;
+         }
+         if (sz > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+            ctx.error = error_code::invalid_length;
             return;
          }
 
          using item_t = std::decay_t<range_value_t<T>>;
+         constexpr bool bounded_buf = has_bounded_capacity<std::remove_cvref_t<decltype(b)>>;
          constexpr size_t max_item_sz = etf::detail::max_etf_val_size<item_t>();
-         if constexpr (max_item_sz > 0) {
-            etf::detail::ensure_space(b, ix + 6 + (sz * max_item_sz));
+         if constexpr (!bounded_buf && max_item_sz > 0) {
+            if (!etf::detail::ensure_space(ctx, b, ix + 6 + (sz * max_item_sz))) [[unlikely]] return;
             etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
             constexpr auto item_opts = write_unchecked_on<Opts>();
             for (auto&& item : value) {
                to<EETF, item_t>::template no_header<item_opts>(item, ctx, b, ix);
+               if (bool(ctx.error)) [[unlikely]] return;
             }
             etf::detail::dump_byte_unchecked(etf::tag::NIL_EXT, b, ix);
          }
          else {
-            constexpr size_t item_alloc = etf::detail::min_etf_val_size<item_t>();
-            etf::detail::ensure_space(b, ix + 6 + (sz * item_alloc));
-            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
+            if constexpr (bounded_buf) {
+               if (!etf::detail::dump_tag_be<uint32_t>(ctx, etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix)) [[unlikely]] return;
+            }
+            else {
+               constexpr size_t item_alloc = etf::detail::min_etf_val_size<item_t>();
+               if (!etf::detail::ensure_space(ctx, b, ix + 6 + (sz * item_alloc))) [[unlikely]] return;
+               etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::LIST_EXT, static_cast<uint32_t>(sz), b, ix);
+            }
             for (auto&& item : value) {
                to<EETF, item_t>::template no_header<Opts>(item, ctx, b, ix);
+               if (bool(ctx.error)) [[unlikely]] return;
             }
-            etf::detail::dump_byte(etf::tag::NIL_EXT, b, ix);
+            (void)etf::detail::dump_byte(ctx, etf::tag::NIL_EXT, b, ix);
          }
       }
    };
@@ -822,26 +860,28 @@ namespace glz
          static constexpr auto N = glz::tuple_size_v<V>;
          if constexpr (N <= 255) {
             if constexpr (!check_write_unchecked(Opts)) {
-               etf::detail::ensure_space(b, ix + 2);
+               if (!etf::detail::ensure_space(ctx, b, ix + 2)) [[unlikely]] return;
             }
             etf::detail::dump_byte_unchecked(etf::tag::SMALL_TUPLE_EXT, b, ix);
             etf::detail::dump_byte_unchecked(static_cast<uint8_t>(N), b, ix);
          }
          else {
             if constexpr (!check_write_unchecked(Opts)) {
-               etf::detail::ensure_space(b, ix + 5);
+               if (!etf::detail::ensure_space(ctx, b, ix + 5)) [[unlikely]] return;
             }
             etf::detail::dump_byte_unchecked(etf::tag::LARGE_TUPLE_EXT, b, ix);
             etf::detail::dump_be_unchecked<uint32_t>(static_cast<uint32_t>(N), b, ix);
          }
          if constexpr (is_std_tuple<V>) {
             for_each<N>([&]<size_t I>() {
+               if (bool(ctx.error)) [[unlikely]] return;
                using item_t = std::decay_t<std::tuple_element_t<I, V>>;
                to<EETF, item_t>::template no_header<Opts>(std::get<I>(value), ctx, b, ix);
             });
          }
          else {
             for_each<N>([&]<size_t I>() {
+               if (bool(ctx.error)) [[unlikely]] return;
                using item_t = std::decay_t<glz::tuple_element_t<I, V>>;
                to<EETF, item_t>::template no_header<Opts>(glz::get<I>(value), ctx, b, ix);
             });
@@ -863,21 +903,32 @@ namespace glz
                etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, 0, b, ix);
             }
             else {
-               etf::detail::dump_tag_be<uint32_t>(etf::tag::MAP_EXT, 0, b, ix);
+               (void)etf::detail::dump_tag_be<uint32_t>(ctx, etf::tag::MAP_EXT, 0, b, ix);
             }
+            return;
+         }
+         if (sz > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+            ctx.error = error_code::invalid_length;
             return;
          }
 
          using key_t = std::decay_t<typename std::decay_t<T>::key_type>;
          using mapped_t = std::decay_t<typename std::decay_t<T>::mapped_type>;
-         constexpr size_t pair_alloc = (std::max)(sizeof(key_t), etf::detail::min_etf_val_size<key_t>()) +
-                                       (std::max)(sizeof(mapped_t), etf::detail::min_etf_val_size<mapped_t>());
-         etf::detail::ensure_space(b, ix + 5 + (sz * pair_alloc));
+         if constexpr (has_bounded_capacity<std::remove_cvref_t<decltype(b)>>) {
+            if (!etf::detail::dump_tag_be<uint32_t>(ctx, etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix)) [[unlikely]] return;
+         }
+         else {
+            constexpr size_t pair_alloc = (std::max)(sizeof(key_t), etf::detail::min_etf_val_size<key_t>()) +
+                                          (std::max)(sizeof(mapped_t), etf::detail::min_etf_val_size<mapped_t>());
+            if (!etf::detail::ensure_space(ctx, b, ix + 5 + (sz * pair_alloc))) [[unlikely]] return;
+            etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix);
+         }
 
-         etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, static_cast<uint32_t>(sz), b, ix);
          for (auto&& [k, v] : value) {
             to<EETF, key_t>::template no_header<Opts>(k, ctx, b, ix);
+            if (bool(ctx.error)) [[unlikely]] return;
             to<EETF, mapped_t>::template no_header<Opts>(v, ctx, b, ix);
+            if (bool(ctx.error)) [[unlikely]] return;
          }
       }
    };
@@ -906,17 +957,21 @@ namespace glz
       template <auto Opts>
       static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         static constexpr size_t fixed_max_size = etf::detail::fixed_etf_padding<std::decay_t<T>>;
-         if constexpr (fixed_max_size > 0) {
+         constexpr bool bounded_buf = has_bounded_capacity<std::remove_cvref_t<decltype(b)>>;
+         static constexpr size_t fixed_max_size = bounded_buf ? 0 : etf::detail::fixed_etf_padding<std::decay_t<T>>;
+         if constexpr (bounded_buf) {
+            if (!etf::detail::ensure_space(ctx, b, ix + 5)) [[unlikely]] return;
+         }
+         else if constexpr (fixed_max_size > 0) {
             if constexpr (!check_write_unchecked(Opts)) {
-               etf::detail::ensure_space(b, ix + fixed_max_size);
+               if (!etf::detail::ensure_space(ctx, b, ix + fixed_max_size)) [[unlikely]] return;
             }
          }
          else {
             constexpr size_t initial_run = 5 + etf::detail::bounded_run_size<Opts, T, 0>();
             constexpr size_t struct_min = etf::detail::min_etf_struct_size<std::decay_t<T>>();
             if constexpr (!check_write_unchecked(Opts)) {
-               etf::detail::ensure_space(b, ix + (std::max)(initial_run, struct_min));
+               if (!etf::detail::ensure_space(ctx, b, ix + (std::max)(initial_run, struct_min))) [[unlikely]] return;
             }
          }
 
@@ -940,6 +995,7 @@ namespace glz
                if constexpr (should_skip_field<Opts, I>()) {
                   return;
                }
+               if (bool(ctx.error)) [[unlikely]] return;
 
                decltype(auto) member_val = [&]() -> decltype(auto) {
                   if constexpr (reflectable<T>) {
@@ -952,13 +1008,13 @@ namespace glz
                using val_t = std::decay_t<decltype(member_val)>;
 
                static constexpr auto key = reflect<T>::keys[I];
-               constexpr size_t val_max = etf::detail::is_indirect_v<val_t> ? 0 : etf::detail::max_etf_val_size<val_t>();
+               constexpr size_t val_max = (bounded_buf || etf::detail::is_indirect_v<val_t>) ? 0 : etf::detail::max_etf_val_size<val_t>();
 
                auto on_skipped = [&] {
-                  if constexpr (not fixed_max_size && val_max == 0) {
+                  if constexpr (!bounded_buf && !fixed_max_size && val_max == 0) {
                      constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
                      if constexpr (next_run > 0) {
-                        etf::detail::ensure_space(b, ix + next_run);
+                        (void)etf::detail::ensure_space(ctx, b, ix + next_run);
                      }
                   }
                };
@@ -1003,8 +1059,16 @@ namespace glz
                         return;
                      }
                   }
-                  else if constexpr (glaze_value_is_nullable<val_t>()) {
-                     if (is_glaze_value_field_null<T, I>(value, t)) {
+                  else if constexpr (etf::detail::etf_glaze_value_is_nullable<val_t>()) {
+                     auto&& inner_val = get_member(member_val, meta_wrapper_v<val_t>);
+                     using Inner = std::decay_t<decltype(inner_val)>;
+                     if constexpr (nullable_value_t<Inner>) {
+                        if (!inner_val.has_value()) {
+                           on_skipped();
+                           return;
+                        }
+                     }
+                     else if (!bool(inner_val)) {
                         on_skipped();
                         return;
                      }
@@ -1013,10 +1077,17 @@ namespace glz
 
                if constexpr (etf::detail::is_etf_str_like<val_t>) {
                   const auto sv = etf::detail::get_etf_str_view(member_val);
+                  if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
                   const auto len = static_cast<uint32_t>(sv.size());
-                  if constexpr (not fixed_max_size) {
+                  if constexpr (bounded_buf) {
+                     if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len)) [[unlikely]] return;
+                  }
+                  else if constexpr (not fixed_max_size) {
                      constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len + next_run);
+                     if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len + next_run)) [[unlikely]] return;
                   }
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
                   etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
@@ -1035,10 +1106,17 @@ namespace glz
                   using inner_t = std::decay_t<decltype(inner_val)>;
                   if constexpr (etf::detail::is_etf_str_like<inner_t>) {
                      const auto sv = etf::detail::get_etf_str_view(inner_val);
+                     if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                        ctx.error = error_code::invalid_length;
+                        return;
+                     }
                      const auto len = static_cast<uint32_t>(sv.size());
-                     if constexpr (not fixed_max_size) {
+                     if constexpr (bounded_buf) {
+                        if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len)) [[unlikely]] return;
+                     }
+                     else if constexpr (not fixed_max_size) {
                         constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
-                        etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len + next_run);
+                        if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len + next_run)) [[unlikely]] return;
                      }
                      static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
                      etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
@@ -1047,7 +1125,7 @@ namespace glz
                   else {
                      if constexpr (not fixed_max_size) {
                         if constexpr (val_max == 0) {
-                           etf::detail::ensure_space(b, ix + 5 + key.size());
+                           if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size())) [[unlikely]] return;
                         }
                      }
 
@@ -1059,10 +1137,11 @@ namespace glz
                      }
                      else {
                         to<EETF, inner_t>::template no_header<Opts>(inner_val, ctx, b, ix);
-                        if constexpr (not fixed_max_size) {
+                        if (bool(ctx.error)) [[unlikely]] return;
+                        if constexpr (!bounded_buf && !fixed_max_size) {
                            constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
                            if constexpr (next_run > 0) {
-                              etf::detail::ensure_space(b, ix + next_run);
+                              if (!etf::detail::ensure_space(ctx, b, ix + next_run)) [[unlikely]] return;
                            }
                         }
                      }
@@ -1071,7 +1150,7 @@ namespace glz
                else {
                   if constexpr (not fixed_max_size) {
                      if constexpr (val_max == 0) {
-                        etf::detail::ensure_space(b, ix + 5 + key.size());
+                        if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size())) [[unlikely]] return;
                      }
                   }
 
@@ -1083,17 +1162,21 @@ namespace glz
                   }
                   else {
                      to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
-                     if constexpr (not fixed_max_size) {
+                     if (bool(ctx.error)) [[unlikely]] return;
+                     if constexpr (!bounded_buf && !fixed_max_size) {
                         constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
                         if constexpr (next_run > 0) {
-                           etf::detail::ensure_space(b, ix + next_run);
+                           if (!etf::detail::ensure_space(ctx, b, ix + next_run)) [[unlikely]] return;
                         }
                      }
                   }
                }
-               ++pair_count;
+               if (!bool(ctx.error)) [[likely]] {
+                  ++pair_count;
+               }
             });
 
+            if (bool(ctx.error)) [[unlikely]] return;
             // Back-patch the actual written pair count
             etf::detail::write_be_at<uint32_t>(pair_count, b, count_pos);
          }
@@ -1105,6 +1188,7 @@ namespace glz
                if constexpr (should_skip_field<Opts, I>()) {
                   return;
                }
+               if (bool(ctx.error)) [[unlikely]] return;
 
                decltype(auto) member_val = [&]() -> decltype(auto) {
                   if constexpr (reflectable<T>) {
@@ -1117,14 +1201,21 @@ namespace glz
                using val_t = std::decay_t<decltype(member_val)>;
 
                static constexpr auto key = reflect<T>::keys[I];
-               constexpr size_t val_max = etf::detail::is_indirect_v<val_t> ? 0 : etf::detail::max_etf_val_size<val_t>();
+               constexpr size_t val_max = (bounded_buf || etf::detail::is_indirect_v<val_t>) ? 0 : etf::detail::max_etf_val_size<val_t>();
 
                if constexpr (etf::detail::is_etf_str_like<val_t>) {
                   const auto sv = etf::detail::get_etf_str_view(member_val);
+                  if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                     ctx.error = error_code::invalid_length;
+                     return;
+                  }
                   const auto len = static_cast<uint32_t>(sv.size());
-                  if constexpr (not fixed_max_size) {
+                  if constexpr (bounded_buf) {
+                     if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len)) [[unlikely]] return;
+                  }
+                  else if constexpr (not fixed_max_size) {
                      constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
-                     etf::detail::ensure_space(b, ix + 5 + key.size() + 5 + len + next_run);
+                     if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size() + 5 + len + next_run)) [[unlikely]] return;
                   }
                   static constexpr etf::detail::static_etf_key<key.size()> formatted_key{key};
                   etf::detail::dump_bytes_unchecked<formatted_key.buf.size()>(formatted_key.buf.data(), b, ix);
@@ -1133,7 +1224,7 @@ namespace glz
                else {
                   if constexpr (not fixed_max_size) {
                      if constexpr (val_max == 0) {
-                        etf::detail::ensure_space(b, ix + 5 + key.size());
+                        if (!etf::detail::ensure_space(ctx, b, ix + 5 + key.size())) [[unlikely]] return;
                      }
                   }
 
@@ -1145,10 +1236,11 @@ namespace glz
                   }
                   else {
                      to<EETF, val_t>::template no_header<Opts>(member_val, ctx, b, ix);
-                     if constexpr (not fixed_max_size) {
+                     if (bool(ctx.error)) [[unlikely]] return;
+                     if constexpr (!bounded_buf && !fixed_max_size) {
                         constexpr size_t next_run = etf::detail::bounded_run_size<Opts, T, I + 1>();
                         if constexpr (next_run > 0) {
-                           etf::detail::ensure_space(b, ix + next_run);
+                           if (!etf::detail::ensure_space(ctx, b, ix + next_run)) [[unlikely]] return;
                         }
                      }
                   }
@@ -1243,12 +1335,12 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
+      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          using Period = std::remove_cvref_t<decltype(value)>::duration::period;
          constexpr auto max_ts_len = chrono_detail::iso_time_point_max_size<Period>;
          if constexpr (!check_write_unchecked(Opts)) {
-            etf::detail::ensure_space(b, ix + 5 + max_ts_len);
+            if (!etf::detail::ensure_space(ctx, b, ix + 5 + max_ts_len)) [[unlikely]] return;
          }
          const auto start_ix = ix;
          ix += 5;
@@ -1270,10 +1362,10 @@ namespace glz
    struct to<EETF, T> final : etf::detail::to_etf_base<to<EETF, T>, T>
    {
       template <auto Opts>
-      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix) noexcept
+      static void no_header(const auto& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          if constexpr (!check_write_unchecked(Opts)) {
-            etf::detail::ensure_space(b, ix + 5 + chrono_detail::iso_date_max_size);
+            if (!etf::detail::ensure_space(ctx, b, ix + 5 + chrono_detail::iso_date_max_size)) [[unlikely]] return;
          }
          const auto start_ix = ix;
          ix += 5;
@@ -1297,9 +1389,9 @@ namespace glz
    struct to<EETF, basic_raw_json<T>> final : etf::detail::to_etf_base<to<EETF, basic_raw_json<T>>, basic_raw_json<T>>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&&, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         etf::detail::dump_bytes(value.str.data(), value.str.size(), b, ix);
+         (void)etf::detail::dump_bytes(ctx, value.str.data(), value.str.size(), b, ix);
       }
    };
 
@@ -1307,9 +1399,9 @@ namespace glz
    struct to<EETF, basic_text<T>> final : etf::detail::to_etf_base<to<EETF, basic_text<T>>, basic_text<T>>
    {
       template <auto Opts>
-      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&&, auto&& b, auto& ix)
+      GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
-         etf::detail::dump_bytes(value.str.data(), value.str.size(), b, ix);
+         (void)etf::detail::dump_bytes(ctx, value.str.data(), value.str.size(), b, ix);
       }
    };
 

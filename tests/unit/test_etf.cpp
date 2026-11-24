@@ -5908,4 +5908,555 @@ TEST_CASE("ETF: Live sanitized Discord GUILD_CREATE gateway event payload", "[et
     }
 }
 
+namespace test_etf_audit_types {
+
+struct RecursiveListNode {
+    std::vector<RecursiveListNode> children{};
+};
+
+struct RecursiveMapNode {
+    std::map<std::string, RecursiveMapNode> children{};
+};
+
+struct RecursivePtrNode {
+    std::unique_ptr<RecursivePtrNode> next{};
+};
+
+struct ByValueStringWrapper {
+    std::string inner{};
+    [[nodiscard]] std::string get_str() const { return inner + "_suffix"; }
+};
+
+struct ByValueStringHost {
+    ByValueStringWrapper label{};
+    int count{};
+};
+
+struct ByValueIntWrapper {
+    int inner{};
+    [[nodiscard]] int get_val() const { return inner * 2; }
+};
+
+struct ByValueIntHost {
+    ByValueIntWrapper value{};
+};
+
+enum class BoolFlagEnum : bool {
+    Off = false,
+    On = true,
+};
+
+struct TaggedA {
+    int kind{10};
+    int payload_a{0};
+};
+
+struct TaggedB {
+    int kind{20};
+    std::string payload_b{};
+};
+
+using SparseIntTaggedVariant = std::variant<TaggedA, TaggedB>;
+
+struct StrictIntField {
+    int only_int{};
+};
+
+struct FallbackStrField {
+    std::string only_str{};
+};
+
+using TaggedStrictVariant = std::variant<StrictIntField, FallbackStrField>;
+
+struct MockRequestMembersData {
+    std::vector<discusy::snowflake> guild_ids{};
+    std::string query{};
+    int limit{0};
+};
+
+struct MockRequestMembers {
+    discusy::Opcode op{discusy::Opcode::RequestGuildMembers};
+    MockRequestMembersData d{};
+};
+
+struct BadKindPayload {
+    int kind{};
+    int payload_a{99};
+};
+
+struct BadTaggedBody {
+    std::string tag{"int_kind"};
+    std::string only_int{"not_an_int"};
+};
+
+struct LimitedEtfOpts : glz::etf::etf_opts {
+    size_t max_string_length = 8;
+};
+
+} // namespace test_etf_audit_types
+
+template <>
+struct glz::meta<test_etf_audit_types::ByValueStringWrapper> {
+    static constexpr auto value = [](const test_etf_audit_types::ByValueStringWrapper& self) -> std::string {
+        return self.get_str();
+    };
+};
+
+template <>
+struct glz::meta<test_etf_audit_types::ByValueIntWrapper> {
+    static constexpr auto value = [](const test_etf_audit_types::ByValueIntWrapper& self) -> int {
+        return self.get_val();
+    };
+};
+
+template <>
+struct glz::meta<test_etf_audit_types::SparseIntTaggedVariant> {
+    static constexpr std::string_view tag = "kind";
+    static constexpr auto ids = std::array{10, 20};
+};
+
+template <>
+struct glz::meta<test_etf_audit_types::TaggedStrictVariant> {
+    static constexpr std::string_view tag = "tag";
+    static constexpr auto ids = std::array{"int_kind", "str_kind"};
+};
+
+TEST_CASE("ETF Audit Regressions", "[etf][audit]") {
+    SECTION("Depth limit enforced for nested containers, structs, and Discord components") {
+        // 1. Nested LIST_EXT exceeding max_recursive_depth_limit
+        constexpr size_t deep_levels = glz::max_recursive_depth_limit + 16;
+        std::string deep_list;
+        deep_list.push_back(static_cast<char>(glz::etf::magic_version));
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_list.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            deep_list.append("\x00\x00\x00\x01", 4);
+            deep_list.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+            deep_list.append("\x00\x00\x00\x08", 4);
+            deep_list.append("children");
+            deep_list.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+            deep_list.append("\x00\x00\x00\x01", 4);
+        }
+        deep_list.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        deep_list.append("\x00\x00\x00\x00", 4);
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_list.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+        }
+
+        test_etf_audit_types::RecursiveListNode list_node{};
+        const auto ec_list = glz::read_etf(list_node, deep_list);
+        CHECK(ec_list.ec == glz::error_code::exceeded_max_recursive_depth);
+
+        // 2. Nested MAP_EXT exceeding max_recursive_depth_limit
+        std::string deep_map;
+        deep_map.push_back(static_cast<char>(glz::etf::magic_version));
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            deep_map.append("\x00\x00\x00\x01", 4);
+            deep_map.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+            deep_map.append("\x00\x00\x00\x08", 4);
+            deep_map.append("children");
+            deep_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            deep_map.append("\x00\x00\x00\x01", 4);
+            deep_map.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+            deep_map.append("\x00\x00\x00\x01", 4);
+            deep_map.push_back('k');
+        }
+        deep_map.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        deep_map.append("\x00\x00\x00\x00", 4);
+
+        test_etf_audit_types::RecursiveMapNode map_node{};
+        const auto ec_map = glz::read_etf(map_node, deep_map);
+        CHECK(ec_map.ec == glz::error_code::exceeded_max_recursive_depth);
+
+        // 3. Nested struct via unique_ptr exceeding max_recursive_depth_limit
+        std::string deep_ptr;
+        deep_ptr.push_back(static_cast<char>(glz::etf::magic_version));
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_ptr.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+            deep_ptr.append("\x00\x00\x00\x01", 4);
+            deep_ptr.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+            deep_ptr.append("\x00\x00\x00\x04", 4);
+            deep_ptr.append("next");
+        }
+        deep_ptr.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        deep_ptr.append("\x00\x00\x00\x00", 4);
+
+        test_etf_audit_types::RecursivePtrNode ptr_node{};
+        const auto ec_ptr = glz::read_etf(ptr_node, deep_ptr);
+        CHECK(ec_ptr.ec == glz::error_code::exceeded_max_recursive_depth);
+
+        // 4. Discord component extract_component_type enforces depth limit when skipping deeply nested unknown fields
+        std::string deep_comp;
+        deep_comp.push_back(static_cast<char>(glz::etf::magic_version));
+        deep_comp.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        deep_comp.append("\x00\x00\x00\x02", 4);
+        deep_comp.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        deep_comp.append("\x00\x00\x00\x04", 4);
+        deep_comp.append("junk");
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_comp.push_back(static_cast<char>(glz::etf::tag::LIST_EXT));
+            deep_comp.append("\x00\x00\x00\x01", 4);
+        }
+        deep_comp.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        deep_comp.push_back('\x01');
+        for (size_t i = 0; i < deep_levels; ++i) {
+            deep_comp.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
+        }
+        deep_comp.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        deep_comp.append("\x00\x00\x00\x04", 4);
+        deep_comp.append("type");
+        deep_comp.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        deep_comp.push_back(static_cast<char>(10)); // Text Display
+
+        discusy::components::component comp{};
+        const auto ec_comp = glz::read_etf(comp, deep_comp);
+        CHECK(ec_comp.ec == glz::error_code::exceeded_max_recursive_depth);
+    }
+
+    SECTION("Bounded buffer writes succeed on exact fit and report buffer_overflow safely") {
+        test_etf_types::SampleStruct obj{
+            .id = discusy::snowflake{987654321012345678ULL},
+            .name = "bounded_test",
+            .description = "desc",
+            .count = 42,
+            .enabled = true,
+        };
+
+        std::string expected;
+        REQUIRE_FALSE(glz::write_etf(obj, expected));
+        REQUIRE(!expected.empty());
+
+        // Exact-fit std::span<char> must succeed
+        std::vector<char> exact_backing(expected.size(), '\xAA');
+        std::span<char> exact_span{exact_backing};
+        const auto exact_res = glz::write_etf(obj, exact_span);
+        REQUIRE_FALSE(exact_res);
+        CHECK(exact_res.count == expected.size());
+        CHECK(std::string_view{exact_backing.data(), exact_res.count} == expected);
+
+        // Every undersized length must fail with buffer_overflow and never write past span end
+        constexpr char sentinel = '\x5A';
+        for (size_t cap = 0; cap < expected.size(); ++cap) {
+            std::vector<char> guarded(cap + 16, sentinel);
+            std::span<char> small_span{guarded.data(), cap};
+            const auto res = glz::write_etf(obj, small_span);
+            CHECK(res.ec == glz::error_code::buffer_overflow);
+            for (size_t i = cap; i < guarded.size(); ++i) {
+                CHECK(guarded[i] == sentinel);
+            }
+        }
+
+        // Fixed std::array exact fit for a 64-bit integer
+        const uint64_t big = 112233445566778899ULL;
+        std::array<char, 12> exact_arr{};
+        const auto arr_ok = glz::write_etf(big, exact_arr);
+        REQUIRE_FALSE(arr_ok);
+        CHECK(arr_ok.count == 12);
+
+        std::array<char, 11> small_arr{};
+        const auto arr_fail = glz::write_etf(big, small_arr);
+        CHECK(arr_fail.ec == glz::error_code::buffer_overflow);
+    }
+
+    SECTION("By-value glaze_value_t wrappers serialize without dangling references") {
+        const test_etf_audit_types::ByValueStringHost host{
+            .label = {.inner = "very_long_heap_allocated_string_to_expose_uaf_if_dangling"},
+            .count = 7,
+        };
+        std::string buf;
+        REQUIRE_FALSE(glz::write_etf(host, buf));
+
+        glz::generic parsed{};
+        REQUIRE_FALSE(glz::read_etf(parsed, buf));
+        REQUIRE(parsed.is_object());
+        CHECK(parsed.at("label").get_string() == "very_long_heap_allocated_string_to_expose_uaf_if_dangling_suffix");
+        CHECK(parsed.at("count").get_number() == 7.0);
+
+        const test_etf_audit_types::ByValueIntHost int_host{.value = {.inner = 21}};
+        std::string int_buf;
+        REQUIRE_FALSE(glz::write_etf(int_host, int_buf));
+        glz::generic parsed_int{};
+        REQUIRE_FALSE(glz::read_etf(parsed_int, int_buf));
+        CHECK(parsed_int.at("value").get_number() == 42.0);
+    }
+
+    SECTION("parse_payload_base resets stale fields, tolerates unknown event names, and rejects nested COMPRESSED") {
+        // 1. Unknown dispatch event name in 't' should succeed with t == nullopt and valid op/s
+        std::string unknown_evt;
+        unknown_evt.push_back(static_cast<char>(glz::etf::magic_version));
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        unknown_evt.append("\x00\x00\x00\x04", 4);
+        // "op" => 0 (Dispatch)
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        unknown_evt.append("\x00\x00\x00\x02", 4);
+        unknown_evt.append("op");
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        unknown_evt.push_back('\x00');
+        // "s" => 99
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        unknown_evt.append("\x00\x00\x00\x01", 4);
+        unknown_evt.push_back('s');
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        unknown_evt.push_back(static_cast<char>(99));
+        // "t" => "FUTURE_DISCORD_EVENT_UNKNOWN_2099"
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        unknown_evt.append("\x00\x00\x00\x01", 4);
+        unknown_evt.push_back('t');
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        const std::string_view unknown_name = "FUTURE_DISCORD_EVENT_UNKNOWN_2099";
+        const auto ulen = static_cast<uint32_t>(unknown_name.size());
+        unknown_evt.push_back(static_cast<char>((ulen >> 24U) & 0xFFU));
+        unknown_evt.push_back(static_cast<char>((ulen >> 16U) & 0xFFU));
+        unknown_evt.push_back(static_cast<char>((ulen >> 8U) & 0xFFU));
+        unknown_evt.push_back(static_cast<char>(ulen & 0xFFU));
+        unknown_evt.append(unknown_name);
+        // "d" => {}
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        unknown_evt.append("\x00\x00\x00\x01", 4);
+        unknown_evt.push_back('d');
+        unknown_evt.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        unknown_evt.append("\x00\x00\x00\x00", 4);
+
+        discusy::recieve_event::payload_base base{};
+        base.s = 12345;
+        base.t = discusy::recieve_event::event::MESSAGE_CREATE;
+        REQUIRE_FALSE(discusy::etf::parse_payload_base(base, unknown_evt));
+        CHECK(base.op == discusy::Opcode::Dispatch);
+        REQUIRE(base.s.has_value());
+        CHECK(*base.s == 99);
+        CHECK_FALSE(base.t.has_value());
+
+        // 2. Reusing payload_base on a payload without s/t must clear stale s/t
+        std::string ack_payload;
+        ack_payload.push_back(static_cast<char>(glz::etf::magic_version));
+        ack_payload.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        ack_payload.append("\x00\x00\x00\x01", 4);
+        ack_payload.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        ack_payload.append("\x00\x00\x00\x02", 4);
+        ack_payload.append("op");
+        ack_payload.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        ack_payload.push_back(static_cast<char>(discusy::Opcode::HeartbeatAck));
+
+        base.s = 777;
+        base.t = discusy::recieve_event::event::READY;
+        REQUIRE_FALSE(discusy::etf::parse_payload_base(base, ack_payload));
+        CHECK(base.op == discusy::Opcode::HeartbeatAck);
+        CHECK_FALSE(base.s.has_value());
+        CHECK_FALSE(base.t.has_value());
+
+        // 3. Embedded COMPRESSED tag (80) inside "d" must be rejected
+        std::string nested_compressed;
+        nested_compressed.push_back(static_cast<char>(glz::etf::magic_version));
+        nested_compressed.push_back(static_cast<char>(glz::etf::tag::MAP_EXT));
+        nested_compressed.append("\x00\x00\x00\x02", 4);
+        nested_compressed.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        nested_compressed.append("\x00\x00\x00\x01", 4);
+        nested_compressed.push_back('d');
+        nested_compressed.push_back(static_cast<char>(glz::etf::tag::COMPRESSED));
+        nested_compressed.append("\x00\x00\x00\x04\x78\x9c\x03\x00", 8);
+        nested_compressed.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
+        nested_compressed.append("\x00\x00\x00\x02", 4);
+        nested_compressed.append("op");
+        nested_compressed.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
+        nested_compressed.push_back('\x00');
+
+        const auto ec_comp = discusy::etf::parse_payload_base(base, nested_compressed);
+        CHECK(static_cast<bool>(ec_comp));
+    }
+
+    SECTION("send_event::rescue_payload preserves op and 64-bit snowflakes losslessly") {
+        const test_etf_audit_types::MockRequestMembers orig{
+            .op = discusy::Opcode::RequestGuildMembers,
+            .d = {
+                .guild_ids = {
+                    discusy::snowflake{9007199254740993ULL},      // 2^53 + 1 (loses LSB in double!)
+                    discusy::snowflake{1234567890123456789ULL},
+                    discusy::snowflake{18446744073709551615ULL},  // UINT64_MAX
+                },
+                .query = "",
+                .limit = 0,
+            },
+        };
+
+        std::string wire;
+        REQUIRE_FALSE(glz::write_etf(orig, wire));
+
+        discusy::send_event::rescue_payload rescued{};
+        REQUIRE_FALSE(glz::read_etf(rescued, wire));
+        CHECK(rescued.op == discusy::Opcode::RequestGuildMembers);
+        REQUIRE(rescued.d.is_object());
+        REQUIRE(rescued.d.contains("guild_ids"));
+        const auto& arr = rescued.d.at("guild_ids").get_array();
+        REQUIRE(arr.size() == 3);
+        REQUIRE(arr[0].holds<uint64_t>());
+        REQUIRE(arr[1].holds<uint64_t>());
+        REQUIRE(arr[2].holds<uint64_t>());
+        CHECK(arr[0].get<uint64_t>() == 9007199254740993ULL);
+        CHECK(arr[1].get<uint64_t>() == 1234567890123456789ULL);
+        CHECK(arr[2].get<uint64_t>() == 18446744073709551615ULL);
+
+        // Re-serialize rescued payload and ensure exact roundtrip
+        std::string re_wire;
+        REQUIRE_FALSE(glz::write_etf(rescued, re_wire));
+        test_etf_audit_types::MockRequestMembers roundtripped{};
+        REQUIRE_FALSE(glz::read_etf(roundtripped, re_wire));
+        CHECK(roundtripped.op == discusy::Opcode::RequestGuildMembers);
+        REQUIRE(roundtripped.d.guild_ids.size() == 3);
+        CHECK(roundtripped.d.guild_ids[0].value == 9007199254740993ULL);
+        CHECK(roundtripped.d.guild_ids[1].value == 1234567890123456789ULL);
+        CHECK(roundtripped.d.guild_ids[2].value == 18446744073709551615ULL);
+    }
+
+    SECTION("bool-backed enum parsing validates range safely across ETF integer tags") {
+        using test_etf_audit_types::BoolFlagEnum;
+        BoolFlagEnum out = BoolFlagEnum::Off;
+
+        // SMALL_INTEGER_EXT 0 & 1 succeed, 2 fails
+        const std::string sm_0 = {static_cast<char>(131), static_cast<char>(97), 0};
+        const std::string sm_1 = {static_cast<char>(131), static_cast<char>(97), 1};
+        const std::string sm_2 = {static_cast<char>(131), static_cast<char>(97), 2};
+        REQUIRE_FALSE(glz::read_etf(out, sm_1));
+        CHECK(out == BoolFlagEnum::On);
+        REQUIRE_FALSE(glz::read_etf(out, sm_0));
+        CHECK(out == BoolFlagEnum::Off);
+        CHECK(static_cast<bool>(glz::read_etf(out, sm_2)));
+
+        // INTEGER_EXT 1 succeeds, -1 and 2 fail
+        const std::string int_1 = {static_cast<char>(131), static_cast<char>(98), 0, 0, 0, 1};
+        const std::string int_neg = {static_cast<char>(131), static_cast<char>(98), static_cast<char>(0xFF), static_cast<char>(0xFF), static_cast<char>(0xFF), static_cast<char>(0xFF)};
+        const std::string int_2 = {static_cast<char>(131), static_cast<char>(98), 0, 0, 0, 2};
+        REQUIRE_FALSE(glz::read_etf(out, int_1));
+        CHECK(out == BoolFlagEnum::On);
+        CHECK(static_cast<bool>(glz::read_etf(out, int_neg)));
+        CHECK(static_cast<bool>(glz::read_etf(out, int_2)));
+
+        // SMALL_BIG_EXT 1 succeeds, 2 fails
+        const std::string big_1 = {static_cast<char>(131), static_cast<char>(110), 1, 0, 1};
+        const std::string big_2 = {static_cast<char>(131), static_cast<char>(110), 1, 0, 2};
+        REQUIRE_FALSE(glz::read_etf(out, big_1));
+        CHECK(out == BoolFlagEnum::On);
+        CHECK(static_cast<bool>(glz::read_etf(out, big_2)));
+
+        // String "1" succeeds, "2" fails
+        std::string str_1;
+        REQUIRE_FALSE(glz::write_etf(std::string{"1"}, str_1));
+        REQUIRE_FALSE(glz::read_etf(out, str_1));
+        CHECK(out == BoolFlagEnum::On);
+
+        std::string str_2;
+        REQUIRE_FALSE(glz::write_etf(std::string{"2"}, str_2));
+        CHECK(static_cast<bool>(glz::read_etf(out, str_2)));
+    }
+
+    SECTION("Truncated enum, chrono, and variant inputs preserve unexpected_end") {
+        // Truncated enum string
+        const std::string trunc_bin = {static_cast<char>(131), static_cast<char>(109), 0, 0, 0, 10, 'a', 'b'};
+        discusy::recieve_event::event ev{};
+        CHECK(glz::read_etf(ev, trunc_bin).ec == glz::error_code::unexpected_end);
+
+        // Truncated system_clock::time_point
+        std::chrono::system_clock::time_point tp{};
+        CHECK(glz::read_etf(tp, trunc_bin).ec == glz::error_code::unexpected_end);
+
+        // Truncated year_month_day
+        std::chrono::year_month_day ymd{};
+        CHECK(glz::read_etf(ymd, trunc_bin).ec == glz::error_code::unexpected_end);
+
+        // Truncated variant atom
+        const std::string trunc_atom = {static_cast<char>(131), static_cast<char>(119), 5, 't', 'r'};
+        std::variant<bool, std::string> bv{};
+        CHECK(glz::read_etf(bv, trunc_atom).ec == glz::error_code::unexpected_end);
+    }
+
+    SECTION("Tagged variant rejects colliding unknown integral IDs and does not mis-fallback on failed matched tag") {
+        // 1. Sparse integral tag IDs (10, 20): unknown IDs like 12, 14, 22, 30 that may collide modulo table size must fail
+        for (const int unknown_kind : {0, 1, 11, 12, 14, 18, 22, 30, 42, -10}) {
+            std::string wire;
+            REQUIRE_FALSE(glz::write_etf(test_etf_audit_types::BadKindPayload{.kind = unknown_kind, .payload_a = 99}, wire));
+            test_etf_audit_types::SparseIntTaggedVariant v{};
+            const auto ec = glz::read_etf(v, wire);
+            CHECK(static_cast<bool>(ec));
+        }
+
+        // Valid IDs still work
+        {
+            std::string wire;
+            REQUIRE_FALSE(glz::write_etf(test_etf_audit_types::TaggedA{.kind = 10, .payload_a = 123}, wire));
+            test_etf_audit_types::SparseIntTaggedVariant v{};
+            REQUIRE_FALSE(glz::read_etf(v, wire));
+            REQUIRE(std::holds_alternative<test_etf_audit_types::TaggedA>(v));
+            CHECK(std::get<test_etf_audit_types::TaggedA>(v).payload_a == 123);
+        }
+
+        // 2. When explicit tag matches "int_kind" (StrictIntField) but payload has wrong type for only_int,
+        //    parser must fail rather than falling back to FallbackStrField.
+        std::string bad_body_wire;
+        REQUIRE_FALSE(glz::write_etf(test_etf_audit_types::BadTaggedBody{}, bad_body_wire));
+        test_etf_audit_types::TaggedStrictVariant tv{};
+        CHECK(static_cast<bool>(glz::read_etf(tv, bad_body_wire)));
+    }
+
+    SECTION("Large containers (>4096 elements), map max_string_length, empty tuple, and bignum-to-double edge cases") {
+        // 1. Large vector (>4096)
+        std::vector<int> big_vec(10000);
+        for (size_t i = 0; i < big_vec.size(); ++i) {
+            big_vec[i] = static_cast<int>((i * 3) - 5000);
+        }
+        std::string vec_wire;
+        REQUIRE_FALSE(glz::write_etf(big_vec, vec_wire));
+        std::vector<int> big_vec_out;
+        REQUIRE_FALSE(glz::read_etf(big_vec_out, vec_wire));
+        CHECK(big_vec_out == big_vec);
+
+        // 2. Large unordered_map (>4096)
+        std::unordered_map<std::string, int> big_map;
+        big_map.reserve(5000);
+        for (int i = 0; i < 5000; ++i) {
+            big_map.emplace("k_" + std::to_string(i), i);
+        }
+        std::string map_wire;
+        REQUIRE_FALSE(glz::write_etf(big_map, map_wire));
+        std::unordered_map<std::string, int> big_map_out;
+        REQUIRE_FALSE(glz::read_etf(big_map_out, map_wire));
+        CHECK(big_map_out == big_map);
+
+        // 3. readable_map_t enforces max_string_length on keys
+        std::map<std::string, int> oversized_key_map{{"this_key_is_definitely_too_long", 1}};
+        std::string oversized_wire;
+        REQUIRE_FALSE(glz::write_etf(oversized_key_map, oversized_wire));
+        std::map<std::string, int> limited_map;
+        constexpr test_etf_audit_types::LimitedEtfOpts limit_opts{};
+        const auto limit_ec = glz::read<limit_opts>(limited_map, oversized_wire);
+        CHECK(limit_ec.ec == glz::error_code::invalid_length);
+
+        // 4. Truncated SMALL_TUPLE_EXT is rejected cleanly with unexpected_end
+        const std::string trunc_tuple = {static_cast<char>(131), static_cast<char>(104), 5, static_cast<char>(97), 1};
+        std::tuple<int, int, int, int, int> five_tup{};
+        CHECK(glz::read_etf(five_tup, trunc_tuple).ec == glz::error_code::unexpected_end);
+
+        // 5. Non-canonical bignum with leading zero bytes converts accurately to double
+        std::string padded_big;
+        padded_big.push_back(static_cast<char>(glz::etf::magic_version));
+        padded_big.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        padded_big.push_back(static_cast<char>(20)); // n = 20 bytes
+        padded_big.push_back('\x00'); // sign = positive
+        padded_big.push_back(static_cast<char>(42));
+        padded_big.append(19, '\x00'); // 19 high zero bytes
+        double d_out = 0.0;
+        REQUIRE_FALSE(glz::read_etf(d_out, padded_big));
+        CHECK(d_out == 42.0);
+
+        // 6. Huge bignum overflowing double returns parse_number_failure cleanly without spinning
+        std::string huge_big;
+        huge_big.push_back(static_cast<char>(glz::etf::magic_version));
+        huge_big.push_back(static_cast<char>(glz::etf::tag::SMALL_BIG_EXT));
+        huge_big.push_back(static_cast<char>(200)); // 256^200 >> DBL_MAX
+        huge_big.push_back('\x01'); // negative
+        huge_big.append(200, static_cast<char>(0xFF));
+        double inf_out = 0.0;
+        CHECK(glz::read_etf(inf_out, huge_big).ec == glz::error_code::parse_number_failure);
+    }
+}
+
+
 
