@@ -76,6 +76,8 @@ public:
         resolver_{strand_}, timer_{strand_}, silence_frame_{discusy::voice::opus_silence}
     {
         boost::system::error_code ec;
+        static const bool sodium_initialized = (sodium_init() >= 0);
+        (void)sodium_initialized;
         socket_.non_blocking(true, ec);
         apply_socket_options();
         socket_broken_ = ec || !socket_.is_open();
@@ -218,15 +220,19 @@ public:
 
     void close() {
         boost::asio::post(strand_, [self = this->shared_from_this()]() {
-            if (self->closed_) return;
+            if (self->closed_.load(std::memory_order_relaxed)) return;
             self->closed_.store(true, std::memory_order_release);
             self->armed_ = false;
             self->keyed_ = false;
+            self->draining_ = false;
+            self->drain_pending_ = false;
             self->has_prepared_packet_ = false;
             ++self->session_;
+            ++self->timer_gen_;
 
             boost::system::error_code ec;
             self->socket_.cancel(ec);
+            self->socket_.close(ec);
             self->resolver_.cancel();
             self->timer_.cancel();
             self->audio_packets_.clear();
@@ -374,14 +380,18 @@ private:
 
     void begin_new_session() {
         ++session_;
+        ++timer_gen_;
 
         armed_ = false;
         keyed_ = false;
         failed_ = false;
+        draining_ = false;
+        drain_pending_ = false;
         has_prepared_packet_ = false;
 
         boost::system::error_code ec;
         socket_.cancel(ec);
+        resolver_.cancel();
         timer_.cancel();
 
         boost::system::error_code ignored;
@@ -437,10 +447,10 @@ private:
         discovery_packet_[2] = 0x00;
         discovery_packet_[3] = 0x46;
         // ssrc
-        discovery_packet_[4] = (ssrc >> 24) & 0xFF;
-        discovery_packet_[5] = (ssrc >> 16) & 0xFF;
-        discovery_packet_[6] = (ssrc >> 8) & 0xFF;
-        discovery_packet_[7] = (ssrc >> 0) & 0xFF;
+        discovery_packet_[4] = static_cast<std::uint8_t>((ssrc >> 24U) & 0xFFU);
+        discovery_packet_[5] = static_cast<std::uint8_t>((ssrc >> 16U) & 0xFFU);
+        discovery_packet_[6] = static_cast<std::uint8_t>((ssrc >> 8U) & 0xFFU);
+        discovery_packet_[7] = static_cast<std::uint8_t>(ssrc & 0xFFU);
 
         resolver_.async_resolve(udp::v4(), host, discusy::number_str{port}.view(),
             boost::asio::cancel_after(std::chrono::seconds{5},
@@ -490,17 +500,20 @@ private:
                                             }
                                             #endif
 
-                                            if (error || (bytes_transferred != 74)) {
+                                            if (error || (bytes_transferred != 74) || (self.discovery_sender_ != self.remote_endpoint_)) {
                                                 return std::invoke(std::move(cb), std::string{}, std::uint16_t{0});
                                             }
 
                                             auto& buf = self.discovery_packet_;
+                                            if (buf[0] != 0x00 || buf[1] != 0x02 || buf[2] != 0x00 || buf[3] != 0x46) {
+                                                return std::invoke(std::move(cb), std::string{}, std::uint16_t{0});
+                                            }
 
                                             const char* addr = reinterpret_cast<const char*>(&buf[8]);
                                             const char* addr_end = std::find(addr, addr + 64, '\0');
 
                                             std::string my_ip{addr, addr_end};
-                                            const auto my_port = static_cast<std::uint16_t>((buf[72] << 8) | buf[73]);
+                                            const auto my_port = static_cast<std::uint16_t>((static_cast<unsigned>(buf[72]) << 8U) | static_cast<unsigned>(buf[73]));
 
                                             boost::system::error_code conn_ec;
                                             self.socket_.connect(self.remote_endpoint_, conn_ec);
@@ -525,7 +538,7 @@ private:
 
     bool encrypt_voice_packet(const std::span<const uint8_t, 12> rtp_header, const std::span<const uint8_t> frame_data) {
         static constexpr std::size_t AEAD_OVERHEAD = 16;
-        if (rtp_header.size() + frame_data.size() + AEAD_OVERHEAD + 4 > discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>::capacity()) {
+        if (rtp_header.size() + frame_data.size() + AEAD_OVERHEAD + 4 > discusy::voice::MAX_FINAL_BUFFER_SIZE) {
             return false;
         }
 
@@ -557,6 +570,8 @@ private:
                 rtp_header.data(), rtp_header.size(),
                 nullptr, sodium_nonce.data(), secret_key_.data()
             ) != 0) return false;
+        } else {
+            return false;
         }
 
         std::memcpy(ciphertext_dest + ciphertext_len, &big_endian_counter, 4);
@@ -567,9 +582,11 @@ private:
 
     void process_received_packet(const std::size_t bytes_transferred) {
         static constexpr std::size_t AEAD_OVERHEAD = 16;
+        static constexpr std::uint8_t DISCORD_OPUS_PAYLOAD_TYPE = 0x78U;
         if (!keyed_ || !armed_ || bytes_transferred < 12 + AEAD_OVERHEAD + 4) return;
         if ((static_cast<unsigned>(recv_buffer_[0]) >> 6U) != 2U) return; // RTP v2 only
-        if (recv_buffer_[1] >= 200 && recv_buffer_[1] <= 204) return; // Ignore RTCP
+        if (recv_buffer_[1] >= 192U && recv_buffer_[1] <= 223U) return; // Ignore RTCP (RFC 5761)
+        if ((recv_buffer_[1] & 0x7FU) != DISCORD_OPUS_PAYLOAD_TYPE) return; // Opus audio only
 
         const auto cc = static_cast<std::size_t>(recv_buffer_[0] & 0x0FU);
         const bool has_ext = (recv_buffer_[0] & 0x10U) != 0U;
@@ -831,8 +848,10 @@ private:
     }
 
     void arm_timer() {
+        const auto gen = ++timer_gen_;
         timer_.expires_at(next_frame_tp_);
-        timer_.async_wait([s = this->shared_from_this()](const boost::system::error_code& ec) {
+        timer_.async_wait([s = this->shared_from_this(), gen](const boost::system::error_code& ec) {
+            if (s->closed_.load(std::memory_order_relaxed) || (s->timer_gen_ != gen)) return;
             if (ec) {
                 s->park_drain();
                 return;
@@ -864,36 +883,37 @@ private:
     }
 
     bool prepare_next_packet() {
-        if (closed_ || !can_transmit()) {
+        if (closed_.load(std::memory_order_relaxed) || !can_transmit()) {
             has_prepared_packet_ = false;
             return false;
         }
 
+        enum class frame_source : std::uint8_t {
+            pause_silence,
+            queued_audio,
+            underrun_silence,
+        };
+
         const discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>* frame = nullptr;
-        bool from_queue = false;
+        frame_source source = frame_source::underrun_silence;
 
         if (paused_) {
             if (pause_frames_remaining_ == 0) {
                 finish_drain(discusy::voice::audio_stop_reason::paused);
                 return false;
             }
-            --pause_frames_remaining_;
             frame = &silence_frame_;
+            source = frame_source::pause_silence;
         } else if (!audio_packets_.empty()) {
-            if (underrun_ticks_ > 0) {
-                stat_underrun_events_.fetch_add(1, std::memory_order_relaxed);
-                stat_underrun_frames_.fetch_add(underrun_ticks_, std::memory_order_relaxed);
-                underrun_ticks_ = 0;
-            }
             frame = &audio_packets_.front();
-            from_queue = true;
+            source = frame_source::queued_audio;
         } else {
             if (underrun_ticks_ >= underrun_grace_frames_.load(std::memory_order_relaxed)) {
                 finish_drain(next_idle_reason_);
                 return false;
             }
-            ++underrun_ticks_;
             frame = &silence_frame_;
+            source = frame_source::underrun_silence;
         }
 
         dave_buf_.clear();
@@ -925,11 +945,21 @@ private:
             not_ready_retries_ = 0;
         }
 
-        if (from_queue) {
+        if (source == frame_source::queued_audio) {
+            if (underrun_ticks_ > 0) {
+                stat_underrun_events_.fetch_add(1, std::memory_order_relaxed);
+                stat_underrun_frames_.fetch_add(underrun_ticks_, std::memory_order_relaxed);
+                underrun_ticks_ = 0;
+            }
             audio_packets_.pop_front();
             const auto current = queued_audio_frames_.load(std::memory_order_relaxed);
             if (current > 0) queued_audio_frames_.store(current - 1, std::memory_order_relaxed);
         } else {
+            if (source == frame_source::pause_silence) {
+                --pause_frames_remaining_;
+            } else {
+                ++underrun_ticks_;
+            }
             stat_silence_frames_.fetch_add(1, std::memory_order_relaxed);
         }
 
@@ -1017,6 +1047,7 @@ private:
     udp::endpoint discovery_sender_;
 
     std::uint64_t session_{0};
+    std::uint64_t timer_gen_{0};
 
     std::array<std::uint8_t, 8192> recv_buffer_{};
     std::array<std::uint8_t, 8192> recv_decrypt_buf_{};

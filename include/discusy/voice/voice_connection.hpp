@@ -4,6 +4,7 @@
 #include <atomic>
 #include <concepts>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -173,9 +174,9 @@ using dave_mls_invalid_commit_welcome_payload = send_payload_base<VoiceOpcode::D
 
 enum class speaking_mode : std::uint8_t {
     None = 0,
-    Microphone = 1ULL << 0, // Normal transmission of voice audio
-    Soundshare = 1ULL << 1, // Transmission of context audio for video, no speaking indicator
-    Priority = 1ULL << 2, // Priority speaker, lowering audio of other speakers
+    Microphone = 1U << 0U, // Normal transmission of voice audio
+    Soundshare = 1U << 1U, // Transmission of context audio for video, no speaking indicator
+    Priority = 1U << 2U, // Priority speaker, lowering audio of other speakers
 };
 
 struct speaking_ {
@@ -271,6 +272,8 @@ public:
     }
 
     void start() {
+        if (started_.test_and_set(std::memory_order_acq_rel)) return;
+
         auto client = std::make_shared<udp_client_t>(
             io_ctx_,
             udp_on_error_cb{this->weak_from_this()},
@@ -278,6 +281,9 @@ public:
             udp_on_idle_cb{this->weak_from_this()},
             udp_on_receive_cb{this->weak_from_this()}
         );
+        client->set_underrun_grace_frames(underrun_grace_frames_.load(std::memory_order_relaxed));
+        client->set_max_catchup_frames(max_catchup_frames_.load(std::memory_order_relaxed));
+        client->set_not_ready_hold_frames(not_ready_hold_frames_.load(std::memory_order_relaxed));
         udp_client_shared_ = std::move(client);
         udp_client_.store(udp_client_shared_.get(), std::memory_order_release);
 
@@ -297,7 +303,6 @@ public:
         }
     }
 
-    // TODO: unsure if valid
     void move_channel(snowflake new_channel_id) {
         if (closed_.load(std::memory_order_acquire)) return;
 
@@ -308,7 +313,8 @@ public:
             const snowflake old_channel_id{c.channel_id_.load()};
 
             if (new_channel_id && (new_channel_id != old_channel_id)) {
-                c.channel_id_.store(new_channel_id.value);
+                c.channel_id_.store(new_channel_id.value, std::memory_order_release);
+                c.channel_moved_pending_refresh_ = true;
 
                 c.drop_dave_keys();
                 c.dave_.create_session();
@@ -333,9 +339,10 @@ public:
             if (c.destructed_) return;
 
             const snowflake old_channel_id{c.channel_id_.load()};
+            const bool channel_changed = channel_id && (channel_id != old_channel_id);
 
-            if (channel_id && (channel_id != old_channel_id)) {
-                c.channel_id_.store(channel_id.value);
+            if (channel_changed) {
+                c.channel_id_.store(channel_id.value, std::memory_order_release);
 
                 c.drop_dave_keys();
                 c.dave_.create_session();
@@ -344,14 +351,20 @@ public:
                 c.log("Moved to channel {}, recognised users and DAVE keys reset", channel_id.value);
                 #endif
 
-                c.on_channel_move.fire(channel_moved{ // TODO: check if this needs to be anywhere else
+                c.on_channel_move.fire(channel_moved{
                     .old_channel_id = old_channel_id,
                     .new_channel_id = channel_id,
                 });
             }
 
-            const bool same_server = c.session_live_ && (c.endpoint_ == endpoint);
+            const bool same_server = c.session_live_ &&
+                                     !channel_changed &&
+                                     !c.channel_moved_pending_refresh_ &&
+                                     (c.endpoint_ == endpoint) &&
+                                     (c.token_ == token) &&
+                                     (c.session_id_ == session_id);
 
+            c.channel_moved_pending_refresh_ = false;
             c.session_id_ = std::move(session_id);
             c.token_ = std::move(token);
 
@@ -366,7 +379,7 @@ public:
             }
 
             #ifdef DISCUSY_LOGGING
-            c.log("Voice server changed, rebuilding onto: {}", endpoint);
+            c.log("Voice server/session changed, rebuilding onto: {}", endpoint);
             #endif
 
             c.endpoint_ = std::move(endpoint);
@@ -449,50 +462,64 @@ public:
     }
 
     void set_underrun_grace_frames(const std::uint32_t frames) {
-        if (auto* const udp = udp_client()) udp->set_underrun_grace_frames(frames);
+        const auto clamped = std::max<std::uint32_t>(1, frames);
+        underrun_grace_frames_.store(clamped, std::memory_order_relaxed);
+        if (auto* const udp = udp_client()) udp->set_underrun_grace_frames(clamped);
     }
 
     void set_max_catchup_frames(const std::uint32_t frames) {
-        if (auto* const udp = udp_client()) udp->set_max_catchup_frames(frames);
+        const auto clamped = std::max<std::uint32_t>(1, frames);
+        max_catchup_frames_.store(clamped, std::memory_order_relaxed);
+        if (auto* const udp = udp_client()) udp->set_max_catchup_frames(clamped);
     }
 
     void set_not_ready_hold_frames(const std::uint32_t frames) {
+        not_ready_hold_frames_.store(frames, std::memory_order_relaxed);
         if (auto* const udp = udp_client()) udp->set_not_ready_hold_frames(frames);
     }
 
     [[nodiscard]] audio_stats get_audio_stats() const noexcept {
-        const auto* const udp = udp_client();
-        if (udp == nullptr) return audio_stats{};
-        return udp->get_stats();
+        audio_stats stats{};
+        if (const auto* const udp = udp_client()) {
+            stats = udp->get_stats();
+        }
+        stats.dave_decrypt_drops = stat_dave_decrypt_drops_.load(std::memory_order_relaxed);
+        return stats;
     }
 
     void reset_audio_stats() noexcept {
         if (auto* const udp = udp_client()) udp->reset_stats();
+        stat_dave_decrypt_drops_.store(0, std::memory_order_relaxed);
     }
 
     bool set_inband_fec(const bool enabled) {
         if (closed_.load(std::memory_order_acquire)) return false;
+        const std::scoped_lock lock{encoder_mutex_};
         return encoder_.set_inband_fec(enabled);
     }
 
     bool set_expected_packet_loss(const int percentage) {
         if (closed_.load(std::memory_order_acquire)) return false;
+        const std::scoped_lock lock{encoder_mutex_};
         return encoder_.set_expected_packet_loss(percentage);
     }
 
     bool set_opus_complexity(const int complexity) {
         if (closed_.load(std::memory_order_acquire)) return false;
+        const std::scoped_lock lock{encoder_mutex_};
         return encoder_.set_complexity(complexity);
     }
 
     // OPUS_SIGNAL_MUSIC / OPUS_SIGNAL_VOICE / OPUS_AUTO
     bool set_opus_signal(const int signal) {
         if (closed_.load(std::memory_order_acquire)) return false;
+        const std::scoped_lock lock{encoder_mutex_};
         return encoder_.set_signal(signal);
     }
 
     bool reset_opus_state() noexcept {
         if (closed_.load(std::memory_order_acquire)) return false;
+        const std::scoped_lock lock{encoder_mutex_};
         return encoder_.reset_state();
     }
 
@@ -500,6 +527,7 @@ public:
         return reset_opus_state();
     }
 
+    /// Direct encoder accessor. Not synchronized with `send_pcm`/`send_pcm_async` or connection teardown.
     [[nodiscard]] opus_encoder& encoder() noexcept { return encoder_; }
     [[nodiscard]] const opus_encoder& encoder() const noexcept { return encoder_; }
 
@@ -514,7 +542,11 @@ public:
     bool opus_ctl([[maybe_unused]] const std::string_view what, Request&&... request) {
         if (closed_.load(std::memory_order_acquire)) return false;
 
-        const bool ok = encoder_.ctl(std::forward<Request>(request)...);
+        bool ok = false;
+        {
+        const std::scoped_lock lock{encoder_mutex_};
+        ok = encoder_.ctl(std::forward<Request>(request)...);
+        }
         #ifdef DISCUSY_LOGGING
         if (!ok) {
             log("Failed to set opus {}", what);
@@ -682,66 +714,68 @@ public:
         if (closed_.load(std::memory_order_acquire) || (udp_client() == nullptr)) return;
 
         try {
-            if (!encoder_) return;
-            check_and_apply_bitrate();
-
             static constexpr int SAMPLES_PER_FRAME = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
-            static constexpr int TOTAL_FRAME_SAMPLES = SAMPLES_PER_FRAME * DISCORD_CHANNELS;
+            static constexpr std::size_t TOTAL_FRAME_SAMPLES = static_cast<std::size_t>(SAMPLES_PER_FRAME) * DISCORD_CHANNELS;
 
             const auto total = pcm_data.size();
             if (total == 0) return;
 
-            const size_t batch_frames_limit = std::max<size_t>(
-                1, 
-                static_cast<size_t>(batch_duration.count() / DISCORD_FRAME_SIZE_MS)
+            const auto duration_ms = std::max<std::int64_t>(0, batch_duration.count());
+            const std::size_t batch_frames_limit = std::max<std::size_t>(
+                1,
+                static_cast<std::size_t>(duration_ms) / DISCORD_FRAME_SIZE_MS
             );
 
-            std::vector<discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>> batch;
-            batch.reserve(batch_frames_limit);
-
             std::array<std::int16_t, TOTAL_FRAME_SAMPLES> padded_pcm{};
+            std::vector<discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>> batch;
 
-            for (size_t pos = 0; pos < total; pos += TOTAL_FRAME_SAMPLES) {
+            for (std::size_t pos = 0; pos < total; ) {
+                if (closed_.load(std::memory_order_acquire)) return;
+
+                const std::size_t remaining_frames = ((total - pos) + TOTAL_FRAME_SAMPLES - 1) / TOTAL_FRAME_SAMPLES;
+                const std::size_t chunk_frames = std::min(batch_frames_limit, remaining_frames);
+                batch.clear();
+                batch.reserve(chunk_frames);
+
+                {
+                const std::scoped_lock lock{encoder_mutex_};
                 if (closed_.load(std::memory_order_acquire) || !encoder_) return;
+                check_and_apply_bitrate();
 
-                const size_t remaining_samples = total - pos;
-                const std::int16_t* current_pcm_ptr = pcm_data.data() + pos;
+                for (std::size_t f = 0; (f < chunk_frames) && (pos < total); ++f, pos += TOTAL_FRAME_SAMPLES) {
+                    const std::size_t remaining_samples = total - pos;
+                    const std::int16_t* current_pcm_ptr = pcm_data.data() + pos;
 
-                if (remaining_samples < TOTAL_FRAME_SAMPLES) { // end of data, pad with silence
-                    std::ranges::fill(padded_pcm, 0);
-                    // TODO: check correct
-                    std::copy_n(current_pcm_ptr, remaining_samples, padded_pcm.begin());
-                    current_pcm_ptr = padded_pcm.data();
+                    if (remaining_samples < TOTAL_FRAME_SAMPLES) { // end of data, pad with silence
+                        std::ranges::fill(padded_pcm, 0);
+                        std::copy_n(current_pcm_ptr, remaining_samples, padded_pcm.begin());
+                        current_pcm_ptr = padded_pcm.data();
+                    }
+
+                    discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>& opus_out = batch.emplace_back();
+                    const int bytes_encoded = encoder_.encode_frame(
+                        current_pcm_ptr,
+                        SAMPLES_PER_FRAME,
+                        opus_out.raw_buf.data(),
+                        discusy::voice::MAX_OPUS_FRAME_BYTES
+                    );
+
+                    if (bytes_encoded > 0) {
+                        opus_out.set_size(static_cast<std::size_t>(bytes_encoded));
+                    } else {
+                        batch.pop_back();
+                    }
+                }
                 }
 
-                discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>& opus_out = batch.emplace_back();
-                const int bytes_encoded = encoder_.encode_frame(
-                    current_pcm_ptr, 
-                    SAMPLES_PER_FRAME, 
-                    opus_out.raw_buf.data(), 
-                    discusy::voice::MAX_OPUS_FRAME_BYTES
-                );
-
-                if (bytes_encoded > 0) {
-                    opus_out.set_size(static_cast<size_t>(bytes_encoded));
-                } else {
-                    batch.pop_back();
-                }
-
-                if (batch.size() >= batch_frames_limit) {
+                if (!batch.empty()) {
                     send_opus_frames(std::move(batch));
                     batch = {};
-                    batch.reserve(batch_frames_limit);
-
-                    std::this_thread::yield();
-
-                    if (closed_.load(std::memory_order_acquire) || !encoder_) return;
-                    check_and_apply_bitrate();
                 }
-            }
 
-            if (!batch.empty()) {
-                send_opus_frames(std::move(batch));
+                if (pos < total) {
+                    std::this_thread::yield();
+                }
             }
         }
         #ifdef DISCUSY_LOGGING
@@ -784,24 +818,81 @@ public:
         const Range& raw_bytes,
         const std::chrono::milliseconds batch_duration = std::chrono::seconds{10}
     ) {
+        if (closed_.load(std::memory_order_acquire) || (udp_client() == nullptr)) return;
+
         const auto byte_count = std::ranges::size(raw_bytes);
         const auto sample_count = byte_count / sizeof(std::int16_t);
         if (sample_count == 0) return;
 
-        const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(raw_bytes));
+        try {
+            static constexpr int SAMPLES_PER_FRAME = (DISCORD_SAMPLING_RATE / 1000) * DISCORD_FRAME_SIZE_MS;
+            static constexpr std::size_t TOTAL_FRAME_SAMPLES = static_cast<std::size_t>(SAMPLES_PER_FRAME) * DISCORD_CHANNELS;
 
-        if (reinterpret_cast<std::uintptr_t>(raw_ptr) % alignof(std::int16_t) == 0) {
-            send_pcm(
-                std::span<const std::int16_t>{reinterpret_cast<const std::int16_t*>(raw_ptr), sample_count},
-                batch_duration
+            const auto duration_ms = std::max<std::int64_t>(0, batch_duration.count());
+            const std::size_t batch_frames_limit = std::max<std::size_t>(
+                1,
+                static_cast<std::size_t>(duration_ms) / DISCORD_FRAME_SIZE_MS
             );
-        } else {
+
+            const auto* raw_ptr = reinterpret_cast<const std::uint8_t*>(std::ranges::data(raw_bytes));
+            std::array<std::int16_t, TOTAL_FRAME_SAMPLES> frame_pcm{};
+            std::vector<discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>> batch;
+
+            for (std::size_t pos = 0; pos < sample_count; ) {
+                if (closed_.load(std::memory_order_acquire)) return;
+
+                const std::size_t remaining_frames = ((sample_count - pos) + TOTAL_FRAME_SAMPLES - 1) / TOTAL_FRAME_SAMPLES;
+                const std::size_t chunk_frames = std::min(batch_frames_limit, remaining_frames);
+                batch.clear();
+                batch.reserve(chunk_frames);
+
+                {
+                const std::scoped_lock lock{encoder_mutex_};
+                if (closed_.load(std::memory_order_acquire) || !encoder_) return;
+                check_and_apply_bitrate();
+
+                for (std::size_t f = 0; (f < chunk_frames) && (pos < sample_count); ++f, pos += TOTAL_FRAME_SAMPLES) {
+                    const std::size_t chunk_samples = std::min(TOTAL_FRAME_SAMPLES, sample_count - pos);
+                    std::memcpy(frame_pcm.data(), raw_ptr + (pos * sizeof(std::int16_t)), chunk_samples * sizeof(std::int16_t));
+                    if (chunk_samples < TOTAL_FRAME_SAMPLES) {
+                        std::fill(frame_pcm.begin() + static_cast<std::ptrdiff_t>(chunk_samples), frame_pcm.end(), std::int16_t{0});
+                    }
+
+                    discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>& opus_out = batch.emplace_back();
+                    const int bytes_encoded = encoder_.encode_frame(
+                        frame_pcm.data(),
+                        SAMPLES_PER_FRAME,
+                        opus_out.raw_buf.data(),
+                        discusy::voice::MAX_OPUS_FRAME_BYTES
+                    );
+
+                    if (bytes_encoded > 0) {
+                        opus_out.set_size(static_cast<std::size_t>(bytes_encoded));
+                    } else {
+                        batch.pop_back();
+                    }
+                }
+                }
+
+                if (!batch.empty()) {
+                    send_opus_frames(std::move(batch));
+                    batch = {};
+                }
+
+                if (pos < sample_count) {
+                    std::this_thread::yield();
+                }
+            }
+        }
+        #ifdef DISCUSY_LOGGING
+        catch (const std::exception& e) {
+            log("send_pcm exception: {}", e.what());
+        }
+        #endif
+        catch (...) {
             #ifdef DISCUSY_LOGGING
-            log::Logger{}("Misaligned data passed into send_pcm! Copying into an aligned vector - this is inefficient");
+            log("send_pcm unknown exception");
             #endif
-            std::vector<std::int16_t> aligned(sample_count);
-            std::memcpy(aligned.data(), raw_ptr, sample_count * sizeof(std::int16_t));
-            send_pcm(std::span<const std::int16_t>{aligned.data(), aligned.size()}, batch_duration);
         }
     }
 
@@ -874,9 +965,10 @@ public:
                                         : TOTAL_FRAME_SAMPLES;
 
                                     const auto total_elements = std::ranges::size(data);
+                                    const auto duration_ms = std::max<std::int64_t>(0, batch_duration.count());
                                     const size_t batch_frames_limit = std::max<size_t>(
-                                        1, 
-                                        static_cast<size_t>(batch_duration.count() / DISCORD_FRAME_SIZE_MS)
+                                        1,
+                                        static_cast<size_t>(duration_ms) / DISCORD_FRAME_SIZE_MS
                                     );
                                     const size_t batch_elements_limit = batch_frames_limit * ELEMENTS_PER_FRAME;
 
@@ -979,24 +1071,10 @@ public:
                     }));
                 };
 
-                if constexpr (std::ranges::contiguous_range<RawContainer> && 
-                            std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<RawContainer>>, std::int16_t>) {
+                if constexpr (std::ranges::contiguous_range<RawContainer> &&
+                            (std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<RawContainer>>, std::int16_t> ||
+                             sizeof(std::ranges::range_value_t<RawContainer>) == 1)) {
                     std::move(launch_task)(std::forward<OwnedContainer>(owned_buffer));
-                } else if constexpr (std::ranges::contiguous_range<RawContainer> && 
-                                    sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
-                    const auto* raw_ptr = reinterpret_cast<const char*>(std::ranges::data(owned_buffer));
-                    if (reinterpret_cast<std::uintptr_t>(raw_ptr) % alignof(std::int16_t) == 0) {
-                        std::move(launch_task)(std::forward<OwnedContainer>(owned_buffer));
-                    } else {
-                        #ifdef DISCUSY_LOGGING
-                        log::Logger{}("Misaligned data passed into send_pcm_async! Copying into an aligned vector upfront - this is inefficient");
-                        #endif
-                        const auto byte_count = std::ranges::size(owned_buffer);
-                        const auto sample_count = byte_count / sizeof(std::int16_t);
-                        std::vector<std::int16_t> aligned(sample_count);
-                        std::memcpy(aligned.data(), raw_ptr, sample_count * sizeof(std::int16_t));
-                        std::move(launch_task)(std::move(aligned));
-                    }
                 } else if constexpr (sizeof(std::ranges::range_value_t<RawContainer>) == 1) {
                     std::string bytes_vec;
                     if constexpr (std::ranges::sized_range<RawContainer>) {
@@ -1054,7 +1132,12 @@ private:
 
         ws_.clear();
 
+        {
+        const std::scoped_lock lock{encoder_mutex_};
         encoder_.destroy();
+        }
+
+        pending_transitions_.clear();
 
         {
         const std::scoped_lock lock{decoder_mutex_};
@@ -1158,9 +1241,9 @@ private:
         ssrc_ = 0;
         last_hb_nonce_ = -1;
         session_description_received_ = false;
+        channel_moved_pending_refresh_ = false;
 
         drop_dave_keys();
-        dave_.cached_external_sender_.clear();
         dave_.create_session();
 
         if (auto* const udp = udp_client()) udp->reset_session();
@@ -1421,19 +1504,21 @@ private:
 
         if (seq != std::uint16_t{0}) seq_ = seq;
 
-        const auto opcode = static_cast<VoiceOpcode>(data[2]);
-        std::string_view payload = data.substr(3);
+        const auto opcode = static_cast<VoiceOpcode>(static_cast<std::uint8_t>(data[2]));
+        const std::string_view payload = data.substr(3);
+        const auto* const payload_bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
 
         switch (opcode) {
             case VoiceOpcode::DaveMlsExternalSender: {
-                dave_.cached_external_sender_.assign(payload.begin(), payload.end());
-                dave_.session_->SetExternalSender(dave_.cached_external_sender_);
+                dave_.session_->SetExternalSender(
+                    std::vector<std::uint8_t>(payload_bytes, payload_bytes + payload.size())
+                );
                 break;
             }
 
             case VoiceOpcode::DaveMlsProposals: {
                 const auto commit_welcome = dave_.session_->ProcessProposals(
-                    std::vector<uint8_t>(payload.begin(), payload.end())
+                    std::vector<std::uint8_t>(payload_bytes, payload_bytes + payload.size())
                 );
                 
                 if (commit_welcome) {
@@ -1445,20 +1530,19 @@ private:
             case VoiceOpcode::DaveMlsAnnounceCommitTransition: {
                 if (payload.size() < 2) return;
                 
-                std::uint16_t transition_id{};
+                discord::dave::TransitionId transition_id{};
                 std::memcpy(&transition_id, payload.data(), sizeof(transition_id));
                 if constexpr (std::endian::native == std::endian::little) transition_id = std::byteswap(transition_id);
-                
-                transition_id_ = transition_id;
 
                 const auto result = dave_.session_->ProcessCommit(
-                    std::vector<uint8_t>(payload.begin() + 2, payload.end())
+                    std::vector<std::uint8_t>(payload_bytes + 2, payload_bytes + payload.size())
                 );
                 
                 if (std::holds_alternative<discord::dave::failed_t>(result)) {
-                    send_invalid_commit_welcome();
+                    send_invalid_commit_welcome(transition_id);
                 } else if (std::holds_alternative<discord::dave::RosterMap>(result)) {
-                    send_ready_for_transition();
+                    prepare_dave_transition(transition_id, dave_.session_->GetProtocolVersion());
+                    maybe_send_ready_for_transition(transition_id);
                 }
                 break;
             }
@@ -1466,20 +1550,19 @@ private:
             case VoiceOpcode::DaveMlsWelcome: {
                 if (payload.size() < 2) return;
                 
-                std::uint16_t transition_id{};
+                discord::dave::TransitionId transition_id{};
                 std::memcpy(&transition_id, payload.data(), sizeof(transition_id));
                 if constexpr (std::endian::native == std::endian::little) transition_id = std::byteswap(transition_id);
-                
-                transition_id_ = transition_id;
 
                 const auto result = dave_.session_->ProcessWelcome(
-                    std::vector<uint8_t>(payload.begin() + 2, payload.end())
+                    std::vector<std::uint8_t>(payload_bytes + 2, payload_bytes + payload.size())
                 );
                 
                 if (!result) {
-                    send_invalid_commit_welcome();
+                    send_invalid_commit_welcome(transition_id);
                 } else {
-                    send_ready_for_transition();
+                    prepare_dave_transition(transition_id, dave_.session_->GetProtocolVersion());
+                    maybe_send_ready_for_transition(transition_id);
                 }
                 break;
             }
@@ -1587,7 +1670,8 @@ private:
                 });
 
                 {
-                std::scoped_lock lock{encryptor_mutex_};
+                const std::scoped_lock lock{encryptor_mutex_};
+                encryptor_ssrc_ = ssrc_;
                 dave_.encryptor_->AssignSsrcToCodec(ssrc_, discord::dave::Codec::Opus);
                 }
 
@@ -1605,12 +1689,10 @@ private:
                     return;
                 }
 
-                dave_protocol_version_ = description.d.dave_protocol_version;
-                dave_protocol_version_atomic_.store(dave_protocol_version_, std::memory_order_release);
-
-                if (dave_protocol_version_ > DAVE_PROTOCOL_VERSION) {
+                const auto max_supported_version = discord::dave::MaxSupportedProtocolVersion();
+                if (description.d.dave_protocol_version > max_supported_version) {
                     #ifdef DISCUSY_LOGGING
-                    log("Dave protocol version not supported! Recieved version: {}", description.d.dave_protocol_version);
+                    log("Dave protocol version not supported! Recieved version: {} (max {})", description.d.dave_protocol_version, max_supported_version);
                     #endif
                     escalate(escalation_action::fatal);
                     return;
@@ -1629,9 +1711,21 @@ private:
                     return;
                 }
 
+                dave_protocol_version_ = description.d.dave_protocol_version;
+                latest_prepared_dave_version_ = dave_protocol_version_;
+                dave_protocol_version_atomic_.store(dave_protocol_version_, std::memory_order_release);
                 session_description_received_ = true;
-                dave_init_session();
-                update_all_decryptors_passthrough(dave_protocol_version_ == 0);
+
+                if (dave_protocol_version_ > discord::dave::kDisabledVersion) {
+                    {
+                    const std::scoped_lock lock{encryptor_mutex_};
+                    dave_.encryptor_->SetPassthroughMode(false);
+                    }
+                    update_all_decryptors_passthrough(false);
+                    dave_init_session(dave_protocol_version_);
+                } else {
+                    prepare_dave_transition(discord::dave::kInitTransitionId, discord::dave::kDisabledVersion);
+                }
 
                 udp->set_secret_key(mode, description.d.secret_key);
 
@@ -1706,13 +1800,19 @@ private:
                     break;
                 }
 
-                if (sp.d.user_id && sp.d.user_id != user_id_) {
+                if (sp.d.user_id && sp.d.user_id != user_id_ && sp.d.ssrc != 0) {
                     bool should_resend_wants = false;
+                    bool ssrc_reassigned = false;
                     opt<std::uint32_t> old_ssrc{};
                     {
                     const std::scoped_lock lock{receive_mutex_};
                     if (const auto ssrc_it = ssrc_to_user_.find(sp.d.ssrc); ssrc_it != ssrc_to_user_.end() && ssrc_it->second != sp.d.user_id) {
-                        user_to_ssrc_.erase(ssrc_it->second);
+                        const snowflake displaced_user = ssrc_it->second;
+                        user_to_ssrc_.erase(displaced_user);
+                        ssrc_reassigned = true;
+                        if (user_wants_.contains(displaced_user)) {
+                            should_resend_wants = true;
+                        }
                     }
                     const auto old_it = user_to_ssrc_.find(sp.d.user_id);
                     const bool ssrc_changed = (old_it == user_to_ssrc_.end()) || (old_it->second != sp.d.ssrc);
@@ -1722,12 +1822,13 @@ private:
                     }
                     ssrc_to_user_[sp.d.ssrc] = sp.d.user_id;
                     user_to_ssrc_[sp.d.user_id] = sp.d.ssrc;
-                    should_resend_wants = ssrc_changed && user_wants_.contains(sp.d.user_id);
+                    should_resend_wants = should_resend_wants || (ssrc_changed && user_wants_.contains(sp.d.user_id));
                     }
 
-                    if (old_ssrc) {
+                    if (old_ssrc || ssrc_reassigned) {
                         const std::scoped_lock lock{decoder_mutex_};
-                        opus_decoders_.erase(*old_ssrc);
+                        if (old_ssrc) opus_decoders_.erase(*old_ssrc);
+                        if (ssrc_reassigned) opus_decoders_.erase(sp.d.ssrc);
                     }
 
                     ensure_user_decryptor(sp.d.user_id);
@@ -1821,11 +1922,25 @@ private:
                     return;
                 }
 
-                transition_id_ = transition.d.transition_id;
+                if (transition.d.protocol_version < 0 ||
+                    std::cmp_greater(transition.d.protocol_version, discord::dave::MaxSupportedProtocolVersion())) {
+                    #ifdef DISCUSY_LOGGING
+                    log("Unsupported DAVE protocol version in PrepareTransition: {}", transition.d.protocol_version);
+                    #endif
+                    escalate(escalation_action::fatal);
+                    return;
+                }
 
-                pending_passthrough_ = (transition.d.protocol_version == 0);
+                if (transition.d.transition_id < 0 ||
+                    std::cmp_greater(transition.d.transition_id, std::numeric_limits<discord::dave::TransitionId>::max())) {
+                    break;
+                }
 
-                send_ready_for_transition();
+                const auto tid = static_cast<discord::dave::TransitionId>(transition.d.transition_id);
+                const auto version = static_cast<discord::dave::ProtocolVersion>(transition.d.protocol_version);
+
+                prepare_dave_transition(tid, version);
+                maybe_send_ready_for_transition(tid);
 
                 break;
             }
@@ -1838,13 +1953,23 @@ private:
                     return;
                 }
 
-                transition_id_ = transition.d.transition_id;
+                if (transition.d.transition_id < 0 ||
+                    std::cmp_greater(transition.d.transition_id, std::numeric_limits<discord::dave::TransitionId>::max())) {
+                    break;
+                }
 
-                apply_pending_passthrough();
+                const auto tid = static_cast<discord::dave::TransitionId>(transition.d.transition_id);
+                const auto it = pending_transitions_.find(tid);
+                if (it == pending_transitions_.end()) {
+                    break;
+                }
 
-                if (transition_id_ != 0) {
-                    apply_key_ratchet();
+                const auto version = it->second;
+                pending_transitions_.erase(it);
 
+                execute_dave_transition_version(version);
+
+                if (tid != discord::dave::kInitTransitionId) {
                     send_speaking(speaking_mode::None); // TODO: should only send here if no audio truly remains
                     send_speaking();
                 }
@@ -1859,17 +1984,26 @@ private:
                     return;
                 }
 
-                pending_passthrough_ = (epoch.d.protocol_version == 0);
+                if (epoch.d.protocol_version < 0 ||
+                    std::cmp_greater(epoch.d.protocol_version, discord::dave::MaxSupportedProtocolVersion())) {
+                    #ifdef DISCUSY_LOGGING
+                    log("Unsupported DAVE protocol version in PrepareEpoch: {}", epoch.d.protocol_version);
+                    #endif
+                    escalate(escalation_action::fatal);
+                    return;
+                }
+
+                const auto version = static_cast<discord::dave::ProtocolVersion>(epoch.d.protocol_version);
 
                 if (epoch.d.epoch == 1) {
-                    dave_init_session();
+                    if (version > discord::dave::kDisabledVersion) {
+                        dave_init_session(version);
+                    } else {
+                        dave_.session_->Reset();
+                    }
+                } else {
+                    dave_.session_->SetProtocolVersion(version);
                 }
-
-                #ifdef DISCUSY_LOGGING
-                if (epoch.d.epoch != 1) {
-                    log("Prepare epoch with epoch {} (protocol version change on a retained group) -- unhandled", epoch.d.epoch);
-                }
-                #endif
 
                 break;
             }
@@ -1883,8 +2017,8 @@ private:
         }
     }
 
-    void dave_init_session() {
-        dave_.init_session(dave_protocol_version_, channel_id_.load(), user_id_str_);
+    void dave_init_session(const discord::dave::ProtocolVersion protocol_version) {
+        dave_.init_session(protocol_version, channel_id_.load(std::memory_order_acquire), user_id_str_);
 
         const auto key_package = dave_.session_->GetMarshalledKeyPackage();
         
@@ -1907,6 +2041,7 @@ private:
                 .user_id{user_id_},
                 .session_id{session_id_},
                 .token{token_},
+                .max_dave_protocol_version = discord::dave::MaxSupportedProtocolVersion(),
             };
             identify_payload payload{id};
 
@@ -1953,11 +2088,11 @@ private:
         ws_.send(std::move(out), true);
     }
 
-    void send_invalid_commit_welcome() {
+    void send_invalid_commit_welcome(const discord::dave::TransitionId transition_id) {
         dave_mls_invalid_commit_welcome invalid_cw{
-            .transition_id = transition_id_,
+            .transition_id = transition_id,
         };
-        dave_mls_invalid_commit_welcome_payload payload{invalid_cw};
+        const dave_mls_invalid_commit_welcome_payload payload{invalid_cw};
 
         std::string out;
         if (json::write_json(payload, out, json_logger)) {
@@ -1966,18 +2101,24 @@ private:
         }
 
         #ifdef DISCUSY_LOGGING
-        log("Sent invalid commit/welcome for transition ID: {}", transition_id_);
+        log("Sent invalid commit/welcome for transition ID: {}", transition_id);
         #endif
         ws_.send(std::move(out));
 
-        dave_init_session();
+        const auto session_ver = dave_.session_->GetProtocolVersion();
+        const auto recovery_ver = (session_ver != discord::dave::kDisabledVersion) ? session_ver : dave_protocol_version_;
+        if (recovery_ver != discord::dave::kDisabledVersion) {
+            dave_init_session(recovery_ver);
+        }
     }
 
-    void send_ready_for_transition() {
+    void maybe_send_ready_for_transition(const discord::dave::TransitionId transition_id) {
+        if (transition_id == discord::dave::kInitTransitionId) return;
+
         dave_protocol_ready_for_transition r{
-            .transition_id = transition_id_,
+            .transition_id = transition_id,
         };
-        dave_protocol_ready_for_transition_payload payload{r};
+        const dave_protocol_ready_for_transition_payload payload{r};
 
         std::string out;
         if (json::write_json(payload, out, json_logger)) {
@@ -1989,51 +2130,62 @@ private:
         log("Sent ready for transition: {}", out);
         #endif
         ws_.send(std::move(out));
+    }
 
-        if (transition_id_ == 0) {
-            apply_pending_passthrough();
-            apply_key_ratchet();
+    void prepare_dave_transition(const discord::dave::TransitionId transition_id, const discord::dave::ProtocolVersion protocol_version) {
+        latest_prepared_dave_version_ = protocol_version;
+
+        if (protocol_version == discord::dave::kDisabledVersion) {
+            update_all_decryptors_passthrough(true);
+        } else {
+            update_all_decryptors_passthrough(false);
+            update_all_decryptors_key_ratchets();
+        }
+
+        if (transition_id == discord::dave::kInitTransitionId) {
+            execute_dave_transition_version(protocol_version);
+        } else {
+            pending_transitions_[transition_id] = protocol_version;
         }
     }
 
-    bool apply_key_ratchet() {
+    void execute_dave_transition_version(const discord::dave::ProtocolVersion protocol_version) {
+        dave_protocol_version_ = protocol_version;
+        dave_protocol_version_atomic_.store(protocol_version, std::memory_order_release);
+
+        if (protocol_version == discord::dave::kDisabledVersion) {
+            dave_.session_->Reset();
+            update_all_decryptors_passthrough(true);
+
+            {
+            const std::scoped_lock lock{encryptor_mutex_};
+            dave_.encryptor_->SetKeyRatchet(nullptr);
+            dave_.encryptor_->SetPassthroughMode(true);
+            }
+
+            if (auto* const udp = udp_client()) udp->kick_drain();
+            maybe_signal_ready();
+            return;
+        }
+
         auto key_ratchet = dave_.session_->GetKeyRatchet(user_id_str_);
+        update_all_decryptors_passthrough(false);
         update_all_decryptors_key_ratchets();
 
-        if (!key_ratchet) {
+        const bool has_ratchet = (key_ratchet != nullptr);
+        {
+        const std::scoped_lock lock{encryptor_mutex_};
+        dave_.encryptor_->SetPassthroughMode(false);
+        if (has_ratchet) {
+            dave_.encryptor_->SetKeyRatchet(std::move(key_ratchet));
+        }
+        }
+
+        if (!has_ratchet) {
             #ifdef DISCUSY_LOGGING
             log("No key ratchet available yet, keeping the current one");
             #endif
-            return false;
-        }
-
-        {
-        std::scoped_lock lock{encryptor_mutex_};
-        dave_.encryptor_->SetKeyRatchet(std::move(key_ratchet));
-        }
-
-        if (auto* const udp = udp_client()) udp->kick_drain();
-        maybe_signal_ready();
-        return true;
-    }
-
-    void apply_pending_passthrough() {
-        if (!pending_passthrough_) return;
-
-        const bool passthrough = *pending_passthrough_;
-        pending_passthrough_.reset();
-
-        if (passthrough) {
-            dave_protocol_version_atomic_.store(0, std::memory_order_release);
-        } else {
-            dave_protocol_version_atomic_.store(dave_protocol_version_, std::memory_order_release);
-        }
-
-        update_all_decryptors_passthrough(passthrough);
-
-        {
-        std::scoped_lock lock{encryptor_mutex_};
-        dave_.encryptor_->SetPassthroughMode(passthrough);
+            return;
         }
 
         if (auto* const udp = udp_client()) udp->kick_drain();
@@ -2041,11 +2193,14 @@ private:
     }
 
     void drop_dave_keys() {
-        pending_passthrough_.reset();
-        transition_id_ = 0;
+        pending_transitions_.clear();
+        dave_protocol_version_ = discord::dave::kDisabledVersion;
+        latest_prepared_dave_version_ = discord::dave::kDisabledVersion;
+        dave_protocol_version_atomic_.store(discord::dave::kDisabledVersion, std::memory_order_release);
 
         {
-        std::scoped_lock lock{encryptor_mutex_};
+        const std::scoped_lock lock{encryptor_mutex_};
+        encryptor_ssrc_ = 0;
         dave_.encryptor_->SetKeyRatchet(nullptr);
         dave_.encryptor_->SetPassthroughMode(false);
         }
@@ -2073,9 +2228,9 @@ private:
         const auto dec = std::shared_ptr<discord::dave::IDecryptor>(discord::dave::CreateDecryptor());
         if (!dec) return;
 
-        const bool passthrough = (session_description_received_ && (dave_protocol_version_ == 0)) || pending_passthrough_.value_or(false);
+        const bool passthrough = session_description_received_ && (latest_prepared_dave_version_ == discord::dave::kDisabledVersion);
         dec->TransitionToPassthroughMode(passthrough);
-        if (session_description_received_ && (dave_protocol_version_ > 0)) {
+        if (latest_prepared_dave_version_ > discord::dave::kDisabledVersion) {
             if (auto kr = dave_.session_->GetKeyRatchet(uid.str().str())) {
                 dec->TransitionToKeyRatchet(std::move(kr));
             }
@@ -2189,6 +2344,8 @@ private:
     }
 
     void send_speaking(std::optional<speaking_mode> mode_override = std::nullopt) {
+        if (!session_live_ || (ssrc_ == 0)) return;
+
         speaking_ s{
             .speaking = mode_override ? *mode_override : speaking_mode_,
             .ssrc = ssrc_,
@@ -2216,10 +2373,10 @@ private:
         }
 
         heartbeat hb{
-            .t = static_cast<integer>(rnd_.next() & 0x1FFFFFFFFFFFFFLL),
+            .t = static_cast<integer>(rnd_.next() & 0x1FFFFFFFFFFFFFULL),
             .seq_ack = seq_,
         };
-        heartbeat_payload payload{hb};
+        const heartbeat_payload payload{hb};
 
         last_hb_nonce_ = hb.t;
 
@@ -2307,7 +2464,7 @@ private:
 
     struct udp_on_idle_cb { std::weak_ptr<connection> s; void operator()(const audio_stop_reason reason) const {
         auto self = s.lock();
-        if (!self || self->closed_.load(std::memory_order_acquire)) return;
+        if (!self || self->closed_.load(std::memory_order_acquire) || self->io_ctx_->stopped()) return;
 
         self->on_audio_stopped.fire(audio_stopped{
             .reason = reason,
@@ -2316,7 +2473,7 @@ private:
     } };
 
     struct udp_dave_encrypt { std::weak_ptr<connection> s; encrypt_result operator()(const discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>& audio, discusy::voice::store<MAX_DAVE_BUFFER_SIZE>& output) const {
-        auto ptr = s.lock();
+        const auto ptr = s.lock();
         if (!ptr) {
             output.clear();
             return encrypt_result::drop;
@@ -2328,15 +2485,20 @@ private:
         size_t bytes_written{0};
 
         {
-        std::scoped_lock lock{self.encryptor_mutex_};
+        const std::scoped_lock lock{self.encryptor_mutex_};
         if (!self.dave_.encryptor_->HasKeyRatchet() && !self.dave_.encryptor_->IsPassthroughMode()) {
             output.clear();
             return encrypt_result::not_ready;
         }
 
+        if (self.dave_.encryptor_->GetMaxCiphertextByteSize(discord::dave::MediaType::Audio, audio.span().size()) > output.raw_buf.size()) {
+            output.clear();
+            return encrypt_result::drop;
+        }
+
         result = self.dave_.encryptor_->Encrypt(
             discord::dave::MediaType::Audio,
-            self.ssrc_,
+            self.encryptor_ssrc_,
             discord::dave::MakeArrayView<const std::uint8_t>(audio.span().data(), audio.span().size()),
             discord::dave::MakeArrayView(output.raw_buf.data(), output.raw_buf.size()),
             &bytes_written
@@ -2430,12 +2592,17 @@ private:
                 &bytes_written
             );
             if (res != discord::dave::IDecryptor::Success || bytes_written == 0) {
+                stat_dave_decrypt_drops_.fetch_add(1, std::memory_order_relaxed);
+                #ifdef DISCUSY_LOGGING
+                log("DAVE decryption failed for user {} (ssrc {}): code {}", speaker_id.value, ssrc, static_cast<int>(res));
+                #endif
                 return;
             }
             opus_span = std::span<const std::uint8_t>{out_ptr, bytes_written};
         } else if (dave_disabled) {
             opus_span = payload;
         } else {
+            stat_dave_decrypt_drops_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
 
@@ -2448,7 +2615,7 @@ private:
         }
 
         if (want_opus) {
-            if (closed_.load(std::memory_order_acquire)) return;
+            if (closed_.load(std::memory_order_acquire) || io_ctx_->stopped()) return;
             std::vector<std::uint8_t> opus;
             if (!heap_buf.empty()) {
                 heap_buf.resize(opus_span.size());
@@ -2467,7 +2634,7 @@ private:
             });
         }
 
-        if (!pcm.empty() && !closed_.load(std::memory_order_acquire)) {
+        if (!pcm.empty() && !closed_.load(std::memory_order_acquire) && !io_ctx_->stopped()) {
             on_audio_received.fire(received_audio{
                 .guild_id = server_id_,
                 .user_id = speaker_id,
@@ -2504,11 +2671,11 @@ private:
     escalation_cb_t on_escalation_;
 
     std::int64_t seq_{-1};
-    std::int64_t transition_id_{};
-    std::optional<bool> pending_passthrough_{};
+    std::unordered_map<discord::dave::TransitionId, discord::dave::ProtocolVersion> pending_transitions_{};
 
     dave dave_;
     std::mutex encryptor_mutex_;
+    std::uint32_t encryptor_ssrc_{0};
 
     mutable std::mutex receive_mutex_;
     bool receive_any_{false};
@@ -2522,16 +2689,21 @@ private:
     std::mutex decoder_mutex_;
     std::unordered_map<std::uint32_t, opus_decoder> opus_decoders_;
 
+    std::mutex encoder_mutex_;
     opus_encoder encoder_{};
     std::atomic<std::uint32_t> target_bitrate_{DEFAULT_OPUS_BITRATE};
     std::uint32_t applied_bitrate_{DEFAULT_OPUS_BITRATE};
 
+    std::atomic<std::uint32_t> underrun_grace_frames_{DEFAULT_UNDERRUN_GRACE_FRAMES};
+    std::atomic<std::uint32_t> max_catchup_frames_{DEFAULT_MAX_CATCHUP_FRAMES};
+    std::atomic<std::uint32_t> not_ready_hold_frames_{DEFAULT_NOT_READY_HOLD_FRAMES};
+    std::atomic<std::uint64_t> stat_dave_decrypt_drops_{0};
+    std::atomic_flag started_ = ATOMIC_FLAG_INIT;
+
     void check_and_apply_bitrate() noexcept {
         const auto target = target_bitrate_.load(std::memory_order_relaxed);
-        if (target != applied_bitrate_) {
-            if (encoder_.set_bitrate(target)) {
-                applied_bitrate_ = target;
-            }
+        if ((target != applied_bitrate_) && encoder_.set_bitrate(target)) {
+            applied_bitrate_ = target;
         }
     }
     
@@ -2551,6 +2723,7 @@ private:
     std::chrono::milliseconds reconnect_backoff_time_{0};
 
     discord::dave::ProtocolVersion dave_protocol_version_{};
+    discord::dave::ProtocolVersion latest_prepared_dave_version_{};
     std::atomic<discord::dave::ProtocolVersion> dave_protocol_version_atomic_{0};
 
     std::int64_t last_hb_nonce_{-1};
@@ -2579,6 +2752,7 @@ private:
     bool awaiting_connect_ready_{false};
     bool reconnect_scheduled_{false};
     bool escalated_{false};
+    bool channel_moved_pending_refresh_{false};
 
     speaking_mode speaking_mode_{speaking_mode::Microphone};
 

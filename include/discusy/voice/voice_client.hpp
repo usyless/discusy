@@ -34,7 +34,13 @@ template <typename botT>
 class client {
 private:
     botT& bot_;
-    snowflake bot_id_{};
+    std::atomic<std::uint64_t> bot_id_{0};
+
+    [[nodiscard]] snowflake get_bot_id() const {
+        const auto cached = bot_id_.load(std::memory_order_acquire);
+        if (cached != 0ULL) return snowflake{cached};
+        return bot_.get_user_id();
+    }
     
     void intents_check() {
         if (!contains_bit<intent::guild_voice_states>(bot_.cfg_.intents)) {
@@ -49,19 +55,21 @@ private:
     struct connection_escalation_cb { 
         client* c;
         snowflake guild_id;
+        std::shared_ptr<std::weak_ptr<connection>> target;
         
-        void operator()(escalation_action ec) {
-            boost::asio::post(c->bot_.io_ctx.executor_, [c = c, ec, guild_id = guild_id]() {
+        void operator()(escalation_action ec) const {
+            boost::asio::post(c->bot_.io_ctx.executor_, [c = c, ec, guild_id = guild_id, target = target]() {
+                const auto expected = target ? target->lock() : connection_ref{};
                 if (ec == escalation_action::fatal) {
                     #ifdef DISCUSY_LOGGING
                     c->bot_.log("Fatal escalation for guild: {}", guild_id.value);
                     #endif
-                    c->disconnect(guild_id);
+                    c->disconnect_if_current(guild_id, expected);
                 } else if (ec == escalation_action::requires_gateway_reconnect) {
                     #ifdef DISCUSY_LOGGING
                     c->bot_.log("Gateway reconnect escalation for guild: {}", guild_id.value);
                     #endif
-                    c->request_session_refresh(guild_id);
+                    c->request_session_refresh(guild_id, expected.get());
                 }
             });
         } 
@@ -92,13 +100,14 @@ public:
         std::function<void(connection&)> on_create{};
     };
 private:
-    void request_session_refresh(const snowflake guild_id) {
+    void request_session_refresh(const snowflake guild_id, const connection* expected = nullptr) {
         snowflake channel_id{};
         bool muted = false;
         bool deaf = false;
         bool found = false;
 
         connections_.visit(guild_id, [&](auto& entry) {
+            if ((expected != nullptr) && (entry.second.conn.get() != expected)) return;
             if (entry.second.refreshing) return;
             entry.second.refreshing = true;
             channel_id = entry.second.channel_id;
@@ -200,7 +209,8 @@ private:
     void register_persistent_listeners() {
         std::call_once(listeners_flag_, [this]() {
             on_voice_state_update_ = bot_.gateway_callbacks.on_voice_state_update.listen_system([this](const recieve_event::voice_state_update& e) {
-                if ((e.user_id != bot_id_) || !e.guild_id) return;
+                const auto me = get_bot_id();
+                if (!me || (e.user_id != me) || !e.guild_id) return;
 
                 connection_ref dying;
                 connection_ref needs_rebuild;
@@ -241,7 +251,7 @@ private:
 
                 if (moved_conn) {
                     moved_conn->move_channel(new_channel_id);
-                    bot_.api.get_channel(new_channel_id)([this, new_channel_id, conn = std::move(moved_conn)](const boost::system::error_code& ec, const auto& channel) {
+                    bot_.api.get_channel(new_channel_id)([new_channel_id, conn = std::move(moved_conn)](const boost::system::error_code& ec, const auto& channel) {
                         if (ec || !channel || !channel->bitrate || (conn->get_channel_id() != new_channel_id)) return;
 
                         conn->set_bitrate(static_cast<std::uint32_t>(*channel->bitrate));
@@ -393,8 +403,10 @@ private:
             );
         }
 
-        void operation_cancelled(std::shared_ptr<join_state> self_ptr) {
-            self->disconnect(guild_id);
+        void operation_cancelled(std::shared_ptr<join_state> self_ptr, const connection_ref& created_conn = nullptr) {
+            if (created_conn) {
+                self->disconnect_if_current(guild_id, created_conn);
+            }
             finish(std::move(self_ptr), boost::asio::error::operation_aborted);
         }
 
@@ -437,31 +449,19 @@ private:
                     return finish(std::move(self_ptr), boost::asio::error::not_connected);
                 }
 
-                if (existing) {
-                    return step_wait_audio_ready_existing(std::move(self_ptr), std::move(existing));
-                }
-
-                return finish(std::move(self_ptr), boost::system::error_code{}, std::move(existing));
+                return step_wait_audio_ready_existing(std::move(self_ptr), std::move(existing));
             }
 
             auto token_def = boost::asio::bind_executor(strand_, boost::asio::bind_allocator(allocator, boost::asio::deferred));
 
-            auto voice_state_update = self->bot_.gateway_callbacks.on_voice_state_update.when([guild_id = guild_id, channel_id = channel_id, muted = options.muted, deaf = options.deaf, me = self->bot_id_](const recieve_event::voice_state_update& e) {
+            const auto me = self->get_bot_id();
+            auto voice_state_update = self->bot_.gateway_callbacks.on_voice_state_update.when([guild_id = guild_id, channel_id = channel_id, muted = options.muted, deaf = options.deaf, me](const recieve_event::voice_state_update& e) {
                 return (e.user_id == me) && (e.guild_id.value_or(0) == guild_id) && (e.channel_id.value_or(0) == channel_id) && (e.self_mute == muted) && (e.self_deaf == deaf);
             }, token_def);
 
             auto voice_server_update = self->bot_.gateway_callbacks.on_voice_server_update.when([guild_id = guild_id](const recieve_event::voice_server_update& e) {
                 return e.guild_id == guild_id;
             }, token_def);
-
-            if (!self->bot_.update_voice_state(send_event::update_voice_state{
-                .guild_id{guild_id},
-                .channel_id{channel_id},
-                .self_mute = options.muted,
-                .self_deaf = options.deaf,
-            })) {
-                return finish(std::move(self_ptr), boost::asio::error::not_connected);
-            }
 
             timer.expires_after(options.timeout);
 
@@ -481,7 +481,7 @@ private:
                         child_signal.slot(),
                         boost::asio::bind_allocator(
                             allocator,
-                            [self_ptr = std::move(self_ptr)](
+                            [self_ptr](
                                 auto order,
                                 boost::system::error_code timer_ec,
                                 auto events_order,
@@ -506,6 +506,16 @@ private:
                     )
                 )
             );
+
+            if (!self->bot_.update_voice_state(send_event::update_voice_state{
+                .guild_id{guild_id},
+                .channel_id{channel_id},
+                .self_mute = options.muted,
+                .self_deaf = options.deaf,
+            })) {
+                child_signal.emit(boost::asio::cancellation_type::all);
+                return finish(std::move(self_ptr), boost::asio::error::not_connected);
+            }
         }
 
         void step_wait_audio_ready_existing(std::shared_ptr<join_state> self_ptr, connection_ref existing) {
@@ -545,9 +555,15 @@ private:
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
             if (order[0] == 0 || vs_ec || vserver_ec || !voice_server_update_event.endpoint) {
-                return finish(std::move(self_ptr), timer_ec ? timer_ec : (vs_ec ? vs_ec : (vserver_ec ? vserver_ec : boost::asio::error::timed_out)), nullptr);
+                const boost::system::error_code ec = (order[0] == 0)
+                    ? ((timer_ec == boost::asio::error::operation_aborted)
+                        ? boost::asio::error::operation_aborted
+                        : boost::asio::error::timed_out)
+                    : (vs_ec ? vs_ec : (vserver_ec ? vserver_ec : boost::asio::error::timed_out));
+                return finish(std::move(self_ptr), ec, nullptr);
             }
 
+            const auto escalation_target = std::make_shared<std::weak_ptr<connection>>();
             connection_ref conn;
             try {
                 conn = std::allocate_shared<connection>(
@@ -560,7 +576,7 @@ private:
                     voice_state_update_event.session_id,
                     voice_server_update_event.token,
                     self->make_endpoint(*voice_server_update_event.endpoint), 
-                    connection_escalation_cb{self, guild_id}
+                    connection_escalation_cb{self, guild_id, escalation_target}
                 );
             } 
             catch (const boost::system::system_error& e) {
@@ -589,6 +605,7 @@ private:
             }
 
             if (!conn) return finish(std::move(self_ptr), boost::asio::error::no_memory, nullptr);
+            *escalation_target = conn;
 
             if (self_ptr->options.receive_audio) {
                 conn->set_receive_any_audio(true);
@@ -598,7 +615,6 @@ private:
                 self_ptr->options.on_create(*conn);
             }
             self->on_connection_created.fire(connection_ref{conn});
-            conn->start();
 
             connection_ref replaced;
             data new_entry{
@@ -620,12 +636,13 @@ private:
             );
 
             discusy::voice::client<botT>::destroy_connection(std::move(replaced));
+            conn->start();
 
             step_wait_audio_ready_new(std::move(self_ptr), std::move(conn));
         }
 
         void step_wait_audio_ready_new(std::shared_ptr<join_state> self_ptr, connection_ref conn) {
-            if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+            if (is_cancelled()) return operation_cancelled(std::move(self_ptr), conn);
 
             if (!conn) {
                 return finish(std::move(self_ptr), boost::asio::error::fault, nullptr);
@@ -647,14 +664,14 @@ private:
                         allocator,
                         [self_ptr = std::move(self_ptr), conn](const boost::system::error_code& ready_ec, bool is_ready) mutable {
                             auto ptr = self_ptr.get();
-                            if (ptr->is_cancelled()) return ptr->operation_cancelled(std::move(self_ptr));
+                            if (ptr->is_cancelled()) return ptr->operation_cancelled(std::move(self_ptr), conn);
 
                             if (ready_ec || !is_ready) {
                                 #ifdef DISCUSY_LOGGING
                                 ptr->self->bot_.log("Voice connection never became ready to transmit for guild: {}", ptr->guild_id.value);
                                 #endif
 
-                                ptr->self->disconnect(ptr->guild_id);
+                                ptr->self->disconnect_if_current(ptr->guild_id, conn);
                                 return ptr->finish(std::move(self_ptr), ready_ec ? ready_ec : boost::asio::error::timed_out, nullptr);
                             }
 
@@ -667,7 +684,7 @@ private:
     };
 
 public:
-    explicit client(botT& bot) noexcept : bot_{bot} {}
+    explicit client(botT& bot) : bot_{bot} {}
 
     // Things to take note: on_create is only called if a new connection is created and an old connection isnt being moved
     template <discusy::asio::ctf<connection_ref> CompletionToken = ctx::io_context::dct_t>
@@ -731,6 +748,27 @@ public:
         return success;
     }
 
+    bool disconnect_if_current(const snowflake guild_id, const connection_ref& expected) {
+        if (!expected) return false;
+
+        connection_ref conn;
+        const bool removed = connections_.erase_if(guild_id, [&](auto& entry) {
+            if (entry.second.conn.get() != expected.get()) return false;
+            conn = std::move(entry.second.conn);
+            return true;
+        }) > 0;
+
+        if (!removed) return false;
+
+        const auto success = bot_.update_voice_state(send_event::update_voice_state{
+            .guild_id{guild_id},
+        });
+
+        destroy_connection(std::move(conn));
+
+        return success;
+    }
+
     [[nodiscard]] connection_ref get(const snowflake guild_id) const {
         connection_ref conn;
         connections_.cvisit(guild_id, [&](const auto& entry) {
@@ -774,7 +812,7 @@ public:
     
 private:
     void set_id(snowflake id) {
-        bot_id_ = id;
+        bot_id_.store(id.value, std::memory_order_release);
         register_persistent_listeners();
     }
 

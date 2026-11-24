@@ -21,7 +21,7 @@ public:
     explicit opus_decoder(
         const std::uint32_t sampling_rate = DISCORD_SAMPLING_RATE,
         const std::uint32_t channels = DISCORD_CHANNELS
-    ) : channels_{channels} {
+    ) : sampling_rate_{sampling_rate}, channels_{channels} {
         int opus_err = OPUS_OK;
         dec_ = opus_decoder_create(
             static_cast<opus_int32>(sampling_rate),
@@ -39,12 +39,13 @@ public:
     }
 
     opus_decoder(opus_decoder&& other) noexcept
-        : dec_{std::exchange(other.dec_, nullptr)}, channels_{other.channels_} {}
+        : dec_{std::exchange(other.dec_, nullptr)}, sampling_rate_{other.sampling_rate_}, channels_{other.channels_} {}
 
     opus_decoder& operator=(opus_decoder&& other) noexcept {
         if (this != &other) {
             destroy();
             dec_ = std::exchange(other.dec_, nullptr);
+            sampling_rate_ = other.sampling_rate_;
             channels_ = other.channels_;
         }
         return *this;
@@ -107,8 +108,40 @@ public:
         const bool decode_fec = false
     ) {
         if (dec_ == nullptr || channels_ == 0) return {};
+        if (opus_frame.size() > static_cast<std::size_t>(std::numeric_limits<opus_int32>::max())) return {};
 
-        std::vector<std::int16_t> pcm(MAX_OPUS_DECODED_SAMPLES_PER_CHANNEL * channels_);
+        if (!opus_frame.empty() && !decode_fec) {
+            const int nb_samples = opus_decoder_get_nb_samples(
+                dec_,
+                opus_frame.data(),
+                static_cast<opus_int32>(opus_frame.size())
+            );
+            if (nb_samples <= 0) {
+                return {};
+            }
+
+            std::vector<std::int16_t> pcm(static_cast<std::size_t>(nb_samples) * channels_);
+            const int samples_per_channel = decode_frame(opus_frame, pcm, false);
+            if (samples_per_channel <= 0) {
+                return {};
+            }
+
+            pcm.resize(static_cast<std::size_t>(samples_per_channel) * channels_);
+            return pcm;
+        }
+
+        // PLC (`opus_frame.empty()`) or in-band FEC (`decode_fec == true`):
+        // query last decoded frame duration when available, defaulting to one 20ms frame.
+        auto target_samples_per_channel = static_cast<opus_int32>((sampling_rate_ / 1000U) * DISCORD_FRAME_SIZE_MS);
+        opus_int32 last_duration = 0;
+        if (opus_decoder_ctl(dec_, OPUS_GET_LAST_PACKET_DURATION(&last_duration)) == OPUS_OK && last_duration > 0) {
+            target_samples_per_channel = last_duration;
+        }
+        if (target_samples_per_channel <= 0) {
+            target_samples_per_channel = static_cast<opus_int32>(TIMESTAMP_INCREMENT);
+        }
+
+        std::vector<std::int16_t> pcm(static_cast<std::size_t>(target_samples_per_channel) * channels_);
         const int samples_per_channel = decode_frame(opus_frame, pcm, decode_fec);
         if (samples_per_channel <= 0) {
             return {};
@@ -120,6 +153,7 @@ public:
 
 private:
     OpusDecoder* dec_{nullptr};
+    std::uint32_t sampling_rate_{DISCORD_SAMPLING_RATE};
     std::uint32_t channels_{DISCORD_CHANNELS};
 };
 

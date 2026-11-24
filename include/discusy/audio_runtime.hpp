@@ -108,13 +108,18 @@ private:
         #endif
     }
 
-    ~audio_runtime() {
-        for (auto& n : nodes_) {
-            n->guard.reset();
-            n->io_ctx.stop();
-        }
-        for (auto& n : nodes_) {
-            if (n->thread.joinable()) n->thread.join();
+    ~audio_runtime() noexcept {
+        try {
+            for (const auto& n : nodes_) {
+                n->guard.reset();
+                n->io_ctx.stop();
+            }
+            for (const auto& n : nodes_) {
+                if (n->thread.joinable()) n->thread.join();
+            }
+        } catch (...) {
+            // destructors must not throw
+            (void)0;
         }
     }
 

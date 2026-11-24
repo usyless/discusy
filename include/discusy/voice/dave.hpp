@@ -1,12 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
 
 #include <dave/dave_interfaces.h>
 #include <dave/logger.h>
-#include <mls/crypto.h>
 
 #include "../log.hpp"
 
@@ -22,10 +22,13 @@ inline void init_dave_logging() noexcept {
             const char* file_name = file;
             if (!file_name) {
                 file_name = "unknown";
-            } else if (const char* sep = std::strrchr(file_name, '/')) {
-                file_name = sep + 1;
-            } else if (const char* sep_win = std::strrchr(file_name, '\\')) {
-                file_name = sep_win + 1;
+            } else {
+                const char* sep_fwd = std::strrchr(file_name, '/');
+                const char* sep_win = std::strrchr(file_name, '\\');
+                const char* sep = std::max(sep_fwd, sep_win);
+                if (sep != nullptr) {
+                    file_name = sep + 1;
+                }
             }
             const char* sev_str = "INFO";
             switch (severity) {
@@ -49,7 +52,6 @@ inline void init_dave_logging() noexcept {
 struct dave {
     std::unique_ptr<discord::dave::mls::ISession> session_;
     std::unique_ptr<discord::dave::IEncryptor> encryptor_;
-    std::vector<uint8_t> cached_external_sender_;
 
     dave(const dave& other) = delete;
     dave& operator=(const dave& other) = delete;
@@ -63,7 +65,7 @@ struct dave {
         encryptor_ = discord::dave::CreateEncryptor();
     }
 
-    void create_session() noexcept {
+    void create_session() {
         session_ = discord::dave::mls::CreateSession(
             nullptr, 
             "",
@@ -73,18 +75,12 @@ struct dave {
                 #endif
             }
         );
-        if (!cached_external_sender_.empty()) {
-            session_->SetExternalSender(cached_external_sender_);
-        }
     }
 
     // group_id is the DAVE/MLS group ID, which Discord derives from the *voice channel* ID.
     // NOLINTNEXTLINE(readability-make-member-function-const)
-    void init_session(discord::dave::ProtocolVersion protocol_version, std::uint64_t group_id, const std::string& user_id_str) {
-        mlspp::CipherSuite suite{mlspp::CipherSuite::ID::P256_AES128GCM_SHA256_P256};
-        mlspp::SignaturePrivateKey sig_priv = mlspp::SignaturePrivateKey::generate(suite);
-        auto transient_key = std::make_shared<mlspp::SignaturePrivateKey>(std::move(sig_priv));
-        
+    void init_session(discord::dave::ProtocolVersion protocol_version, std::uint64_t group_id, const std::string& user_id_str) noexcept {
+        std::shared_ptr<mlspp::SignaturePrivateKey> transient_key{};
         session_->Init(
             protocol_version,
             group_id,

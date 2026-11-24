@@ -81,6 +81,7 @@ struct audio_stats {
     std::int64_t  worst_lateness_us{};  // worst observed pacing lateness
     std::uint64_t packets_received{};   // valid voice RTP packets decrypted
     std::uint64_t receive_decrypt_drops{}; // incoming packets that failed transport decryption
+    std::uint64_t dave_decrypt_drops{}; // incoming packets that failed DAVE E2EE decryption
 };
 
 static constexpr std::array<std::uint8_t, 3> opus_silence = {0xF8, 0xFF, 0xFE};
