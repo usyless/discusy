@@ -32,7 +32,7 @@ cmake_dependent_option(DISCUSY_USE_STATIC_MSVCRT
     "MSVC" OFF
 )
 option(DISCUSY_NO_CACHES "Disable the caches of channels/users/guilds/etc from existing at all" ON)
-option(DISCUSY_USE_ETF "Use Erlang External Term Format (ETF) for Discord gateway communication instead of JSON (EXPERIMENTAL)" OFF)
+option(DISCUSY_USE_ETF "Use Erlang External Term Format (ETF) for Discord gateway communication instead of JSON" OFF)
 
 # Voice & Audio Features
 if(PROJECT_IS_TOP_LEVEL)

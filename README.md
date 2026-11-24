@@ -10,7 +10,7 @@ All of the bot facing Discord API is covered and accessible, with types matching
 - Discord API v10 with [zstd](https://github.com/facebook/zstd) + voice API v8 with [DAVE](https://github.com/discord/libdave)
 - Header-only with statically linked dependencies (this does lead to high compiler memory requirements)
 - [Glaze](https://github.com/stephenberry/glaze) for compile-time JSON and binary Erlang External Term Format (ETF) serialisation and deserialisation algorithms
-- (Extremely Experimental) ETF parser/serializer with compile-time hash maps for higher throughput than JSON
+- ETF parser/serializer with compile-time hash maps for higher throughput than JSON
 - Works with 1 to N threads
 - Asynchronous methods support coroutines (lazy, eager), callbacks and detached execution with the same function (Asio completion tokens)
 - Small memory footprint
