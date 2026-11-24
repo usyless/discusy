@@ -288,8 +288,13 @@ public:
     }
 
     // must be called from its own strand, which is the websockets strand
-    ~connection() {
-        destruct();
+    ~connection() noexcept {
+        try {
+            destruct();
+        } catch (...) {
+            destructed_ = true;
+            closed_.store(true, std::memory_order_release);
+        }
     }
 
     // TODO: unsure if valid
@@ -355,7 +360,7 @@ public:
                 c.log("Same voice server, staying connected");
                 #endif
 
-                c.refresh_watchdog_.cancel();
+                c.cancel_refresh_watchdog();
                 c.escalated_ = false;
                 return;
             }
@@ -1026,14 +1031,18 @@ private:
     void destruct() {
         if (destructed_) return;
         destructed_ = true;
+        ++session_generation_;
 
         closed_.store(true, std::memory_order_release);
 
         if (auto* const udp = udp_client()) udp->close();
 
         stop_heartbeat();
+        ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
-        refresh_watchdog_.cancel();
+        cancel_refresh_watchdog();
+        awaiting_connect_ready_ = false;
+        reconnect_scheduled_ = false;
 
         ws_.stop();
         ws_.pause();
@@ -1043,7 +1052,6 @@ private:
         ws_.on_message(message_cb{nullptr});
         ws_.on_open(open_cb{nullptr});
 
-        ws_.close();
         ws_.clear();
 
         encoder_.destroy();
@@ -1059,7 +1067,9 @@ private:
         user_to_ssrc_.clear();
         }
 
-        on_closed.fire(voice_closed{.guild_id = server_id_});
+        if (!io_ctx_->stopped()) {
+            on_closed.fire(voice_closed{.guild_id = server_id_});
+        }
     }
 
 public:
@@ -1074,15 +1084,18 @@ private:
     #endif
 
     void stop() {
+        ++session_generation_;
         reconnecting_ = true;
+        awaiting_connect_ready_ = false;
         session_live_ = false;
         ready_received_ = false;
         ready_.store(false, std::memory_order_release);
         ready_signalled_ = false;
         stop_heartbeat();
-        ws_.pause();
+        ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
         reconnect_scheduled_ = false;
+        ws_.disconnect();
     }
 
     void escalate(const escalation_action action) {
@@ -1104,13 +1117,19 @@ private:
         arm_refresh_watchdog();
     }
 
+    void cancel_refresh_watchdog() {
+        ++refresh_watchdog_gen_;
+        refresh_watchdog_.cancel();
+    }
+
     void arm_refresh_watchdog() {
+        const auto gen = ++refresh_watchdog_gen_;
         refresh_watchdog_.expires_after(std::chrono::seconds{30});
-        refresh_watchdog_.async_wait([weak = this->weak_from_this()](asio::ec_t ec) {
+        refresh_watchdog_.async_wait([weak = this->weak_from_this(), gen](const asio::ec_t ec) {
             if (ec) return;
 
-            auto self = weak.lock();
-            if (!self || self->destructed_) return;
+            const auto self = weak.lock();
+            if (!self || self->destructed_ || (self->refresh_watchdog_gen_ != gen)) return;
 
             #ifdef DISCUSY_LOGGING
             self->log("No refreshed voice session arrived, rebuilding on the endpoint we have");
@@ -1123,7 +1142,7 @@ private:
 
     void begin_fresh_session(const bool reset_backoff = true) {
         stop();
-        refresh_watchdog_.cancel();
+        cancel_refresh_watchdog();
 
         escalated_ = false;
         awaiting_connect_ready_ = false;
@@ -1164,6 +1183,7 @@ private:
     }
 
     void handle_ws_open() {
+        if (destructed_ || escalated_) return;
         #ifdef DISCUSY_LOGGING
         log("Websocket open");
         #endif
@@ -1172,9 +1192,8 @@ private:
     }
 
     void handle_ws_connect_ready() {
+        if (destructed_ || escalated_ || !awaiting_connect_ready_) return;
         awaiting_connect_ready_ = false;
-
-        if (destructed_ || escalated_) return;
 
         reconnecting_ = true;
         session_live_ = false;
@@ -1290,6 +1309,7 @@ private:
     }
 
     void handle_ws_message(const std::string_view msg, bool binary) {
+        if (destructed_ || escalated_) return;
         try {
             if (binary) {
                 handle_binary_payload(msg);
@@ -1321,12 +1341,13 @@ private:
 
         if (destructed_ || escalated_) return;
 
+        const auto gen = ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
         reconnect_timeout_timer_.expires_after(std::chrono::seconds{25});
-        reconnect_timeout_timer_.async_wait([weak = this->weak_from_this()](asio::ec_t ec) {
+        reconnect_timeout_timer_.async_wait([weak = this->weak_from_this(), gen](const asio::ec_t ec) {
             if (ec) return;
-            auto self = weak.lock();
-            if (!self || self->destructed_) return;
+            const auto self = weak.lock();
+            if (!self || self->destructed_ || (self->reconnect_timer_gen_ != gen)) return;
 
             #ifdef DISCUSY_LOGGING
             self->log("Reconnect timeout expired, attempting to reconnect...");
@@ -1346,6 +1367,7 @@ private:
         if (reconnect_scheduled_) return;
 
         reconnecting_ = true;
+        ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
 
         if (++reconnect_attempts_ > MAX_RECONNECT_ATTEMPTS) {
@@ -1376,11 +1398,12 @@ private:
             #ifdef DISCUSY_LOGGING
             log("Re/connecting after: {}", delay);
             #endif
+            const auto gen = ++reconnect_timer_gen_;
             reconnect_timeout_timer_.expires_after(delay);
-            reconnect_timeout_timer_.async_wait([weak = this->weak_from_this()](asio::ec_t ec) {
+            reconnect_timeout_timer_.async_wait([weak = this->weak_from_this(), gen](const asio::ec_t ec) {
                 if (ec) return;
-                auto self = weak.lock();
-                if (!self || self->destructed_) return;
+                const auto self = weak.lock();
+                if (!self || self->destructed_ || (self->reconnect_timer_gen_ != gen)) return;
 
                 self->reconnect_internal();
             });
@@ -1491,6 +1514,7 @@ private:
                 }
 
                 ws_.resume();
+                ++reconnect_timer_gen_;
                 reconnect_timeout_timer_.cancel();
                 reconnect_scheduled_ = false;
 
@@ -1520,13 +1544,14 @@ private:
 
                 ssrc_ = ready.d.ssrc;
 
-                udp->send_ip_discovery(std::move(ready.d.ip), ready.d.port, ssrc_, [weak = this->weak_from_this(), mode, strand = strand_](std::string&& my_ip, std::uint16_t my_port) mutable {
-                    boost::asio::post(strand, [weak = std::move(weak), my_ip = std::move(my_ip), my_port, mode]() mutable {
-                        auto s = weak.lock();
+                const auto session_gen = session_generation_;
+                udp->send_ip_discovery(std::move(ready.d.ip), ready.d.port, ssrc_, [weak = this->weak_from_this(), mode, strand = strand_, session_gen](std::string&& my_ip, std::uint16_t my_port) mutable {
+                    boost::asio::post(strand, [weak = std::move(weak), my_ip = std::move(my_ip), my_port, mode, session_gen] mutable {
+                        const auto s = weak.lock();
                         if (!s) return;
 
                         auto& self = *s;
-                        if (self.destructed_) return;
+                        if (self.destructed_ || self.escalated_ || (self.session_generation_ != session_gen)) return;
 
                         if (my_ip.empty() || my_port == 0) {
                             #ifdef DISCUSY_LOGGING
@@ -1624,6 +1649,7 @@ private:
 
             case VoiceOpcode::Resumed: {
                 ws_.resume();
+                ++reconnect_timer_gen_;
                 reconnect_timeout_timer_.cancel();
                 reconnect_scheduled_ = false;
                 reconnect_backoff_time_ = std::chrono::milliseconds{0};
@@ -2213,20 +2239,28 @@ private:
     }
 
     void start_heartbeat(const std::chrono::milliseconds interval) {
+        stop_heartbeat();
         recieved_heartbeat_ack_ = true; // initial state
 
+        const auto gen = ++hb_timer_gen_;
         hb_timer_.expires_after(interval);
-        hb_timer_.async_wait([i = this, interval](this auto&& self, asio::ec_t ec) -> void {
+        hb_timer_.async_wait([weak = this->weak_from_this(), interval, gen](this auto&& self, const asio::ec_t ec) -> void {
             if (ec) return;
+            const auto s = weak.lock();
+            if (!s || s->destructed_ || (s->hb_timer_gen_ != gen)) return;
 
-            if (i->send_heartbeat()) {
-                i->hb_timer_.expires_at(i->hb_timer_.expiry() + interval);
-                i->hb_timer_.async_wait(self);
+            if (s->send_heartbeat()) {
+                const auto now = std::chrono::steady_clock::now();
+                auto next = s->hb_timer_.expiry() + interval;
+                if (next <= now) next = now + interval;
+                s->hb_timer_.expires_at(next);
+                s->hb_timer_.async_wait(std::forward<decltype(self)>(self));
             }
         });
     }
 
     void stop_heartbeat() {
+        ++hb_timer_gen_;
         hb_timer_.cancel();
     }
 
@@ -2252,10 +2286,10 @@ public:
     /// Note: incoming audio is disabled by default (`MediaSinkWants` `{"any": 0}`). Enable via `join_options::receive_audio`, `set_receive_any_audio(true)`, or `set_received_users(...)`.
     Callback<received_audio> on_audio_received{io_ctx_};
 private:
-    struct open_cb    { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
-    struct connect_cb { connection* s; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
-    struct close_cb   { connection* s; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
-    struct message_cb { connection* s; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
+    struct open_cb    { connection* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
+    struct connect_cb { connection* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
+    struct close_cb   { connection* s{nullptr}; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
+    struct message_cb { connection* s{nullptr}; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
 
     using ws_client_t = ws::websocket_client<open_cb, close_cb, message_cb, connect_cb>;
 
@@ -2504,10 +2538,15 @@ private:
     std::uint32_t ssrc_{0};
 
     ctx::io_context::strand_timer_t hb_timer_;
+    std::uint64_t hb_timer_gen_{0};
 
     ctx::io_context::strand_timer_t reconnect_timeout_timer_;
+    std::uint64_t reconnect_timer_gen_{0};
 
     ctx::io_context::strand_timer_t refresh_watchdog_;
+    std::uint64_t refresh_watchdog_gen_{0};
+
+    std::uint64_t session_generation_{0};
 
     std::chrono::milliseconds reconnect_backoff_time_{0};
 

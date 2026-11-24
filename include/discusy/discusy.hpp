@@ -1125,7 +1125,9 @@ private:
                     log("Starting shard: {}", j);
                     #endif
                     
-                    shards_.emplace_back(std::make_unique<shard>(io_ctx, j, total_shards, cfg_, state_));
+                    auto s = std::make_shared<shard>(io_ctx, j, total_shards, cfg_, state_);
+                    s->start();
+                    shards_.emplace_back(std::move(s));
 
                     if (is_last_iteration && !shards_stop_requested.load()) {
                         shards_restarting_.store(false);
@@ -1169,24 +1171,32 @@ private:
         #endif
         shards_stop_requested.store(true);
         {
-        std::scoped_lock lock{shards_mutex};
+        const std::scoped_lock lock{shards_mutex};
         total_shards_.store(0);
+        const bool io_stopped = io_ctx->stopped();
         for (auto& shard : shards_) {
-            auto strand = shard->strand_;
-            boost::asio::post(strand, [this, shard = std::move(shard)]() {
+            if (io_stopped) {
+                shard->shutdown();
+                shard.reset();
+                continue;
+            }
+
+            const auto strand = shard->strand_;
+            boost::asio::post(strand, [this, shard = std::move(shard)] mutable {
                 auto payloads = shard->extract_pending_payloads();
             
                 if (!payloads.empty()) {
-                    std::scoped_lock q_lock{this->pending_shard_operations_mtx_};
+                    const std::scoped_lock q_lock{this->pending_shard_operations_mtx_};
                     for (auto& payload : payloads) {
                         this->pending_shard_operations_queue_.emplace_back(
-                            [this, p = std::move(payload)]() mutable {
+                            [this, p = std::move(payload)] mutable {
                                 this->route_evacuated_payload(std::move(p));
                             }
                         );
                     }
                 }
-                // shard destructor runs on its own strand
+                shard->shutdown();
+                shard.reset();
             });
         }
         shards_.clear();
@@ -1349,7 +1359,7 @@ private:
     std::atomic_bool shards_stop_requested{false};
     std::atomic_bool shards_restarting_{false};
     std::atomic<std::uint32_t> total_shards_{0};
-    std::vector<std::unique_ptr<shard>> shards_;
+    std::vector<std::shared_ptr<shard>> shards_;
 
     // always acquire shards_mutex before this
     std::mutex pending_shard_operations_mtx_;

@@ -48,7 +48,7 @@ namespace gateway_protocol = json;
 #endif
 
 // Don't construct this class yourself, make a discusy::bot instead
-class shard {
+class shard : public std::enable_shared_from_this<shard> {
 public:
     shard(const shard& other) = delete;
     shard& operator=(const shard& other) = delete;
@@ -69,10 +69,13 @@ public:
     {
         setup_gateway_callbacks();
         ws_.pause();
+    }
 
-        boost::asio::post(strand_, [this]() {
-            reconnect(false); // gives us the logic in case of failure to open
-            // already running via the pool
+    void start() {
+        boost::asio::post(strand_, [weak = this->weak_from_this()] {
+            if (const auto self = weak.lock()) {
+                if (!self->destructed_) self->reconnect(false); // gives us the logic in case of failure to open
+            }
         });
     }
 
@@ -80,8 +83,10 @@ public:
         #ifdef DISCUSY_LOGGING
         log("Queing websocket send: {}", text);
         #endif
-        boost::asio::dispatch(strand_, [this, text = std::move(text)]() mutable {
-            ws_.send_ratelimited(std::move(text), is_binary_payload);
+        boost::asio::dispatch(strand_, [weak = this->weak_from_this(), text = std::move(text)] mutable {
+            if (const auto self = weak.lock()) {
+                if (!self->destructed_) self->ws_.send_ratelimited(std::move(text), is_binary_payload);
+            }
         });
     }
 
@@ -119,8 +124,16 @@ public:
     }
 
     // must be called from its own strand, which is the websockets strand
-    ~shard() {
+    void shutdown() {
+        if (destructed_) return;
+        destructed_ = true;
+
         stop_heartbeat();
+        ++reconnect_timer_gen_;
+        reconnect_timeout_timer_.cancel();
+        awaiting_connect_ready_ = false;
+        reconnect_scheduled_ = false;
+
         ws_.stop();
         ws_.pause();
 
@@ -129,8 +142,16 @@ public:
         ws_.on_message(message_cb{nullptr});
         ws_.on_open(open_cb{nullptr});
 
-        ws_.close();
         ws_.clear();
+    }
+
+    // must be called from its own strand, which is the websockets strand
+    ~shard() noexcept {
+        try {
+            shutdown();
+        } catch (...) {
+            destructed_ = true;
+        }
     }
 
 private:
@@ -143,21 +164,24 @@ private:
 
     void stop() {
         reconnecting_ = true;
+        awaiting_connect_ready_ = false;
         stop_heartbeat();
-        ws_.pause();
+        ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
         reconnect_scheduled_ = false;
+        ws_.disconnect();
     }
 
     void handle_ws_open() {
+        if (destructed_) return;
         #ifdef DISCUSY_LOGGING
         log("Websocket open");
         #endif
         reconnecting_ = false;
-        reconnect_backoff_time_ = std::chrono::milliseconds{0};
     }
 
     void handle_ws_connect_ready() {
+        if (destructed_ || !awaiting_connect_ready_) return;
         awaiting_connect_ready_ = false;
 
         reconnecting_ = true;
@@ -186,11 +210,22 @@ private:
             #ifdef DISCUSY_LOGGING
             log("Failed to start a connection to {}, backing off", connect_url);
             #endif
-            reconnect(try_resume_);
+            if (try_resume_) {
+                ++consecutive_resume_failures_;
+                if (consecutive_resume_failures_ >= 3) {
+                    try_resume_ = false;
+                    consecutive_resume_failures_ = 0;
+                    session_id_.clear();
+                    resume_gateway_url_.clear();
+                    seq_ = -1;
+                }
+            }
+            reconnect(try_resume_, true);
         }
     }
 
     void handle_ws_close(const std::uint16_t code) {
+        if (destructed_) return;
         #ifdef DISCUSY_LOGGING
         log("Websocket close: {}", code);
         #endif
@@ -208,22 +243,19 @@ private:
         bool should_resume = true;
 
         switch (static_cast<CloseCode>(code)) {
-            case CloseCode::InvalidIntents: {
-                #ifdef DISCUSY_LOGGING
-                log("Invalid intents sent!");
-                #endif
-                // no break on purpose
-            }
-            case CloseCode::DisallowedIntents: {
-                #ifdef DISCUSY_LOGGING
-                log("Disallowed intents sent!");
-                #endif
-                // no break on purpose
-            }
+            case CloseCode::InvalidIntents:
+            case CloseCode::DisallowedIntents:
             case CloseCode::AuthenticationFailed:
             case CloseCode::InvalidShard:
             case CloseCode::ShardingRequired:
             case CloseCode::InvalidApiVersion:
+                #ifdef DISCUSY_LOGGING
+                if (static_cast<CloseCode>(code) == CloseCode::InvalidIntents) {
+                    log("Invalid intents sent!");
+                } else if (static_cast<CloseCode>(code) == CloseCode::DisallowedIntents) {
+                    log("Disallowed intents sent!");
+                }
+                #endif
                 fatal = true; 
                 break;
             case CloseCode::NotAuthenticated:
@@ -243,9 +275,9 @@ private:
             #endif
             stop();
             if (static_cast<CloseCode>(code) == CloseCode::ShardingRequired) {
-                state_.sharding_required->request_stop();
+                if (state_.sharding_required) state_.sharding_required->request_stop();
             } else {
-                state_.fatal_error->request_stop();
+                if (state_.fatal_error) state_.fatal_error->request_stop();
             }
             return;
         }
@@ -279,21 +311,30 @@ private:
     }
 
     void handle_ws_message(const std::string_view msg, bool) {
+        if (destructed_) return;
         try {
-            if (inflater_.push(msg, decompressed_buffer_)) {
-                handle_gateway_payload(decompressed_buffer_);
+            if (!inflater_.push(msg, decompressed_buffer_)) {
+                #ifdef DISCUSY_LOGGING
+                log("Zstd decompression failed, reconnecting");
+                #endif
+                stop();
+                reconnect(true, true);
+                return;
             }
+            handle_gateway_payload(decompressed_buffer_);
             // if (decompressed_buffer_.capacity() > 1UZ * 1024 * 1024) {
             //     decompressed_buffer_.shrink_to_fit();
             // }
         }
-        catch ([[maybe_unused]]  std::bad_alloc& e) {
+        catch ([[maybe_unused]] std::bad_alloc& e) {
             inflater_.reset();
             decompressed_buffer_.clear();
             decompressed_buffer_.shrink_to_fit();
             #ifdef DISCUSY_LOGGING
             log("on_message bad_alloc: {}", e.what());
             #endif
+            stop();
+            reconnect(true, true);
         }
         #ifdef DISCUSY_LOGGING
         catch (const std::exception& e) {
@@ -303,6 +344,8 @@ private:
         catch (...) {
             #ifdef DISCUSY_LOGGING
             log("on_message unknown exception");
+            #else
+            (void)0;
             #endif
         }
     }
@@ -315,20 +358,25 @@ private:
     }
 
     void reconnect_internal() {
+        if (destructed_) return;
         reconnect_scheduled_ = false;
 
+        const auto gen = ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
         reconnect_timeout_timer_.expires_after(std::chrono::seconds{25});
-        reconnect_timeout_timer_.async_wait([this](asio::ec_t ec) {
+        reconnect_timeout_timer_.async_wait([weak = this->weak_from_this(), gen](const asio::ec_t ec) {
             if (ec) return;
+            const auto self = weak.lock();
+            if (!self || self->destructed_ || (self->reconnect_timer_gen_ != gen)) return;
+
             #ifdef DISCUSY_LOGGING
-            log("Reconnect timeout expired, attempting to reconnect...");
+            self->log("Reconnect timeout expired, attempting to reconnect...");
             #endif
 
-            stop();
+            self->stop();
 
             // maybe this should eventually fail and stop the bot? add compile time option for it?
-            reconnect(try_resume_, true);
+            self->reconnect(self->try_resume_, true);
         });
 
         awaiting_connect_ready_ = true;
@@ -336,6 +384,7 @@ private:
     }
 
     void reconnect(const bool try_resume, const bool force = false) {
+        if (destructed_) return;
         if (reconnect_scheduled_ && !force) {
             #ifdef DISCUSY_LOGGING
             log("Reconnect already scheduled, not stacking another");
@@ -344,6 +393,7 @@ private:
         }
 
         reconnecting_ = true;
+        ++reconnect_timer_gen_;
         reconnect_timeout_timer_.cancel();
 
         const auto delay = reconnect_backoff_time_;
@@ -367,9 +417,13 @@ private:
             #ifdef DISCUSY_LOGGING
             log("Re/connecting after: {}", delay);
             #endif
+            const auto gen = ++reconnect_timer_gen_;
             reconnect_timeout_timer_.expires_after(delay);
-            reconnect_timeout_timer_.async_wait([this](asio::ec_t ec) {
-                if (!ec) reconnect_internal();
+            reconnect_timeout_timer_.async_wait([weak = this->weak_from_this(), gen](const asio::ec_t ec) {
+                if (ec) return;
+                const auto self = weak.lock();
+                if (!self || self->destructed_ || (self->reconnect_timer_gen_ != gen)) return;
+                self->reconnect_internal();
             });
         }
     }
@@ -406,6 +460,7 @@ private:
                 if (session_id_.empty()) { send_identify(); } 
                 else { send_resume(); }
                 
+                ++reconnect_timer_gen_;
                 reconnect_timeout_timer_.cancel();
                 reconnect_scheduled_ = false;
                 break;
@@ -426,7 +481,7 @@ private:
                 #ifdef DISCUSY_LOGGING
                 log("Recieved heartbeat from discord");
                 #endif
-                (void)send_heartbeat();
+                (void)send_heartbeat(false);
                 break;
             }
 
@@ -501,17 +556,17 @@ private:
 
     void send_identify() {
         send_event::identify identify{};
-        send_event::identify_payload payload{identify};
+        const send_event::identify_payload payload{identify};
         identify.token = cfg_.token;
         identify.intents = cfg_.intents;
         identify.shard = {shard_id_, total_shards_}; // maybe need to consider how new shards and stuff works?
-        if (auto p = state_.presence.load(std::memory_order_acquire)) {
+        if (const auto p = state_.presence.load(std::memory_order_acquire)) {
             identify.presence.emplace(*p);
         }
 
         std::string out;
         if (gateway_protocol::write(payload, out, json_logger)) {
-            state_.fatal_error->request_stop(); // maybe too extreme?
+            if (state_.fatal_error) state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
 
@@ -523,14 +578,14 @@ private:
 
     void send_resume() {
         send_event::resume resume{};
-        send_event::resume_payload payload{resume};
+        const send_event::resume_payload payload{resume};
         resume.token = cfg_.token;
         resume.session_id = session_id_;
         resume.seq = seq_;
 
         std::string out;
         if (gateway_protocol::write(payload, out, json_logger)) {
-            state_.fatal_error->request_stop(); // maybe too extreme?
+            if (state_.fatal_error) state_.fatal_error->request_stop(); // maybe too extreme?
             return;
         }
 
@@ -540,15 +595,15 @@ private:
         ws_.send(std::move(out), is_binary_payload);
     }
 
-    [[nodiscard]] bool send_heartbeat() {
-        if (!recieved_heartbeat_ack_) {
+    [[nodiscard]] bool send_heartbeat(const bool check_ack = true) {
+        if (check_ack && !recieved_heartbeat_ack_) {
             stop();
             reconnect(true, true);
             return false;
         }
 
         send_event::heartbeat hb{};
-        send_event::heartbeat_payload payload{hb};
+        const send_event::heartbeat_payload payload{hb};
         const auto s = seq_;
         if (s >= 0) hb.emplace(s);
 
@@ -559,51 +614,68 @@ private:
             return o;
         }();
         if (gateway_protocol::write<hb_opts>(payload, out, json_logger)) {
-            state_.fatal_error->request_stop(); // maybe too extreme? but this will literally never happen
+            if (state_.fatal_error) state_.fatal_error->request_stop(); // maybe too extreme? but this will literally never happen
             return false;
         }
 
         #ifdef DISCUSY_LOGGING
         log("Sent heartbeat: {}", out);
         #endif
-        recieved_heartbeat_ack_ = false;
+        if (check_ack) recieved_heartbeat_ack_ = false;
         ws_.send(std::move(out), is_binary_payload);
         return true;
     }
 
     void start_heartbeat(const std::chrono::milliseconds interval) {
+        stop_heartbeat();
         recieved_heartbeat_ack_ = true; // initial state
 
+        const auto gen = ++hb_timer_gen_;
         hb_timer_.expires_after(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<double, std::milli>(interval) * rnd::jitter()));
-        hb_timer_.async_wait([i = this, interval](this auto&& self, asio::ec_t ec) -> void {
+        hb_timer_.async_wait([weak = this->weak_from_this(), interval, gen](this auto&& self, const asio::ec_t ec) -> void {
             if (ec) return;
+            const auto s = weak.lock();
+            if (!s || s->destructed_ || (s->hb_timer_gen_ != gen)) return;
 
-            if (i->send_heartbeat()) {
-                i->hb_timer_.expires_at(i->hb_timer_.expiry() + interval);
-                i->hb_timer_.async_wait(self);
+            if (s->send_heartbeat()) {
+                const auto now = std::chrono::steady_clock::now();
+                auto next = s->hb_timer_.expiry() + interval;
+                if (next <= now) next = now + interval;
+                s->hb_timer_.expires_at(next);
+                s->hb_timer_.async_wait(std::forward<decltype(self)>(self));
             }
         });
     }
 
     void stop_heartbeat() {
+        ++hb_timer_gen_;
         hb_timer_.cancel();
     }
 
     void handle_ready(const recieve_event::ready& d) {
         {
-        std::scoped_lock lock{state_.details_mtx};
+        const std::scoped_lock lock{state_.details_mtx};
         state_.me = d.user;
         }
 
-        std::call_once(*state_.ready_flag, [this, &d]() {
-            std::scoped_lock lock{this->state_.details_mtx};
-            this->state_.application_id = d.application.id.str();
-        });
+        if (state_.ready_flag) {
+            std::call_once(*state_.ready_flag, [this, &d] {
+                const std::scoped_lock lock{this->state_.details_mtx};
+                this->state_.application_id = d.application.id.str();
+            });
+        }
 
         const bool replaced_session = fired_shard_ready_;
 
         session_id_ = d.session_id;
-        resume_gateway_url_ = ulp::str::concat_strings(d.resume_gateway_url, "/", urls::GATEWAY_QUERY_PARAMS);
+        if (!d.resume_gateway_url.empty()) {
+            const std::string_view base = d.resume_gateway_url.ends_with('/')
+                ? std::string_view{d.resume_gateway_url}.substr(0, d.resume_gateway_url.size() - 1)
+                : std::string_view{d.resume_gateway_url};
+            resume_gateway_url_ = ulp::str::concat_strings(base, "/", urls::GATEWAY_QUERY_PARAMS);
+        } else {
+            resume_gateway_url_.clear();
+        }
 
         reconnect_backoff_time_ = std::chrono::milliseconds{0};
         consecutive_resume_failures_ = 0;
@@ -623,7 +695,7 @@ private:
     void post_handle_ready() {
         if (!fired_shard_ready_) {
             fired_shard_ready_ = true;
-            state_.shards_ready_counter->arrive();
+            if (state_.shards_ready_counter) state_.shards_ready_counter->arrive();
         }
     }
 
@@ -649,10 +721,10 @@ private:
 public:
     const ctx::io_context::strand_t strand_;
 private:
-    struct open_cb    { shard* s; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
-    struct connect_cb { shard* s; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
-    struct close_cb   { shard* s; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
-    struct message_cb { shard* s; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
+    struct open_cb    { shard* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
+    struct connect_cb { shard* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
+    struct close_cb   { shard* s{nullptr}; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
+    struct message_cb { shard* s{nullptr}; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
 
     using ws_client_t = ws::websocket_client<open_cb, close_cb, message_cb, connect_cb>;
 
@@ -668,13 +740,16 @@ private:
     std::int64_t seq_{-1};
 
     ctx::io_context::strand_timer_t hb_timer_;
+    std::uint64_t hb_timer_gen_{0};
     std::string session_id_;
     std::string resume_gateway_url_;
 
     ctx::io_context::strand_timer_t reconnect_timeout_timer_;
+    std::uint64_t reconnect_timer_gen_{0};
 
     std::chrono::milliseconds reconnect_backoff_time_{0};
 
+    bool destructed_{false};
     bool reconnecting_{false};
     bool recieved_heartbeat_ack_{false};
     bool fired_shard_ready_{false};

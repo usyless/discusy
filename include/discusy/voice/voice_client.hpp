@@ -739,23 +739,34 @@ public:
         return conn;
     }
 
-    ~client() {
-        if (on_voice_state_update_ != 0UZ) bot_.gateway_callbacks.on_voice_state_update.unregister(on_voice_state_update_);
-        if (on_voice_server_update_ != 0UZ) bot_.gateway_callbacks.on_voice_server_update.unregister(on_voice_server_update_);
-        if (on_channel_update_ != 0UZ) bot_.gateway_callbacks.on_channel_update.unregister(on_channel_update_);
-        if (on_shard_session_invalidated_ != 0UZ) bot_.state_.shard_session_invalidated.unregister(on_shard_session_invalidated_);
+    ~client() noexcept {
+        try {
+            if (on_voice_state_update_ != 0UZ) bot_.gateway_callbacks.on_voice_state_update.unregister(on_voice_state_update_);
+            if (on_voice_server_update_ != 0UZ) bot_.gateway_callbacks.on_voice_server_update.unregister(on_voice_server_update_);
+            if (on_channel_update_ != 0UZ) bot_.gateway_callbacks.on_channel_update.unregister(on_channel_update_);
+            if (on_shard_session_invalidated_ != 0UZ) bot_.state_.shard_session_invalidated.unregister(on_shard_session_invalidated_);
 
-        std::vector<connection_ref> dying;
-        dying.reserve(connections_.size());
-        connections_.erase_if([&](auto& entry) {
-            if (entry.second.conn) {
-                dying.emplace_back(std::move(entry.second.conn));
+            std::vector<connection_ref> dying;
+            dying.reserve(connections_.size());
+            connections_.erase_if([&](auto& entry) {
+                if (entry.second.conn) {
+                    dying.emplace_back(std::move(entry.second.conn));
+                }
+                return true;
+            });
+
+            const bool io_stopped = bot_.io_ctx->stopped();
+            for (auto& conn : dying) {
+                if (io_stopped) {
+                    conn->destruct();
+                    conn.reset();
+                } else {
+                    destroy_connection(std::move(conn));
+                }
             }
-            return true;
-        });
-
-        for (auto& conn : dying) {
-            destroy_connection(std::move(conn));
+        } catch (...) {
+            // destructors must not throw
+            on_voice_state_update_ = 0UZ;
         }
     }
 
