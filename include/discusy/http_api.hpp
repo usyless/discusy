@@ -72,14 +72,12 @@ requires ( glz::has_reflect<T> )
         
         if constexpr (is_iterable_v<ActualType>) {
             for (const auto& item : val) {
-                q += name;
-                q.push_back('=');
+                ulp::str::append_to(q, name, '=');
                 append_value(q, item);
                 q.push_back('&');
             }
         } else {
-            q += name;
-            q.push_back('=');
+            ulp::str::append_to(q, name, '=');
             append_value(q, val);
             q.push_back('&');
         }
@@ -170,7 +168,7 @@ private:
             discusy::api::error err{};
             std::string err_msg;
             if (discusy::json::parse_json<discusy::json::glz_opts_non_minified>(err, resp.body)) {
-                err_msg = resp.body.empty() ? ("HTTP error " + discusy::number_str{resp.status_code}.str()) : "JSON Parsing error while parsing error";
+                err_msg = resp.body.empty() ? ulp::str::concat_utf8("HTTP error ", ulp::str::to_fixed_str(resp.status_code)) : "JSON Parsing error while parsing error";
             } else {
                 err_msg = std::move(err.message);
             }

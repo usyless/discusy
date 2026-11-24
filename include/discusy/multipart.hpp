@@ -4,6 +4,8 @@
 #include <string_view>
 #include <span>
 
+#include <usylibpp/strings.hpp>
+
 namespace discusy::multipart {
 
 inline constexpr auto BOUNDARY_HEADER = "multipart/form-data; boundary=---------DiscusyBoundary1234-5"; // two less --
@@ -11,20 +13,17 @@ inline constexpr auto BOUNDARY = "-----------DiscusyBoundary1234-5";
 
 constexpr void add_multipart_part(std::string& body, const std::string_view name, const std::string_view content, 
                     const std::string_view filename = "", const std::string_view type = "") {
-    body.append(BOUNDARY).append("\r\nContent-Disposition: form-data; name=\""); // extra two --
-    body.append(name).append("\"");
+    ulp::str::append_to(body, BOUNDARY, "\r\nContent-Disposition: form-data; name=\"", name, '"'); // extra two --
     
     if (!filename.empty()) {
-        body.append("; filename=\"").append(filename).append("\"");
+        ulp::str::append_to(body, "; filename=\"", filename, '"');
     }
-    
-    body.append("\r\n");
     
     if (!type.empty()) {
-        body.append("Content-Type: ").append(type).append("\r\n");
+        ulp::str::append_to(body, "\r\nContent-Type: ", type);
     }
     
-    body.append("\r\n").append(content).append("\r\n");
+    ulp::str::append_to(body, "\r\n\r\n", content, "\r\n");
 }
 
 template <typename ElementType, std::size_t Extent>
@@ -37,7 +36,7 @@ constexpr void add_multipart_part(std::string& body, const std::string_view name
 }
 
 constexpr void finish_multipart(std::string& body) {
-    body.append(BOUNDARY).append("--\r\n");
+    ulp::str::append_to(body, BOUNDARY, "--\r\n");
 }
 
 }

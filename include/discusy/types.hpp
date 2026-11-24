@@ -136,11 +136,11 @@ struct focused_input {
 
 inline constexpr std::uint64_t DISCORD_EPOCH = 1420070400000;
 
-struct snowflake_str;
-struct snowflake_mention_str;
 template <std::size_t N>
 struct basic_number_str;
 using number_str = basic_number_str<32>;
+using snowflake_str = basic_number_str<24>;
+using snowflake_mention_str = ulp::str::FixedString<32>;
 
 struct snowflake {
     std::uint64_t value{};
@@ -221,162 +221,12 @@ struct snowflake {
     };
 };
  
-struct snowflake_str {
-    std::array<char, 24> buf; 
-    std::uint8_t len{0};
-
-    constexpr snowflake_str() noexcept : buf{} {}
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    constexpr explicit snowflake_str(std::uint64_t val) noexcept {
-        if consteval {
-            buf = {};
-            if (val == 0) {
-                buf[0] = '0';
-                buf[1] = '\0';
-                len = 1;
-                return;
-            }
-            std::array<char, 24> temp{};
-            std::size_t i = 0;
-            while (val > 0) {
-                temp[i++] = static_cast<char>('0' + (val % 10));
-                val /= 10;
-            }
-            for (std::size_t j = 0; j < i; ++j) {
-                buf[j] = temp[i - 1 - j];
-            }
-            buf[i] = '\0';
-            len = static_cast<std::uint8_t>(i);
-        } else {
-            auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
-            *ptr = '\0';
-            len = static_cast<std::uint8_t>(ptr - buf.data());
-        }
-    }
-
-    constexpr explicit snowflake_str(snowflake s) noexcept : snowflake_str(s.value) {}
-
-    [[nodiscard]] constexpr std::string_view view() const noexcept {
-        return std::string_view{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
-        return view();
-    }
-
-    [[nodiscard]] std::string str() const {
-        return std::string{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr const char* c_str() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr const char* data() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr std::size_t length() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr bool empty() const noexcept {
-        return len == 0;
-    }
-
-    constexpr bool operator==(const snowflake_str& other) const noexcept {
-        return view() == other.view();
-    }
-    constexpr auto operator<=>(const snowflake_str& other) const noexcept {
-        return view() <=> other.view();
-    }
-
-    constexpr bool operator==(std::string_view sv) const noexcept {
-        return view() == sv;
-    }
-    constexpr auto operator<=>(std::string_view sv) const noexcept {
-        return view() <=> sv;
-    }
-
-    [[nodiscard]] friend std::size_t hash_value(const snowflake_str& s) noexcept {
-        return std::hash<std::string_view>{}(s.view());
-    }
-
-    struct glaze {
-        using T = snowflake_str;
-        using mimic = std::string_view;
-        static constexpr auto value = &T::view;
-    };
-};
-
-struct snowflake_mention_str {
-    std::array<char, 32> buf{};
-    std::uint8_t len{0};
-
-    constexpr snowflake_mention_str() noexcept = default;
-
-    [[nodiscard]] constexpr std::string_view view() const noexcept {
-        return std::string_view{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
-        return view();
-    }
-
-    [[nodiscard]] std::string str() const {
-        return std::string{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr const char* c_str() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr const char* data() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr std::size_t length() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr bool empty() const noexcept {
-        return len == 0;
-    }
-
-    constexpr bool operator==(const snowflake_mention_str& other) const noexcept {
-        return view() == other.view();
-    }
-    constexpr auto operator<=>(const snowflake_mention_str& other) const noexcept {
-        return view() <=> other.view();
-    }
-
-    constexpr bool operator==(std::string_view sv) const noexcept {
-        return view() == sv;
-    }
-    constexpr auto operator<=>(std::string_view sv) const noexcept {
-        return view() <=> sv;
-    }
-
-    struct glaze {
-        using T = snowflake_mention_str;
-        using mimic = std::string_view;
-        static constexpr auto value = &T::view;
-    };
-};
-
 template <std::size_t N>
-struct basic_number_str {
-    std::array<char, N> buf{};
-    std::uint8_t len{0};
+struct basic_number_str : ulp::str::FixedString<N> {
+    using base_type = ulp::str::FixedString<N>;
+    using base_type::buf;
+    using base_type::len;
+    using base_type::view;
 
     constexpr basic_number_str() noexcept = default;
 
@@ -388,7 +238,6 @@ struct basic_number_str {
             *this = basic_number_str(static_cast<std::underlying_type_t<Decayed>>(val));
         } else if constexpr (std::is_integral_v<Decayed>) {
             if consteval {
-                buf = {};
                 if (val == 0) {
                     buf[0] = '0';
                     buf[1] = '\0';
@@ -418,52 +267,20 @@ struct basic_number_str {
                 }
                 out_idx += i;
                 buf[out_idx] = '\0';
-                len = static_cast<std::uint8_t>(out_idx);
+                len = out_idx;
             } else {
                 auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
                 *ptr = '\0';
-                len = static_cast<std::uint8_t>(ptr - buf.data());
+                len = static_cast<std::size_t>(ptr - buf.data());
             }
         } else {
             auto [ptr, _] = std::to_chars(buf.data(), buf.data() + buf.size() - 1, val);
             *ptr = '\0';
-            len = static_cast<std::uint8_t>(ptr - buf.data());
+            len = static_cast<std::size_t>(ptr - buf.data());
         }
     }
 
     constexpr explicit basic_number_str(snowflake s) noexcept : basic_number_str(s.value) {}
-
-    [[nodiscard]] constexpr std::string_view view() const noexcept {
-        return std::string_view{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
-        return view();
-    }
-
-    [[nodiscard]] std::string str() const {
-        return std::string{buf.data(), len};
-    }
-
-    [[nodiscard]] constexpr const char* c_str() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr const char* data() const noexcept {
-        return buf.data();
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr std::size_t length() const noexcept {
-        return len;
-    }
-
-    [[nodiscard]] constexpr bool empty() const noexcept {
-        return len == 0;
-    }
 
     constexpr bool operator==(const basic_number_str& other) const noexcept {
         return view() == other.view();
@@ -493,36 +310,6 @@ struct basic_number_str {
 template <typename U>
 basic_number_str(U) -> basic_number_str<32>;
 
-namespace detail {
-    constexpr void format_mention(char* buf, std::uint8_t& len, std::string_view prefix, std::uint64_t val) noexcept {
-        std::size_t offset = 0;
-        for (char c : prefix) {
-            buf[offset++] = c;
-        }
-        if consteval {
-            if (val == 0) {
-                buf[offset++] = '0';
-            } else {
-                std::array<char, 24> temp{}; 
-                std::size_t i = 0;
-                while (val > 0) {
-                    temp[i++] = static_cast<char>('0' + (val % 10));
-                    val /= 10;
-                }
-                for (std::size_t j = 0; j < i; ++j) {
-                    buf[offset++] = temp[i - 1 - j];
-                }
-            }
-        } else {
-            auto [ptr, _] = std::to_chars(buf + offset, buf + 30, val);
-            offset = static_cast<std::size_t>(ptr - buf);
-        }
-        buf[offset++] = '>';
-        buf[offset] = '\0';
-        len = static_cast<std::uint8_t>(offset);
-    }
-}
-
 constexpr snowflake_str snowflake::str() const noexcept {
     return snowflake_str{value};
 }
@@ -533,25 +320,25 @@ constexpr snowflake_str snowflake::stack_str() const noexcept {
 
 constexpr snowflake_mention_str snowflake::mention_user() const noexcept {
     snowflake_mention_str res{};
-    detail::format_mention(res.buf.data(), res.len, "<@", value);
+    res.append("<@", stack_str(), '>');
     return res;
 }
 
 constexpr snowflake_mention_str snowflake::mention_channel() const noexcept {
     snowflake_mention_str res{};
-    detail::format_mention(res.buf.data(), res.len, "<#", value);
+    res.append("<#", stack_str(), '>');
     return res;
 }
 
 constexpr snowflake_mention_str snowflake::mention_role() const noexcept {
     snowflake_mention_str res{};
-    detail::format_mention(res.buf.data(), res.len, "<@&", value);
+    res.append("<@&", stack_str(), '>');
     return res;
 }
 
 constexpr snowflake_mention_str snowflake::mention_game() const noexcept {
     snowflake_mention_str res{};
-    detail::format_mention(res.buf.data(), res.len, "<@$", value);
+    res.append("<@$", stack_str(), '>');
     return res;
 }
 
@@ -1130,25 +917,19 @@ private:
 
         std::string out{cdn::BASE};
         for (std::size_t i = 0; i < traits::id_count; ++i) {
-            out += traits::segments[i];
-            out += ids[i].stack_str();
+            ulp::str::append_to(out, traits::segments[i], ids[i].stack_str());
         }
-        out += traits::segments[traits::id_count];
-        out += hash;
-        out += cdn::extension(fmt);
+        ulp::str::append_to(out, traits::segments[traits::id_count], hash, cdn::extension(fmt));
 
         bool first = true;
         const auto add = [&](const std::string_view key, const std::string_view val) {
-            out += first ? '?' : '&';
+            ulp::str::append_to(out, first ? '?' : '&', key, '=', val);
             first = false;
-            out += key;
-            out += '=';
-            out += val;
         };
 
         if constexpr (traits::honours_size) {
             if (opts.size && cdn::valid_size(*opts.size)) {
-                add("size", number_str{*opts.size});
+                add("size", ulp::str::to_fixed_str(*opts.size));
             }
         }
         if (opts.animated && fmt == image_format::webp && is_animated()) {
@@ -1180,58 +961,35 @@ namespace cdn {
 namespace detail {
     inline void append_size(std::string& out, const opt<std::uint32_t> size) {
         if (size && valid_size(*size)) {
-            out += "?size=";
-            out += number_str{*size}.view();
+            ulp::str::append_to(out, "?size=", ulp::str::to_fixed_str(*size));
         }
     }
 }
 
 [[nodiscard]] inline std::string custom_emoji(const snowflake emoji_id, const options opts = {}) {
-    std::string out{BASE};
-    out += "emojis/";
-    out += emoji_id.stack_str();
-    out += extension(opts.format.value_or(image_format::webp));
+    auto out = ulp::str::concat_utf8(BASE, "emojis/", emoji_id.stack_str(), extension(opts.format.value_or(image_format::webp)));
     detail::append_size(out, opts.size);
     return out;
 }
 
 [[nodiscard]] inline std::string sticker(const snowflake sticker_id, const image_format format = image_format::png) {
-    std::string out{format == image_format::gif ? MEDIA_BASE : BASE};
-    out += "stickers/";
-    out += sticker_id.stack_str();
-    out += extension(format);
-    return out;
+    return ulp::str::concat_utf8(format == image_format::gif ? MEDIA_BASE : BASE, "stickers/", sticker_id.stack_str(), extension(format));
 }
 
 [[nodiscard]] inline std::string sticker_pack_banner(const snowflake banner_asset_id, const options opts = {}) {
-    std::string out{BASE};
-    out += "app-assets/";
-    out += snowflake{STICKER_PACK_BANNER_APPLICATION_ID}.stack_str();
-    out += "/store/";
-    out += banner_asset_id.stack_str();
-    out += extension(opts.format.value_or(image_format::png));
+    auto out = ulp::str::concat_utf8(BASE, "app-assets/", snowflake{STICKER_PACK_BANNER_APPLICATION_ID}.stack_str(), "/store/", banner_asset_id.stack_str(), extension(opts.format.value_or(image_format::png)));
     detail::append_size(out, opts.size);
     return out;
 }
 
 [[nodiscard]] inline std::string application_asset(const snowflake application_id, const snowflake asset_id, const options opts = {}) {
-    std::string out{BASE};
-    out += "app-assets/";
-    out += application_id.stack_str();
-    out += '/';
-    out += asset_id.stack_str();
-    out += extension(opts.format.value_or(image_format::png));
+    auto out = ulp::str::concat_utf8(BASE, "app-assets/", application_id.stack_str(), '/', asset_id.stack_str(), extension(opts.format.value_or(image_format::png)));
     detail::append_size(out, opts.size);
     return out;
 }
 
 [[nodiscard]] inline std::string store_page_asset(const snowflake application_id, const snowflake asset_id, const options opts = {}) {
-    std::string out{BASE};
-    out += "app-assets/";
-    out += application_id.stack_str();
-    out += "/store/";
-    out += asset_id.stack_str();
-    out += extension(opts.format.value_or(image_format::png));
+    auto out = ulp::str::concat_utf8(BASE, "app-assets/", application_id.stack_str(), "/store/", asset_id.stack_str(), extension(opts.format.value_or(image_format::png)));
     detail::append_size(out, opts.size);
     return out;
 }
@@ -1242,32 +1000,17 @@ namespace detail {
     const std::string_view icon_hash,
     const options opts = {}
 ) {
-    std::string out{BASE};
-    out += "app-assets/";
-    out += application_id.stack_str();
-    out += "/achievements/";
-    out += achievement_id.stack_str();
-    out += "/icons/";
-    out += icon_hash;
-    out += extension(opts.format.value_or(image_format::png));
+    auto out = ulp::str::concat_utf8(BASE, "app-assets/", application_id.stack_str(), "/achievements/", achievement_id.stack_str(), "/icons/", icon_hash, extension(opts.format.value_or(image_format::png)));
     detail::append_size(out, opts.size);
     return out;
 }
 
 [[nodiscard]] inline std::string default_user_avatar(const snowflake user_id) {
-    std::string out{BASE};
-    out += "embed/avatars/";
-    out += static_cast<char>('0' + ((user_id.value >> 22) % 6));
-    out += ".png";
-    return out;
+    return ulp::str::concat_utf8(BASE, "embed/avatars/", static_cast<char>('0' + ((user_id.value >> 22) % 6)), ".png");
 }
 
 [[nodiscard]] inline std::string default_user_avatar_legacy(const std::uint16_t discriminator) {
-    std::string out{BASE};
-    out += "embed/avatars/";
-    out += static_cast<char>('0' + (discriminator % 5));
-    out += ".png";
-    return out;
+    return ulp::str::concat_utf8(BASE, "embed/avatars/", static_cast<char>('0' + (discriminator % 5)), ".png");
 }
 
 }
@@ -1456,18 +1199,25 @@ struct std::formatter<discusy::snowflake> : std::formatter<decltype(discusy::sno
     }
 };
 
-template <>
-struct std::hash<discusy::snowflake_str> {
-    [[nodiscard]] std::size_t operator()(const discusy::snowflake_str& s) const noexcept {
+template <std::size_t N>
+struct std::hash<ulp::str::FixedBasicString<char, N>> {
+    [[nodiscard]] std::size_t operator()(const ulp::str::FixedBasicString<char, N>& s) const noexcept {
         return std::hash<std::string_view>{}(s.view());
     }
 };
 
-template <>
-struct std::formatter<discusy::snowflake_str> : std::formatter<std::string_view> {
-    auto format(const discusy::snowflake_str& s, std::format_context& ctx) const {
+template <std::size_t N>
+struct std::formatter<ulp::str::FixedBasicString<char, N>> : std::formatter<std::string_view> {
+    auto format(const ulp::str::FixedBasicString<char, N>& s, std::format_context& ctx) const {
         return std::formatter<std::string_view>::format(s.view(), ctx);
     }
+};
+
+template <std::size_t N>
+struct glz::meta<ulp::str::FixedBasicString<char, N>> {
+    using T = ulp::str::FixedBasicString<char, N>;
+    using mimic = std::string_view;
+    static constexpr auto value = &T::view;
 };
 
 template <std::size_t N>
