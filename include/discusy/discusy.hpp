@@ -772,19 +772,11 @@ public:
                     boost::asio::executor_work_guard<executor_type> work;
                     boost::asio::basic_stream_file<ctx::io_context::strand_t> file;
                     std::string data;
-                    std::atomic<bool> completed{false};
 
                     boost::asio::cancellation_signal child_signal;
 
                     state_t(handler_t h, const executor_type& e, const ctx::io_context::strand_t& exec)
                         : handler(std::move(h)), work(boost::asio::make_work_guard(e)), file(exec) {}
-
-                    void complete(boost::system::error_code ec, std::string&& res = {}) {
-                        auto slot = boost::asio::get_associated_cancellation_slot(handler);
-                        if (slot.is_connected()) slot.clear();
-                        work.reset();
-                        std::move(handler)(ec, std::move(res));
-                    }
                 };
 
                 std::shared_ptr<state_t> state = std::allocate_shared<state_t>(
