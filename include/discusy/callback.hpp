@@ -160,7 +160,7 @@ class Callback {
 
         // Returns true if this waiter is now completed (matched, cancelled, or aborted).
         virtual bool try_match(const T& data) noexcept = 0;
-        virtual void on_callback_destroyed() noexcept = 0;
+        virtual void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept = 0;
 
         constexpr void set_invalid_idx() noexcept {
             vector_idx = INVALID_IDX;
@@ -284,7 +284,7 @@ class Callback {
             }
 
             for (auto& node : failed_drain) {
-                node->on_callback_destroyed();
+                node->on_callback_destroyed(exec);
             }
             failed_drain.clear();
 
@@ -393,10 +393,10 @@ class Callback {
             when_lock.unlock();
 
             for (auto& node : pending_active) {
-                node->on_callback_destroyed();
+                node->on_callback_destroyed(exec);
             }
             for (auto& node : pending_incoming) {
-                node->on_callback_destroyed();
+                node->on_callback_destroyed(exec);
             }
         }
 
