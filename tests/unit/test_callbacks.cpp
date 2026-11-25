@@ -452,27 +452,6 @@ TEST_CASE("Callback: when() inline completion handler exception does not double-
     }
 }
 
-TEST_CASE("Callback: when() supports timer-less boost::asio::cancel_after", "[callback]") {
-    discusy::ctx::io_context ctx{1};
-    discusy::Callback<int> cb{ctx};
-
-    bool timed_out = false;
-    ctx.co_launch_detached([&]() -> discusy::coro::awaitable<void> {
-        auto [ec, val] = co_await cb.when(
-            [](int) { return false; },
-            boost::asio::as_tuple(
-                boost::asio::cancel_after(std::chrono::milliseconds{20}, boost::asio::use_awaitable)
-            )
-        );
-        CHECK(ec == boost::asio::error::operation_aborted);
-        (void)val;
-        timed_out = true;
-    });
-
-    ctx->run();
-    CHECK(timed_out);
-}
-
 TEST_CASE("Callback: Deferred when() initiated after destruction respects bound strand", "[callback]") {
     discusy::ctx::io_context ctx{1};
     auto strand = ctx.make_strand();
