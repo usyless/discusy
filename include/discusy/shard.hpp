@@ -524,7 +524,7 @@ private:
                                 self->handle_##LOWER(p.d); \
                                 self->state_.gateway_callbacks.on_##LOWER.fire(std::move(p.d)); \
                             } else { \
-                                self->state_.gateway_callbacks.on_##LOWER.template fire_payload<recieve_event::payload<recieve_event::LOWER>>(payload); \
+                                self->state_.gateway_callbacks.on_##LOWER.fire_registered_payload(payload); \
                             } \
                             if constexpr (requires { self->post_handle_##LOWER(); }) { \
                                 self->post_handle_##LOWER(); \

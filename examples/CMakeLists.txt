@@ -13,7 +13,7 @@ add_subdirectory(multithreading)
 add_subdirectory(using_completion_tokens)
 add_subdirectory(random_image_bot)
 
-if(TARGET discusy_pch)
+if(DEFINED DISCUSY_SHARED_PCH_TARGET)
     foreach(_discusy_example IN ITEMS
         example_slash_commands
         example_components
@@ -29,7 +29,7 @@ if(TARGET discusy_pch)
             if(MSVC)
                 target_compile_definitions(${_discusy_example} PRIVATE _MBCS)
             endif()
-            target_precompile_headers(${_discusy_example} REUSE_FROM discusy_pch)
+            target_precompile_headers(${_discusy_example} REUSE_FROM ${DISCUSY_SHARED_PCH_TARGET})
         endif()
     endforeach()
 endif()

@@ -33,8 +33,8 @@ target_link_libraries(discusy_unit_tests PRIVATE
     Catch2::Catch2WithMain
 )
 
-if(TARGET discusy_pch)
-    target_precompile_headers(discusy_unit_tests REUSE_FROM discusy_pch)
+if(DEFINED DISCUSY_SHARED_PCH_TARGET)
+    target_precompile_headers(discusy_unit_tests REUSE_FROM ${DISCUSY_SHARED_PCH_TARGET})
 endif()
 
 if(WIN32)

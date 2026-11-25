@@ -194,8 +194,14 @@ configure_file(
     @ONLY
 )
 
+set(DISCUSY_RUNTIME_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/callback.cpp"
+    "${PROJECT_SOURCE_DIR}/src/http_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/websocket_client.cpp"
+)
+
 if(DISCUSY_USE_MODULES)
-    add_library(${LIBRARY_NAME} STATIC)
+    add_library(${LIBRARY_NAME} STATIC ${DISCUSY_RUNTIME_SOURCES})
     set(USYLIBPP_ENABLE_PCH OFF CACHE BOOL "" FORCE)
     set(DISCUSY_VISIBILITY "PUBLIC")
 
@@ -213,8 +219,8 @@ if(DISCUSY_USE_MODULES)
             FILES "${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/${PROJECT_NAME}.cppm"
     )
 else()
-    add_library(${LIBRARY_NAME} INTERFACE)
-    set(DISCUSY_VISIBILITY "INTERFACE")
+    add_library(${LIBRARY_NAME} STATIC ${DISCUSY_RUNTIME_SOURCES})
+    set(DISCUSY_VISIBILITY "PUBLIC")
 
     target_compile_features(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
         "${DISCUSY_CXX_STD}"
@@ -235,7 +241,7 @@ else()
             set(USYLIBPP_ENABLE_PCH ON CACHE BOOL "" FORCE)
         else()
             set(USYLIBPP_ENABLE_PCH OFF CACHE BOOL "" FORCE)
-            target_precompile_headers(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
+            target_precompile_headers(${LIBRARY_NAME} INTERFACE
                 "<${PROJECT_NAME}/${PROJECT_NAME}.hpp>"
             )
         endif()
@@ -728,18 +734,13 @@ if(PROJECT_IS_TOP_LEVEL)
     endif()
 
     if(DISCUSY_ENABLE_PCH AND NOT DISCUSY_USE_MODULES)
-        set(DISCUSY_PCH_ANCHOR "${CMAKE_CURRENT_BINARY_DIR}/discusy_pch_anchor.cpp")
-        if(NOT EXISTS "${DISCUSY_PCH_ANCHOR}")
-            file(WRITE "${DISCUSY_PCH_ANCHOR}" "// Anchor source for shared top-level precompiled header target.\n")
-        endif()
-        add_library(discusy_pch STATIC "${DISCUSY_PCH_ANCHOR}")
-        target_link_libraries(discusy_pch PRIVATE
-            discusy::discusy
+        target_link_libraries(${LIBRARY_NAME} PRIVATE
             discusy_exe_options
         )
-        target_precompile_headers(discusy_pch PRIVATE
+        target_precompile_headers(${LIBRARY_NAME} PRIVATE
             "<${PROJECT_NAME}/pch_top_level.hpp>"
         )
+        set(DISCUSY_SHARED_PCH_TARGET "${LIBRARY_NAME}")
     endif()
 
     set(TEST_LIBRARY_NAME "${PROJECT_NAME}_test")
@@ -752,8 +753,8 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy_exe_options
     )
 
-    if(TARGET discusy_pch)
-        target_precompile_headers(${TEST_LIBRARY_NAME} REUSE_FROM discusy_pch)
+    if(DEFINED DISCUSY_SHARED_PCH_TARGET)
+        target_precompile_headers(${TEST_LIBRARY_NAME} REUSE_FROM ${DISCUSY_SHARED_PCH_TARGET})
     endif()
 
     set(BENCHMARK_JSON_ETF_LIBRARY_NAME "${PROJECT_NAME}_benchmark_json_etf")
@@ -766,8 +767,8 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy_exe_options
     )
 
-    if(TARGET discusy_pch)
-        target_precompile_headers(${BENCHMARK_JSON_ETF_LIBRARY_NAME} REUSE_FROM discusy_pch)
+    if(DEFINED DISCUSY_SHARED_PCH_TARGET)
+        target_precompile_headers(${BENCHMARK_JSON_ETF_LIBRARY_NAME} REUSE_FROM ${DISCUSY_SHARED_PCH_TARGET})
     endif()
 
     if(WIN32)

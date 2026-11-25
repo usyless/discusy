@@ -1189,6 +1189,17 @@ using update_voice_state_payload = payload_base<Opcode::VoiceStateUpdate, update
 
 }
 
+namespace recieve_event {
+
+template <typename T>
+inline constexpr bool is_gateway_event_v = false
+#define DISCUSY_X(UPPER, LOWER) || std::is_same_v<T, discusy::recieve_event::LOWER>
+    DISCORD_GATEWAY_EVENTS
+#undef DISCUSY_X
+    ;
+
+}
+
 }
 
 template <>
