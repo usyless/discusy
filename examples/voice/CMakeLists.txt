@@ -3,7 +3,6 @@ project(example_voice LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 # Enable voice support in discusy
 set(DISCUSY_ENABLE_VOICE ON CACHE BOOL "" FORCE)
@@ -21,6 +20,10 @@ if(NOT TARGET discusy::discusy)
         )
         FetchContent_MakeAvailable(discusy)
     endif()
+endif()
+
+if(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
 add_executable(example_voice main.cpp)

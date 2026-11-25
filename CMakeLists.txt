@@ -29,7 +29,7 @@ endif()
 cmake_dependent_option(DISCUSY_ENABLE_PCH "Enable PCH for quicker compilation" ON "NOT DISCUSY_USE_MODULES" OFF)
 option(DISCUSY_LOGGING_ENABLED "Enable logging in release mode" OFF)
 option(DISCUSY_USE_MIMALLOC "Replace default allocator with mimalloc" OFF)
-option(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION "Enable FLTO/LTCG" ON)
+option(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION "Enable FLTO/LTCG (recommended ON for final release builds)" OFF)
 cmake_dependent_option(DISCUSY_USE_STATIC_MSVCRT
     "Use the static release/debug MSVCRT - or set the flag yourself before including the project" OFF
     "MSVC" OFF
@@ -198,6 +198,8 @@ set(DISCUSY_RUNTIME_SOURCES
     "${PROJECT_SOURCE_DIR}/src/callback.cpp"
     "${PROJECT_SOURCE_DIR}/src/http_client.cpp"
     "${PROJECT_SOURCE_DIR}/src/websocket_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/shard.cpp"
+    "${PROJECT_SOURCE_DIR}/src/bot.cpp"
 )
 
 if(DISCUSY_USE_MODULES)
@@ -535,6 +537,10 @@ endif()
 
 # Voice Support Configuration
 if(DISCUSY_ENABLE_VOICE)
+    target_sources(${LIBRARY_NAME} PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/voice_connection.cpp"
+    )
+
     target_compile_definitions(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
         DISCUSY_VOICE
     )

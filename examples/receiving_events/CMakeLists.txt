@@ -3,7 +3,6 @@ project(example_receiving_events LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 # Link to discusy from parent repository if available, or fetch via FetchContent
 if(NOT TARGET discusy::discusy)
@@ -18,6 +17,10 @@ if(NOT TARGET discusy::discusy)
         )
         FetchContent_MakeAvailable(discusy)
     endif()
+endif()
+
+if(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
 add_executable(example_receiving_events main.cpp)

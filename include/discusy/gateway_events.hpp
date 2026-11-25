@@ -955,9 +955,9 @@ enum class status_type : std::uint8_t { // update glaze meta
 template <Opcode code, typename T>
 struct payload_base {
     Opcode op = code;
-    T& d;
+    const T& d;
 
-    payload_base(T& d_) : d{d_} {}
+    payload_base(const T& d_) : d{d_} {}
 
     struct glaze {
         using U = payload_base<code, T>;
