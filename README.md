@@ -6,7 +6,7 @@ All of the bot facing Discord API is covered and accessible, with types matching
 
 ## Features
 - Discord API v10 with [zstd](https://github.com/facebook/zstd) + voice API v8 with [DAVE](https://github.com/discord/libdave)
-- Header-only with statically linked dependencies (this does lead to high compiler memory requirements)
+- Static library with header-only templates for user-facing APIs and lazy event parser instantiation (only events you listen to are compiled), with statically linked dependencies
 - [Glaze](https://github.com/stephenberry/glaze) for compile-time JSON and binary Erlang External Term Format (ETF) serialisation and deserialisation algorithms
 - ETF parser/serializer with compile-time hash maps for higher throughput than JSON
 - Works with 1 to N threads
@@ -27,6 +27,11 @@ A compiler supporting C++23 and at least meeting [Glaze's](https://github.com/st
     - Using the mold linker is recommended
     - An example of this can be founds under [tests.yml](/.github/workflows/tests.yml)
 
+### Build & Memory Requirements
+- **RAM**: Peak memory usage is roughly **2–3 GB per compiler job** and **~0.8 GB for linking** with default settings (`DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION=OFF`), making parallel builds safe on typical machines.
+    - Enabling LTO/IPO (`DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION=ON`, recommended for final release builds) increases peak link memory to **~3.5 GB**.
+- **PCH**: Precompiled headers (`DISCUSY_ENABLE_PCH=ON`, enabled by default) are recommended for fast incremental builds.
+
 ### Platform Support
 - Linux
     - Dependencies: `openssl`, `io_uring` if asynchronous file reading is used, can also enable it for networking
@@ -37,7 +42,7 @@ A compiler supporting C++23 and at least meeting [Glaze's](https://github.com/st
     - Untested, but should likely work as it is mostly platform-agnostic
 
 All other dependencies are fetched via CMake as needed
-- Due to the this, I would recommend only including `<discusy/discusy.hpp>` in only one translation unit to avoid polluting your project with all the dependencies
+- Due to this, I would recommend only including `<discusy/discusy.hpp>` in only one translation unit to avoid polluting your project with all the dependencies
 
 ## Documentation
 This does not really exist for now, due to the api types being very tightly coupled to Discord's API.
@@ -107,10 +112,10 @@ add_subdirectory("path/to/discusy")
 target_link_libraries(${PROJECT_NAME} PRIVATE discusy::discusy)
 ```
 
-### Recommended flags to leave on
+### Recommended flags for release builds
 - `set(DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "" FORCE)`
-    - The build may fail if this isn't on, due to the large binaries created
-    - This simply just enables interprocedural optimisation
+    - Enables Link-Time Optimization (LTO/IPO) for smaller, faster final release binaries
+    - Off by default so local development builds link much faster (~1s vs ~30s) and use less memory (~0.8 GB vs ~3.5 GB)
 
 ### All CMake Flags
 
@@ -119,7 +124,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE discusy::discusy)
 | `DISCUSY_ENABLE_VOICE` | `OFF` | Enables voice capabilities (Opus, DAVE E2EE, libsodium, mlspp). |
 | `DISCUSY_LOGGING_ENABLED` | `OFF` | Forces logging in release builds (always enabled in Debug). |
 | `DISCUSY_USE_MIMALLOC` | `OFF` | Uses Microsoft `mimalloc` as the memory allocator. |
-| `DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION` | `ON` | Enables Link-Time Optimization (LTO/IPO). |
+| `DISCUSY_USE_INTERPROCEDURAL_OPTIMIZATION` | `OFF` | Enables Link-Time Optimization (LTO/IPO). Recommended `ON` for final release builds. |
 | `DISCUSY_ENABLE_PCH` | `ON` | Generates Precompiled Headers to speed up builds. |
 | `DISCUSY_NO_CACHES` | `ON` | Disables internal caching of guilds/channels/members to reduce memory usage. |
 | `DISCUSY_ENABLE_IO_URING` | `OFF` | (Linux only) Enables Linux `io_uring` for async file operations. |
