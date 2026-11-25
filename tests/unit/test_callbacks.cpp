@@ -1,10 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <discusy/callback.hpp>
 #include <discusy/io_context.hpp>
-#include <vector>
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
-#include <atomic>
+#include <vector>
 
 TEST_CASE("Callback: Short-circuiting execution on return false", "[callback]") {
     discusy::ctx::io_context ctx{1};
@@ -286,5 +290,317 @@ TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
 
     ctx->run();
     CHECK(completed_count.load() == NUM_WAITERS);
+}
+
+TEST_CASE("Callback: Async and mixed sync/async callbacks with strand and short-circuiting", "[callback]") {
+    discusy::ctx::io_context ctx{2};
+    discusy::Callback<int> cb{ctx};
+    auto strand = ctx.make_strand();
+
+    std::vector<std::string> log;
+    std::mutex log_mtx;
+    auto push = [&](std::string s) {
+        std::scoped_lock lock{log_mtx};
+        log.emplace_back(std::move(s));
+    };
+
+    cb.listen_system([&](const int&) {
+        push("sys_sync");
+    });
+
+    cb.listen_system([&](const int&) -> discusy::coro::awaitable<void> {
+        co_await boost::asio::post(ctx.executor_, boost::asio::deferred);
+        push("sys_async");
+    });
+
+    cb.listen(strand, [&](const int&) {
+        CHECK(strand.running_in_this_thread());
+        push("user_strand_sync");
+    });
+
+    cb.listen(strand, [&](const int&) -> discusy::coro::awaitable<bool> {
+        CHECK(strand.running_in_this_thread());
+        co_await boost::asio::post(strand, boost::asio::deferred);
+        CHECK(strand.running_in_this_thread());
+        push("user_strand_async_stop");
+        co_return false;
+    });
+
+    cb.listen([&](const int&) {
+        push("user_should_not_run");
+    });
+
+    cb.fire(7);
+    ctx->run();
+
+    REQUIRE(log.size() == 4);
+    CHECK(log[0] == "sys_sync");
+    CHECK(log[1] == "sys_async");
+    CHECK(log[2] == "user_strand_sync");
+    CHECK(log[3] == "user_strand_async_stop");
+}
+
+TEST_CASE("Callback: Sync callback on strand exception does not halt subsequent callbacks", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+    auto strand = ctx.make_strand();
+
+    bool second_ran = false;
+
+    cb.listen(strand, [](const int&) {
+        throw std::runtime_error("boom");
+    });
+
+    cb.listen([&](const int&) {
+        second_ran = true;
+    });
+
+    cb.fire(1);
+    ctx->run();
+
+    CHECK(second_ran);
+}
+
+TEST_CASE("Callback: Functor with operator bool() returning false still registers", "[callback]") {
+    struct StatefulFunctor {
+        int* count;
+        explicit operator bool() const noexcept { return false; }
+        void operator()(const int& v) const { *count += v; }
+    };
+
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    int total = 0;
+    const auto id = cb.listen(StatefulFunctor{&total});
+    CHECK(id != 0);
+
+    cb.fire(5);
+    ctx->run();
+    CHECK(total == 5);
+}
+
+namespace {
+
+struct PropagatingInlineExecutor {
+    discusy::ctx::io_context::executor_t fallback;
+
+    bool operator==(const PropagatingInlineExecutor&) const noexcept = default;
+
+    auto require(boost::asio::execution::blocking_t::never_t) const {
+        return boost::asio::require(fallback, boost::asio::execution::blocking.never);
+    }
+
+    auto require(boost::asio::execution::blocking_t::possibly_t) const noexcept {
+        return *this;
+    }
+
+    static constexpr boost::asio::execution::blocking_t query(boost::asio::execution::blocking_t) noexcept {
+        return boost::asio::execution::blocking.possibly;
+    }
+
+    template <typename F>
+    void execute(F&& f) const {
+        std::forward<F>(f)();
+    }
+};
+
+} // namespace
+
+TEST_CASE("Callback: when() inline completion handler exception does not double-complete", "[callback]") {
+    SECTION("Default io_context executor") {
+        discusy::ctx::io_context ctx{1};
+        discusy::Callback<int> cb{ctx};
+
+        int invocations = 0;
+        cb.when(
+            [](int v) { return v == 1; },
+            [&](boost::system::error_code ec, int v) {
+                ++invocations;
+                CHECK(!ec);
+                CHECK(v == 1);
+                throw std::runtime_error("handler error");
+            }
+        );
+
+        cb.fire(1);
+        CHECK_THROWS_AS(ctx->run(), std::runtime_error);
+        CHECK(invocations == 1);
+    }
+
+    SECTION("Propagating inline executor") {
+        discusy::ctx::io_context ctx{1};
+        discusy::Callback<int> cb{ctx};
+
+        int invocations = 0;
+        cb.when(
+            [](int v) { return v == 1; },
+            boost::asio::bind_executor(
+                PropagatingInlineExecutor{ctx.executor_},
+                [&](boost::system::error_code ec, int v) {
+                    ++invocations;
+                    CHECK(!ec);
+                    CHECK(v == 1);
+                    throw std::runtime_error("inline handler error");
+                }
+            )
+        );
+
+        cb.fire(1);
+        ctx->run();
+        CHECK(invocations == 1);
+    }
+}
+
+TEST_CASE("Callback: when() supports timer-less boost::asio::cancel_after", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    discusy::Callback<int> cb{ctx};
+
+    bool timed_out = false;
+    ctx.co_launch_detached([&]() -> discusy::coro::awaitable<void> {
+        auto [ec, val] = co_await cb.when(
+            [](int) { return false; },
+            boost::asio::as_tuple(
+                boost::asio::cancel_after(std::chrono::milliseconds{20}, boost::asio::use_awaitable)
+            )
+        );
+        CHECK(ec == boost::asio::error::operation_aborted);
+        (void)val;
+        timed_out = true;
+    });
+
+    ctx->run();
+    CHECK(timed_out);
+}
+
+TEST_CASE("Callback: Deferred when() initiated after destruction respects bound strand", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    auto strand = ctx.make_strand();
+
+    bool completed_on_strand = false;
+    boost::system::error_code captured_ec;
+
+    auto deferred_op = [&]() {
+        discusy::Callback<int> cb{ctx};
+        return cb.when([](int) { return true; }, boost::asio::deferred);
+    }();
+
+    std::move(deferred_op)(
+        boost::asio::bind_executor(strand, [&](boost::system::error_code ec, int) {
+            captured_ec = ec;
+            completed_on_strand = strand.running_in_this_thread();
+        })
+    );
+
+    ctx->run();
+    CHECK(captured_ec == boost::asio::error::operation_aborted);
+    CHECK(completed_on_strand);
+}
+
+TEST_CASE("Callback: Destroying Callback inside when() completion handler does not deadlock", "[callback]") {
+    discusy::ctx::io_context ctx{1};
+    auto cb = std::make_unique<discusy::Callback<int>>(ctx);
+
+    bool first_matched = false;
+    bool second_aborted = false;
+
+    cb->when(
+        [](int v) { return v == 1; },
+        [&](boost::system::error_code ec, int) {
+            CHECK(!ec);
+            first_matched = true;
+            cb.reset();
+        }
+    );
+
+    cb->when(
+        [](int v) { return v == 2; },
+        [&](boost::system::error_code ec, int) {
+            second_aborted = (ec == boost::asio::error::operation_aborted);
+        }
+    );
+
+    cb->fire(1);
+    ctx->run();
+
+    CHECK(first_matched);
+    CHECK(second_aborted);
+}
+
+TEST_CASE("Callback: Multi-threaded when() predicate reference lifetime vs cancellation", "[callback]") {
+    discusy::ctx::io_context ctx{4};
+    discusy::Callback<int> cb{ctx};
+
+    constexpr int ITERS = 60;
+    std::atomic<int> done{0};
+    std::atomic<bool> stop_firing{false};
+
+    std::thread firer([&]() {
+        int v = 0;
+        while (!stop_firing.load(std::memory_order_relaxed)) {
+            cb.fire(v++);
+            if ((v & 15) == 0) {
+                std::this_thread::yield();
+            }
+        }
+    });
+
+    auto work = boost::asio::make_work_guard(ctx.io_ctx_);
+    std::vector<std::thread> workers;
+    for (int i = 0; i < 3; ++i) {
+        workers.emplace_back([&]() { ctx->run(); });
+    }
+
+    for (int i = 0; i < ITERS; ++i) {
+        auto strand = ctx.make_strand();
+        ctx.co_launch_detached([&, strand]() -> discusy::coro::awaitable<void> {
+            co_await boost::asio::dispatch(strand, boost::asio::deferred);
+            std::string local_sentinel = "alive_sentinel_value_for_uaf_check";
+            discusy::ctx::io_context::strand_timer_t timer{strand};
+
+            auto [ec, val] = co_await cb.when(
+                [&local_sentinel](int) -> bool {
+                    return local_sentinel == "never_matches";
+                },
+                boost::asio::cancel_after(
+                    timer,
+                    std::chrono::milliseconds{1},
+                    boost::asio::bind_executor(strand, boost::asio::as_tuple(boost::asio::deferred))
+                )
+            );
+            CHECK(ec == boost::asio::error::operation_aborted);
+            (void)val;
+            if (done.fetch_add(1, std::memory_order_acq_rel) + 1 == ITERS) {
+                stop_firing.store(true, std::memory_order_relaxed);
+                work.reset();
+            }
+        });
+    }
+
+    ctx->run();
+    for (auto& t : workers) t.join();
+    firer.join();
+
+    CHECK(done.load() == ITERS);
+}
+
+TEST_CASE("CounterCallback: Saturates without wrap-around and supports self-destruction", "[callback]") {
+    int count = 0;
+    discusy::CounterCallback<std::uint8_t> narrow{2, [&]() { ++count; }};
+    for (int i = 0; i < 300; ++i) {
+        narrow.arrive();
+    }
+    CHECK(count == 1);
+
+    // Self-destruction inside callback
+    std::unique_ptr<discusy::CounterCallback<int>> self_ptr;
+    bool self_fired = false;
+    self_ptr = std::make_unique<discusy::CounterCallback<int>>(1, [&]() {
+        self_fired = true;
+        self_ptr.reset();
+    });
+    self_ptr->arrive();
+    CHECK(self_fired);
+    CHECK(self_ptr == nullptr);
 }
 

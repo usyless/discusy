@@ -1,16 +1,21 @@
 #pragma once
 
 #include <algorithm>
-#include <functional>
-#include <utility>
-#include <concepts>
-#include <version>
-#include <limits>
-#include <mutex>
 #include <atomic>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
+#include <version>
 
 #include <boost/container/small_vector.hpp>
 
@@ -48,6 +53,19 @@ GLZ_ALWAYS_INLINE void attach_bot(Obj& obj, bot* b) noexcept {
     }
 }
 
+namespace detail {
+
+#ifdef DISCUSY_LOGGING
+template <typename... Args>
+inline void callback_log_noexcept(const std::format_string<Args...>& fmt, Args&&... args) noexcept {
+    try {
+        log::Logger{}(fmt, std::forward<Args>(args)...);
+    } catch (...) {} // NOLINT(bugprone-empty-catch)
+}
+#endif
+
+} // namespace detail
+
 // should callback unregister and register be dispatch or post?
 // if im currently running callbacks and i unregister one should i unregister it immediately
 // or unregister it after theyve all run?
@@ -60,8 +78,8 @@ class Callback {
         std::atomic<bool> unregistered{false};
         bool is_async_{false};
 
-        callback_interface(auto&& exec) : ex{std::forward<decltype(exec)>(exec)} {}
-        callback_interface(auto&& exec, bool is_async) : ex{std::forward<decltype(exec)>(exec)}, is_async_(is_async) {}
+        explicit callback_interface(boost::asio::any_io_executor exec, bool is_async = false) noexcept
+            : ex{std::move(exec)}, is_async_{is_async} {}
         callback_interface() noexcept = default;
         callback_interface(const callback_interface&) = delete;
         callback_interface& operator=(const callback_interface&) = delete;
@@ -81,9 +99,9 @@ class Callback {
         F func;
 
         template <typename FF>
-        explicit sync_callback(FF&& f, auto&& executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
-            : callback_interface{std::forward<decltype(executor)>(executor)}, func(std::forward<FF>(f)) {}
-        
+        explicit sync_callback(FF&& f, boost::asio::any_io_executor executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
+            : callback_interface{std::move(executor), false}, func(std::forward<FF>(f)) {}
+
         bool invoke_sync(const T& data) override final {
             using Result = std::invoke_result_t<F&, const T&>;
             if constexpr (std::is_same_v<Result, bool>) {
@@ -100,9 +118,9 @@ class Callback {
         F func;
 
         template <typename FF>
-        explicit async_callback(FF&& f, auto&& executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
-            : callback_interface{std::forward<decltype(executor)>(executor), true}, func(std::forward<FF>(f)) {}
-        
+        explicit async_callback(FF&& f, boost::asio::any_io_executor executor) noexcept(std::is_nothrow_constructible_v<F, FF&&>)
+            : callback_interface{std::move(executor), true}, func(std::forward<FF>(f)) {}
+
         coro::awaitable<bool> invoke_async(const T& data) override final {
             using Result = std::invoke_result_t<F&, const T&>;
             if constexpr (std::is_same_v<Result, coro::awaitable<bool>>) {
@@ -126,7 +144,11 @@ class Callback {
     struct when_interface : std::enable_shared_from_this<when_interface> {
         static constexpr auto INVALID_IDX = std::numeric_limits<std::size_t>::max();
 
+        // Serializes predicate invocations on this node and ensures any in-flight
+        // predicate finishes before cancellation/destruction resumes the caller.
+        std::mutex match_mtx;
         std::atomic<bool> completed{false};
+        std::atomic<bool> complete_entered{false};
         std::size_t vector_idx{INVALID_IDX};
 
         when_interface() noexcept = default;
@@ -136,16 +158,24 @@ class Callback {
         when_interface(when_interface&&) = delete;
         when_interface& operator=(when_interface&&) = delete;
 
-        virtual void try_match(const T& data) noexcept(noexcept(std::atomic_bool().load()) && noexcept(std::atomic_bool().exchange(true, std::memory_order_acq_rel))) = 0;
-        virtual void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept(noexcept(std::atomic_bool().load())) = 0;
+        // Returns true if this waiter is now completed (matched, cancelled, or aborted).
+        virtual bool try_match(const T& data) noexcept = 0;
+        virtual void on_callback_destroyed() noexcept = 0;
 
         constexpr void set_invalid_idx() noexcept {
             vector_idx = INVALID_IDX;
         }
-        
-        constexpr bool is_invalid_idx() const noexcept {
+
+        [[nodiscard]] constexpr bool is_invalid_idx() const noexcept {
             return vector_idx == INVALID_IDX;
         }
+    };
+
+    enum class push_waiter_result : std::uint8_t {
+        pushed,
+        already_completed,
+        destroyed,
+        no_memory,
     };
 
     struct entry {
@@ -165,17 +195,17 @@ class Callback {
 
     struct Core {
         ctx::io_context::executor_t exec;
+        boost::asio::any_io_executor any_exec;
         boost::container::small_vector<entry, 2> system_callbacks;
         boost::container::small_vector<entry, 4> user_callbacks;
         std::atomic<callback_id> cb_idx{0};
-        std::size_t stale_count{0};
         atomic_shared_ptr<const Snapshot> snapshot{nullptr};
         std::atomic<std::size_t> active_count{0};
-        std::size_t async_count{0};
         std::mutex mtx;
 
         std::mutex incoming_mtx;
         boost::container::small_vector<std::shared_ptr<when_interface>, 8> incoming_waiters;
+        bool waiters_destroyed{false};
         std::atomic<std::size_t> when_waiters_count{0};
         std::mutex when_mtx;
         boost::container::small_vector<std::shared_ptr<when_interface>, 8> active_waiters;
@@ -185,39 +215,57 @@ class Callback {
         Core(Core&&) = delete;
         Core& operator=(Core&&) = delete;
 
-        explicit Core(auto&& ex) : exec{std::forward<decltype(ex)>(ex)} {}
+        explicit Core(const ctx::io_context::executor_t& ex)
+            : exec{ex}, any_exec{ex} {}
 
         ~Core() noexcept = default;
 
-        bool push_when_waiter(std::shared_ptr<when_interface> node) {
-            if (node->completed.load(std::memory_order_acquire)) return true;
+        push_waiter_result push_when_waiter(std::shared_ptr<when_interface> node) noexcept {
+            if (node->completed.load(std::memory_order_acquire)) {
+                return push_waiter_result::already_completed;
+            }
 
             {
-            std::scoped_lock lock{incoming_mtx};
-            if (node->completed.load(std::memory_order_acquire)) return true;
-            when_waiters_count.fetch_add(1, std::memory_order_release);
-            try {
-                incoming_waiters.emplace_back(std::move(node));
-            } catch (...) {
-                when_waiters_count.fetch_sub(1, std::memory_order_release);
-                return false;
+                std::scoped_lock lock{incoming_mtx};
+                if (waiters_destroyed) {
+                    return push_waiter_result::destroyed;
+                }
+                if (node->completed.load(std::memory_order_acquire)) {
+                    return push_waiter_result::already_completed;
+                }
+                try {
+                    incoming_waiters.emplace_back(std::move(node));
+                } catch (...) {
+                    return push_waiter_result::no_memory;
+                }
+                when_waiters_count.fetch_add(1, std::memory_order_release);
             }
-            }
-            return true;
+            return push_waiter_result::pushed;
         }
 
-        void drain_incoming_when_waiters() {
-            std::remove_cvref_t<decltype(incoming_waiters)> incoming;
+        // Must be called with when_mtx held. Returns any waiters that could not be
+        // moved into active_waiters due to OOM so the caller can abort them outside locks.
+        boost::container::small_vector<std::shared_ptr<when_interface>, 8> drain_incoming_when_waiters() noexcept {
+            boost::container::small_vector<std::shared_ptr<when_interface>, 8> incoming;
             {
-            std::scoped_lock lock{incoming_mtx};
-            if (incoming_waiters.empty()) return;
-            incoming = std::move(incoming_waiters);
-            incoming_waiters.clear();
+                std::scoped_lock lock{incoming_mtx};
+                if (incoming_waiters.empty()) return {};
+                incoming = std::move(incoming_waiters);
+                incoming_waiters.clear();
             }
+
+            try {
+                active_waiters.reserve(active_waiters.size() + incoming.size());
+            } catch (...) {
+                when_waiters_count.fetch_sub(incoming.size(), std::memory_order_release);
+                return incoming;
+            }
+
             for (auto& node : incoming) {
                 auto& waiter = active_waiters.emplace_back(std::move(node));
                 waiter->vector_idx = active_waiters.size() - 1;
             }
+            return {};
         }
 
         void dispatch_when_waiters(const T& data) {
@@ -225,155 +273,197 @@ class Callback {
                 return;
             }
 
-            std::remove_cvref_t<decltype(active_waiters)> active;
+            boost::container::small_vector<std::shared_ptr<when_interface>, 8> active;
+            boost::container::small_vector<std::shared_ptr<when_interface>, 8> failed_drain;
             {
-            std::scoped_lock lock{when_mtx};
-            drain_incoming_when_waiters();
-            if (active_waiters.empty()) return;
-            active = active_waiters;
-            }
-
-            for (auto& node : active) {
-                if (node->completed.load(std::memory_order_acquire)) continue;
-                node->try_match(data);
-            }
-
-            {
-            std::scoped_lock lock{when_mtx};
-            drain_incoming_when_waiters();
-            if (active_waiters.empty()) return;
-            std::size_t removed = 0;
-            for (std::size_t i = 0; i < active_waiters.size(); ) {
-                auto& node = active_waiters[i];
-                if (node->completed.load(std::memory_order_acquire)) {
-                    node->set_invalid_idx();
-                    const auto last_idx = active_waiters.size() - 1;
-                    if (i != last_idx) {
-                        active_waiters[i] = std::move(active_waiters.back());
-                        active_waiters[i]->vector_idx = i;
-                    }
-                    active_waiters.pop_back();
-                    ++removed;
-                } else {
-                    ++i;
+                std::scoped_lock lock{when_mtx};
+                failed_drain = drain_incoming_when_waiters();
+                if (!active_waiters.empty()) {
+                    active = active_waiters;
                 }
             }
-            if (removed > 0) {
-                when_waiters_count.fetch_sub(removed, std::memory_order_release);
+
+            for (auto& node : failed_drain) {
+                node->on_callback_destroyed();
             }
+            failed_drain.clear();
+
+            if (active.empty()) return;
+
+            bool any_completed = false;
+            for (auto& node : active) {
+                if (node->completed.load(std::memory_order_acquire)) {
+                    any_completed = true;
+                    continue;
+                }
+                if (node->try_match(data)) {
+                    any_completed = true;
+                }
+            }
+
+            if (!any_completed) return;
+
+            boost::container::small_vector<std::shared_ptr<when_interface>, 8> removed_nodes;
+            {
+                std::scoped_lock lock{when_mtx};
+                if (active_waiters.empty()) return;
+                std::size_t removed = 0;
+                for (std::size_t i = 0; i < active_waiters.size(); ) {
+                    auto& node = active_waiters[i];
+                    if (node->completed.load(std::memory_order_acquire)) {
+                        node->set_invalid_idx();
+                        try {
+                            removed_nodes.emplace_back(std::move(node));
+                        } catch (...) {
+                            // Keep alive via `active` if present; otherwise falls back to immediate release.
+                        }
+                        const auto last_idx = active_waiters.size() - 1;
+                        if (i != last_idx) {
+                            active_waiters[i] = std::move(active_waiters.back());
+                            active_waiters[i]->vector_idx = i;
+                        }
+                        active_waiters.pop_back();
+                        ++removed;
+                    } else {
+                        ++i;
+                    }
+                }
+                if (removed > 0) {
+                    when_waiters_count.fetch_sub(removed, std::memory_order_release);
+                }
             }
         }
 
-        // Clean up completed/cancelled waiters when events are not triggering matches
-        void clear_completed_waiter(std::shared_ptr<when_interface> node) {
+        // Clean up completed/cancelled waiters when events are not triggering matches.
+        // Zero-allocation and noexcept.
+        void clear_completed_waiter(const std::shared_ptr<when_interface>& node) noexcept {
             if (when_waiters_count.load(std::memory_order_acquire) == 0) {
                 return;
             }
 
-            {
             std::scoped_lock lock{when_mtx};
-            drain_incoming_when_waiters();
+            if (!node->is_invalid_idx()) {
+                const auto idx = node->vector_idx;
+                node->set_invalid_idx();
 
-            if (node->is_invalid_idx()) return;
-            const auto idx = node->vector_idx;
-            node->set_invalid_idx();
-
-            if (idx < active_waiters.size() && active_waiters[idx] == node) {
-                const auto last_idx = active_waiters.size() - 1;
-                if (idx != last_idx) {
-                    active_waiters[idx] = std::move(active_waiters.back());
-                    active_waiters[idx]->vector_idx = idx;
+                if (idx < active_waiters.size() && active_waiters[idx] == node) {
+                    const auto last_idx = active_waiters.size() - 1;
+                    if (idx != last_idx) {
+                        active_waiters[idx] = std::move(active_waiters.back());
+                        active_waiters[idx]->vector_idx = idx;
+                    }
+                    active_waiters.pop_back();
+                    when_waiters_count.fetch_sub(1, std::memory_order_release);
                 }
-                active_waiters.pop_back();
-                when_waiters_count.fetch_sub(1, std::memory_order_release);
+                return;
             }
+
+            // Not in active_waiters; it may still be queued in incoming_waiters.
+            std::scoped_lock in_lock{incoming_mtx};
+            for (std::size_t i = 0; i < incoming_waiters.size(); ++i) {
+                if (incoming_waiters[i] == node) {
+                    const auto last_idx = incoming_waiters.size() - 1;
+                    if (i != last_idx) {
+                        incoming_waiters[i] = std::move(incoming_waiters.back());
+                    }
+                    incoming_waiters.pop_back();
+                    when_waiters_count.fetch_sub(1, std::memory_order_release);
+                    return;
+                }
             }
         }
 
-        void abort_all_when_waiters() {
-            std::remove_cvref_t<decltype(active_waiters)> pending;
-            {
-            std::scoped_lock lock{when_mtx};
-            drain_incoming_when_waiters();
+        void abort_all_when_waiters() noexcept {
+            std::unique_lock when_lock{when_mtx};
+            std::unique_lock in_lock{incoming_mtx};
+
+            waiters_destroyed = true;
+
             for (auto& node : active_waiters) {
                 node->set_invalid_idx();
             }
-            pending = std::move(active_waiters);
-            active_waiters.clear();
-            when_waiters_count.store(0, std::memory_order_release);
-            }
 
-            for (auto& node : pending) {
-                node->on_callback_destroyed(exec);
+            auto pending_active = std::move(active_waiters);
+            active_waiters.clear();
+            auto pending_incoming = std::move(incoming_waiters);
+            incoming_waiters.clear();
+            when_waiters_count.store(0, std::memory_order_release);
+
+            in_lock.unlock();
+            when_lock.unlock();
+
+            for (auto& node : pending_active) {
+                node->on_callback_destroyed();
+            }
+            for (auto& node : pending_incoming) {
+                node->on_callback_destroyed();
             }
         }
 
-        void rebuild_snapshot() {
+        // Must be called with mtx held. Returns the replaced snapshot so the caller
+        // destroys it outside mtx.
+        [[nodiscard]] std::shared_ptr<const Snapshot> rebuild_snapshot() {
             auto snap = std::make_shared<Snapshot>();
             std::size_t active = 0;
             std::size_t async_c = 0;
 
-            auto compact_and_copy = [&](auto& src, auto& dst) {
-                if (stale_count > 0) {
-                    auto ret = std::remove_if(src.begin(), src.end(), [](const auto& e) {
-                        return !e.func || e.func->unregistered.load(std::memory_order_relaxed);
-                    });
-                    src.erase(ret, src.end());
-                }
+            auto copy_entries = [&](const auto& src, auto& dst) {
                 dst.reserve(src.size());
                 for (const auto& e : src) {
                     if (e.func && !e.func->unregistered.load(std::memory_order_relaxed)) {
                         dst.emplace_back(e.func);
                         ++active;
-                        if (e.func->is_async() || (e.func->get_executor() != exec)) {
+                        if (e.func->is_async() || (e.func->get_executor() != any_exec)) {
                             ++async_c;
                         }
                     }
                 }
             };
 
-            compact_and_copy(system_callbacks, snap->system_callbacks);
-            compact_and_copy(user_callbacks, snap->user_callbacks);
-            stale_count = 0;
+            copy_entries(system_callbacks, snap->system_callbacks);
+            copy_entries(user_callbacks, snap->user_callbacks);
 
             snap->async_count = async_c;
-            async_count = async_c;
+            // Publish snapshot BEFORE active_count so readers seeing active_count > 0
+            // via acquire load are guaranteed to observe the new snapshot.
+            auto old_snap = snapshot.exchange(std::move(snap), std::memory_order_acq_rel);
             active_count.store(active, std::memory_order_release);
-            snapshot.store(std::move(snap), std::memory_order_release);
+            return old_snap;
         }
 
         bool unregister(const callback_id id) {
             if (id == 0) return false;
-            
+
             std::shared_ptr<callback_interface> to_destroy;
+            std::shared_ptr<const Snapshot> old_snap;
             {
-            std::scoped_lock lock{mtx};
-            auto it_user = std::ranges::find_if(user_callbacks, [id](const auto& e) {
-                return e.id == id;
-            });
-            entry* target_entry = nullptr;
-            if (it_user != user_callbacks.end() && it_user->func) {
-                target_entry = std::addressof(*it_user);
-            } else {
-                auto it_sys = std::ranges::find_if(system_callbacks, [id](const auto& e) {
+                std::scoped_lock lock{mtx};
+                auto it_user = std::ranges::find_if(user_callbacks, [id](const auto& e) {
                     return e.id == id;
                 });
-                if (it_sys != system_callbacks.end() && it_sys->func) {
-                    target_entry = std::addressof(*it_sys);
+                if (it_user != user_callbacks.end() && it_user->func) {
+                    it_user->func->unregistered.store(true, std::memory_order_release);
+                    to_destroy = std::move(it_user->func);
+                    user_callbacks.erase(it_user);
+                } else {
+                    auto it_sys = std::ranges::find_if(system_callbacks, [id](const auto& e) {
+                        return e.id == id;
+                    });
+                    if (it_sys == system_callbacks.end() || !it_sys->func) {
+                        return false;
+                    }
+                    it_sys->func->unregistered.store(true, std::memory_order_release);
+                    to_destroy = std::move(it_sys->func);
+                    system_callbacks.erase(it_sys);
                 }
-            }
-            if (target_entry == nullptr) return false;
-            
-            if (target_entry->func->is_async() || (target_entry->func->get_executor() != exec)) {
-                if (async_count > 0) --async_count;
-            }
 
-            target_entry->func->unregistered.store(true, std::memory_order_release);
-            to_destroy = std::move(target_entry->func);
-            ++stale_count;
-            active_count.fetch_sub(1, std::memory_order_release);
-            
-            rebuild_snapshot();
+                try {
+                    old_snap = rebuild_snapshot();
+                } catch (...) {
+                    // Snapshot remains valid (unregistered flag skips the removed callback).
+                    active_count.store(system_callbacks.size() + user_callbacks.size(), std::memory_order_release);
+                    throw;
+                }
             }
             return true;
         }
@@ -385,33 +475,71 @@ class Callback {
 
     std::shared_ptr<Core> core_;
     ctx::io_context& io_ctx_;
-    bot* bot_ptr_{nullptr};
+    std::atomic<bot*> bot_ptr_{nullptr};
+
+    [[nodiscard]] static bool same_executor(
+        const boost::asio::any_io_executor& target_ex,
+        const boost::asio::any_io_executor& current_ex,
+        const boost::asio::any_io_executor& core_exec
+    ) noexcept {
+        return target_ex == current_ex || target_ex == core_exec;
+    }
 
     static bool invoke_entry_sync(callback_interface& entry, const T& data) {
         return entry.invoke_sync(data);
     }
 
-    static coro::awaitable<bool> invoke_entry_async(callback_interface& entry, const T& data, const boost::asio::any_io_executor& current_ex) {
-        const auto& target_ex = entry.get_executor();
-        if (entry.is_async()) {
-            if (target_ex == current_ex) {
-                co_return co_await entry.invoke_async(data);
-            } else {
-                const auto cont = co_await ctx::io_context::co_launch<ctx::launch::fresh>([&entry, &data]() -> coro::awaitable<bool> {
-                    return entry.invoke_async(data);
-                }, target_ex, boost::asio::deferred);
-                co_return cont;
-            }
-        } else {
-            if (target_ex == current_ex) {
-                co_return entry.invoke_sync(data);
-            } else {
-                const auto cont = co_await ctx::io_context::co_launch<ctx::launch::fresh>([&entry, &data]() -> coro::awaitable<bool> {
-                    co_return entry.invoke_sync(data);
-                }, target_ex, boost::asio::deferred);
-                co_return cont;
-            }
-        }
+    static auto invoke_sync_on_executor(
+        callback_interface& entry,
+        const T& data,
+        const boost::asio::any_io_executor& target_ex
+    ) {
+        auto token = boost::asio::deferred;
+        return boost::asio::async_initiate<boost::asio::deferred_t, void(std::exception_ptr, bool)>(
+            [](auto&& handler, callback_interface* ep, const T* dp, boost::asio::any_io_executor target) mutable {
+                auto alloc = boost::asio::get_associated_allocator(
+                    handler,
+                    boost::asio::recycling_allocator<void>{}
+                );
+                auto handler_ex = boost::asio::get_associated_executor(handler, target);
+                auto work = boost::asio::make_work_guard(handler_ex);
+
+                boost::asio::post(
+                    target,
+                    boost::asio::bind_allocator(
+                        alloc,
+                        [h = std::forward<decltype(handler)>(handler),
+                         handler_ex = std::move(handler_ex),
+                         work = std::move(work),
+                         alloc,
+                         ep,
+                         dp]() mutable {
+                            std::exception_ptr eptr;
+                            bool res = true;
+                            try {
+                                res = ep->invoke_sync(*dp);
+                            } catch (...) {
+                                eptr = std::current_exception();
+                            }
+                            boost::asio::post(
+                                handler_ex,
+                                boost::asio::bind_allocator(
+                                    alloc,
+                                    [h = std::move(h), work = std::move(work), eptr, res]() mutable {
+                                        work.reset();
+                                        std::move(h)(eptr, res);
+                                    }
+                                )
+                            );
+                        }
+                    )
+                );
+            },
+            token,
+            std::addressof(entry),
+            std::addressof(data),
+            target_ex
+        );
     }
 
     static void fire_sync_internal(std::shared_ptr<Core> core, std::shared_ptr<const Snapshot> snap, const T& data) {
@@ -468,12 +596,26 @@ class Callback {
         if (!snap && (!core || core->when_waiters_count.load(std::memory_order_acquire) == 0)) co_return;
 
         const auto current_ex = co_await boost::asio::this_coro::executor;
+        const auto& core_exec = core ? core->any_exec : current_ex;
 
         if (snap) {
             for (const auto& entry_ptr : snap->system_callbacks) {
                 if (entry_ptr && !entry_ptr->unregistered.load(std::memory_order_acquire)) {
                     try {
-                        co_await invoke_entry_async(*entry_ptr, data, current_ex);
+                        const auto& target_ex = entry_ptr->get_executor();
+                        if (same_executor(target_ex, current_ex, core_exec)) {
+                            if (entry_ptr->is_async()) {
+                                co_await entry_ptr->invoke_async(data);
+                            } else {
+                                entry_ptr->invoke_sync(data);
+                            }
+                        } else if (entry_ptr->is_async()) {
+                            co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, &data]() -> coro::awaitable<bool> {
+                                return entry_ptr->invoke_async(data);
+                            }, target_ex, boost::asio::deferred);
+                        } else {
+                            co_await invoke_sync_on_executor(*entry_ptr, data, target_ex);
+                        }
                     }
                     #ifdef DISCUSY_LOGGING
                     catch (const std::exception& e) {
@@ -497,7 +639,22 @@ class Callback {
             for (const auto& entry_ptr : snap->user_callbacks) {
                 if (entry_ptr && !entry_ptr->unregistered.load(std::memory_order_acquire)) {
                     try {
-                        if (!(co_await invoke_entry_async(*entry_ptr, data, current_ex))) {
+                        bool cont = true;
+                        const auto& target_ex = entry_ptr->get_executor();
+                        if (same_executor(target_ex, current_ex, core_exec)) {
+                            if (entry_ptr->is_async()) {
+                                cont = co_await entry_ptr->invoke_async(data);
+                            } else {
+                                cont = entry_ptr->invoke_sync(data);
+                            }
+                        } else if (entry_ptr->is_async()) {
+                            cont = co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, &data]() -> coro::awaitable<bool> {
+                                return entry_ptr->invoke_async(data);
+                            }, target_ex, boost::asio::deferred);
+                        } else {
+                            cont = co_await invoke_sync_on_executor(*entry_ptr, data, target_ex);
+                        }
+                        if (!cont) {
                             break;
                         }
                     }
@@ -527,32 +684,31 @@ public:
     explicit Callback(ctx::io_context& ctx) : core_{std::make_shared<Core>(ctx.executor_)}, io_ctx_{ctx} {}
 
     void set_bot(bot* b) noexcept {
-        bot_ptr_ = b;
+        bot_ptr_.store(b, std::memory_order_relaxed);
     }
 
-    ~Callback() {
+    ~Callback() noexcept {
         if (!core_) return;
 
-        std::remove_cvref_t<decltype(Core::system_callbacks)> system_old;
-        std::remove_cvref_t<decltype(Core::user_callbacks)> user_old;
-        {
-        std::scoped_lock lock{core_->mtx};
-        for (auto& entry : core_->system_callbacks) {
-            if (entry.func) entry.func->unregistered.store(true, std::memory_order_release);
+        std::shared_ptr<const Snapshot> old_snap;
+        std::unique_lock lock{core_->mtx};
+        for (auto& e : core_->system_callbacks) {
+            if (e.func) e.func->unregistered.store(true, std::memory_order_release);
         }
-        system_old = std::move(core_->system_callbacks);
+        auto system_old = std::move(core_->system_callbacks);
         core_->system_callbacks.clear();
 
-        for (auto& entry : core_->user_callbacks) {
-            if (entry.func) entry.func->unregistered.store(true, std::memory_order_release);
+        for (auto& e : core_->user_callbacks) {
+            if (e.func) e.func->unregistered.store(true, std::memory_order_release);
         }
-        user_old = std::move(core_->user_callbacks);
+        auto user_old = std::move(core_->user_callbacks);
         core_->user_callbacks.clear();
 
-        core_->stale_count = 0;
-        core_->rebuild_snapshot();
-        }
+        old_snap = core_->snapshot.exchange(nullptr, std::memory_order_acq_rel);
+        core_->active_count.store(0, std::memory_order_release);
+        lock.unlock();
 
+        old_snap.reset();
         system_old.clear();
         user_old.clear();
 
@@ -564,146 +720,163 @@ public:
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen_with_id(const callback_id id, callback_priority prio, F&& cb, boost::asio::any_io_executor ex) {
         if (id == 0 || !core_) return 0;
 
-        if constexpr (requires { !cb; }) {
-            if (!cb) return 0;
+        if constexpr (requires { static_cast<bool>(cb == nullptr); }) {
+            if (cb == nullptr) return 0;
+        }
+
+        if (!ex) {
+            ex = io_ctx_.executor_;
         }
 
         std::shared_ptr<callback_interface> ptr;
 
-        using Result = std::invoke_result_t<F&, const T&>;
+        using DecayedF = std::decay_t<F>;
+        using Result = std::invoke_result_t<DecayedF&, const T&>;
         if constexpr (!coro::IsAwaitable<Result>) {
-            ptr = std::make_shared<sync_callback<std::decay_t<F>>>(std::forward<F>(cb), std::move(ex));
+            ptr = std::make_shared<sync_callback<DecayedF>>(std::forward<F>(cb), std::move(ex));
         } else {
-            ptr = std::make_shared<async_callback<std::decay_t<F>>>(std::forward<F>(cb), std::move(ex));
+            ptr = std::make_shared<async_callback<DecayedF>>(std::forward<F>(cb), std::move(ex));
         }
 
+        std::shared_ptr<const Snapshot> old_snap;
         {
-        std::scoped_lock lock{core_->mtx};
-        if (prio == callback_priority::system) {
-            core_->system_callbacks.emplace_back(id, std::move(ptr));
-        } else {
-            core_->user_callbacks.emplace_back(id, std::move(ptr));
-        }
-        core_->rebuild_snapshot();
+            std::scoped_lock lock{core_->mtx};
+            if (prio == callback_priority::system) {
+                core_->system_callbacks.emplace_back(id, std::move(ptr));
+                try {
+                    old_snap = core_->rebuild_snapshot();
+                } catch (...) {
+                    core_->system_callbacks.pop_back();
+                    throw;
+                }
+            } else {
+                core_->user_callbacks.emplace_back(id, std::move(ptr));
+                try {
+                    old_snap = core_->rebuild_snapshot();
+                } catch (...) {
+                    core_->user_callbacks.pop_back();
+                    throw;
+                }
+            }
         }
         return id;
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen_with_id(const callback_id id, F&& cb, boost::asio::any_io_executor ex) {
         return listen_with_id(id, callback_priority::user, std::forward<F>(cb), std::move(ex));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::is_same_v<std::decay_t<Executor>, boost::asio::any_io_executor> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::is_same_v<std::decay_t<Executor>, boost::asio::any_io_executor> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_with_id(const callback_id id, callback_priority prio, F&& cb, Executor&& ex) {
         return listen_with_id(id, prio, std::forward<F>(cb), boost::asio::any_io_executor(std::forward<Executor>(ex)));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::is_same_v<std::decay_t<Executor>, boost::asio::any_io_executor> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::is_same_v<std::decay_t<Executor>, boost::asio::any_io_executor> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_with_id(const callback_id id, F&& cb, Executor&& ex) {
         return listen_with_id(id, callback_priority::user, std::forward<F>(cb), std::forward<Executor>(ex));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_with_id(const callback_id id, callback_priority prio, Executor&& ex, F&& cb) {
         return listen_with_id(id, prio, std::forward<F>(cb), boost::asio::any_io_executor(std::forward<Executor>(ex)));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_with_id(const callback_id id, Executor&& ex, F&& cb) {
         return listen_with_id(id, callback_priority::user, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen_with_id(const callback_id id, callback_priority prio, F&& cb) {
         auto ex = boost::asio::get_associated_executor(cb, io_ctx_.executor_);
         return listen_with_id(id, prio, std::forward<F>(cb), std::move(ex));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen_with_id(const callback_id id, F&& cb) {
         return listen_with_id(id, callback_priority::user, std::forward<F>(cb));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen(callback_priority prio, Executor&& ex, F&& cb) {
         return listen_with_id(reserve_id(), prio, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen(Executor&& ex, F&& cb) {
         return listen_with_id(reserve_id(), callback_priority::user, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen(callback_priority prio, F&& cb, Executor&& ex) {
         return listen_with_id(reserve_id(), prio, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen(F&& cb, Executor&& ex) {
         return listen_with_id(reserve_id(), callback_priority::user, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen(callback_priority prio, F&& cb) {
         return listen_with_id(reserve_id(), prio, std::forward<F>(cb));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen(F&& cb) {
         return listen_with_id(reserve_id(), callback_priority::user, std::forward<F>(cb));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_system(Executor&& ex, F&& cb) {
         return listen(callback_priority::system, std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id listen_system(F&& cb, Executor&& ex) {
         return listen(callback_priority::system, std::forward<F>(cb), std::forward<Executor>(ex));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id listen_system(F&& cb) {
         return listen(callback_priority::system, std::forward<F>(cb));
     }
 
     template <typename Executor, typename F>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id operator()(Executor&& ex, F&& cb) {
         return listen(std::forward<Executor>(ex), std::forward<F>(cb));
     }
 
     template <typename F, typename Executor>
-    requires ( std::invocable<F&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<Executor&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> && std::is_constructible_v<boost::asio::any_io_executor, std::decay_t<Executor>> && !std::invocable<std::decay_t<Executor>&, const T&> )
     callback_id operator()(F&& cb, Executor&& ex) {
         return listen(std::forward<F>(cb), std::forward<Executor>(ex));
     }
 
     template <typename F>
-    requires ( std::invocable<F&, const T&> )
+    requires ( std::invocable<std::decay_t<F>&, const T&> )
     callback_id operator()(F&& cb) {
         return listen(std::forward<F>(cb));
     }
@@ -722,12 +895,13 @@ public:
     void fire(T&& data) {
         if (!core_) return;
         const auto active_c = core_->active_count.load(std::memory_order_acquire);
-        if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
+        const auto waiters_c = core_->when_waiters_count.load(std::memory_order_acquire);
+        if (active_c == 0 && waiters_c == 0) return;
 
-        auto snap = core_->get_snapshot();
+        auto snap = active_c != 0 ? core_->get_snapshot() : nullptr;
         if ((!snap || snap->empty()) && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
 
-        attach_bot(data, bot_ptr_);
+        attach_bot(data, bot_ptr_.load(std::memory_order_relaxed));
 
         try {
             if (!snap || snap->async_count == 0) {
@@ -739,7 +913,7 @@ public:
                     return fire_async_internal(std::move(core), std::move(snap), std::move(data));
                 });
             }
-        } 
+        }
         #ifdef DISCUSY_LOGGING
         catch (const std::exception& e) {
             log::Logger{}("Callback fire exception: {}", e.what());
@@ -756,29 +930,37 @@ public:
     void fire_payload(std::string_view payload) {
         if (!core_) return;
         const auto active_c = core_->active_count.load(std::memory_order_acquire);
-        if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
+        const auto waiters_c = core_->when_waiters_count.load(std::memory_order_acquire);
+        if (active_c == 0 && waiters_c == 0) return;
 
-        auto snap = core_->get_snapshot();
+        auto snap = active_c != 0 ? core_->get_snapshot() : nullptr;
         if ((!snap || snap->empty()) && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
+
+        auto* const bot_ptr = bot_ptr_.load(std::memory_order_relaxed);
 
         try {
             if (!snap || snap->async_count == 0) {
-                io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::string(payload)]() mutable {
+                io_ctx_.submit([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload)]() mutable {
                     W p{};
                     if (gateway_protocol::parse(p, payload)) return;
-                    attach_bot(p.d, bot_ptr_);
+                    attach_bot(p.d, bot_ptr);
                     fire_sync_internal(std::move(core), std::move(snap), p.d);
                 });
             } else {
-                io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::string(payload)]() mutable -> coro::awaitable<void> {
+                io_ctx_.co_launch_detached([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload)]() mutable -> coro::awaitable<void> {
                     W p{};
                     if (gateway_protocol::parse(p, payload)) co_return;
-                    attach_bot(p.d, bot_ptr_);
+                    attach_bot(p.d, bot_ptr);
                     co_await fire_async_internal(std::move(core), std::move(snap), std::move(p.d));
                     co_return;
                 });
             }
         }
+        #ifdef DISCUSY_LOGGING
+        catch (const std::exception& e) {
+            log::Logger{}("Callback fire_payload exception: {}", e.what());
+        }
+        #endif
         catch (...) {
             #ifdef DISCUSY_LOGGING
             log::Logger{}("Callback fire_payload unknown exception");
@@ -786,50 +968,12 @@ public:
         }
     }
 
-    // template <typename W = T>
-    // void fire_payload(std::string&& payload) {
-    //     if (!core_) return;
-    //     const auto active_c = core_->active_count.load(std::memory_order_acquire);
-    //     if (active_c == 0 && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
-
-    //     auto snap = core_->get_snapshot();
-    //     if ((!snap || snap->empty()) && core_->when_waiters_count.load(std::memory_order_acquire) == 0) return;
-
-    //     try {
-    //         if (!snap || snap->async_count == 0) {
-    //             io_ctx_.submit([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable {
-    //                 W p{};
-    //                 if (gateway_protocol::parse(p, payload)) return;
-    //                 attach_bot(p.d, bot_ptr_);
-    //                 fire_sync_internal(std::move(core), std::move(snap), p.d);
-    //             });
-    //         } else {
-    //             io_ctx_.co_launch_detached([core = core_, bot_ptr_ = bot_ptr_, snap = std::move(snap), payload = std::move(payload)]() mutable -> coro::awaitable<void> {
-    //                 W p{};
-    //                 if (gateway_protocol::parse(p, payload)) co_return;
-    //                 attach_bot(p.d, bot_ptr_);
-    //                 co_await fire_async_internal(std::move(core), std::move(snap), std::move(p.d));
-    //                 co_return;
-    //             });
-    //         }
-    //     }
-    //     catch (...) {
-    //         #ifdef DISCUSY_LOGGING
-    //         log::Logger{}("Callback fire_payload unknown exception");
-    //         #endif
-    //     }
-    // }
-
     template <typename W = T>
     void fire_json(std::string_view json) {
         fire_payload<W>(json);
     }
 
-    // template <typename W = T>
-    // void fire_json(std::string&& json) {
-    //     fire_payload<W>(std::move(json));
-    // }
-
+private:
     template <typename Predicate, typename Handler, typename Executor>
     struct when_node final : when_interface {
         Predicate pred;
@@ -845,6 +989,7 @@ public:
 
         static void complete(std::shared_ptr<when_interface> self_ptr, boost::system::error_code ec, T data = T{}) {
             auto* self = static_cast<when_node*>(self_ptr.get());
+            self->complete_entered.store(true, std::memory_order_release);
             auto h = std::move(self->handler);
             auto slot = boost::asio::get_associated_cancellation_slot(h);
             if (slot.is_connected()) slot.clear();
@@ -853,42 +998,44 @@ public:
             std::move(h)(ec, std::move(data));
         }
 
-        void try_match(const T& data) noexcept(noexcept(std::atomic_bool().load()) && noexcept(std::atomic_bool().exchange(true, std::memory_order_acq_rel))) override final {
-            if (this->completed.load(std::memory_order_acquire)) return;
+        bool try_match(const T& data) noexcept override final {
+            if (this->completed.load(std::memory_order_acquire)) return true;
 
             bool matched = false;
-            try {
-                matched = std::invoke(pred, data);
-            }
-            #ifdef DISCUSY_LOGGING
-            catch (const std::exception& e) {
-                log::Logger{}("When predicate exception: {}", e.what());
-            }
-            #endif
-            catch (...) {
+            {
+                std::scoped_lock lock{this->match_mtx};
+                if (this->completed.load(std::memory_order_acquire)) return true;
+
+                try {
+                    matched = std::invoke(pred, data);
+                }
                 #ifdef DISCUSY_LOGGING
-                log::Logger{}("When predicate unknown exception");
+                catch (const std::exception& e) {
+                    detail::callback_log_noexcept("When predicate exception: {}", e.what());
+                }
                 #endif
+                catch (...) {
+                    #ifdef DISCUSY_LOGGING
+                    detail::callback_log_noexcept("When predicate unknown exception");
+                    #endif
+                }
+
+                if (!matched) return false;
+
+                if (this->completed.exchange(true, std::memory_order_acq_rel)) return true;
             }
-
-            if (!matched) return;
-
-            if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
 
             auto alloc = boost::asio::get_associated_allocator(
-                handler, 
+                handler,
                 boost::asio::recycling_allocator<void>{}
             );
 
+            std::optional<T> copied_data;
             try {
-                boost::asio::dispatch(ex,
-                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = data]() mutable {
-                        when_node::complete(std::move(self), boost::system::error_code{}, std::move(d));
-                    })
-                );
+                copied_data.emplace(data);
             } catch (...) {
                 #ifdef DISCUSY_LOGGING
-                log::Logger{}("When handler dispatch exception");
+                detail::callback_log_noexcept("When data copy exception");
                 #endif
                 try {
                     boost::asio::dispatch(ex,
@@ -896,15 +1043,47 @@ public:
                             when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::no_memory));
                         })
                     );
-                } catch (...) {} // NOLINT(bugprone-empty-catch)
+                } catch (...) {
+                    #ifdef DISCUSY_LOGGING
+                    detail::callback_log_noexcept("When handler no_memory dispatch exception");
+                    #endif
+                }
+                return true;
             }
+
+            try {
+                boost::asio::dispatch(ex,
+                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = std::move(*copied_data)]() mutable {
+                        when_node::complete(std::move(self), boost::system::error_code{}, std::move(d));
+                    })
+                );
+            } catch (...) {
+                if (!this->complete_entered.load(std::memory_order_acquire)) {
+                    #ifdef DISCUSY_LOGGING
+                    detail::callback_log_noexcept("When handler dispatch exception");
+                    #endif
+                    try {
+                        boost::asio::dispatch(ex,
+                            boost::asio::bind_allocator(alloc, [self = this->shared_from_this()]() mutable {
+                                when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::no_memory));
+                            })
+                        );
+                    } catch (...) {} // NOLINT(bugprone-empty-catch)
+                }
+                #ifdef DISCUSY_LOGGING
+                else {
+                    detail::callback_log_noexcept("When completion handler threw exception");
+                }
+                #endif
+            }
+            return true;
         }
 
-        void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept(noexcept(std::atomic_bool().load())) override final {
+        void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept override final {
             if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
 
             auto alloc = boost::asio::get_associated_allocator(
-                handler, 
+                handler,
                 boost::asio::recycling_allocator<void>{}
             );
 
@@ -913,6 +1092,9 @@ public:
                     boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc]() mutable {
                         boost::asio::dispatch(ex,
                             boost::asio::bind_allocator(alloc, [self = std::move(self)]() mutable {
+                                {
+                                    std::scoped_lock lock{self->match_mtx};
+                                }
                                 when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                             })
                         );
@@ -920,127 +1102,151 @@ public:
                 );
             } catch (...) {
                 #ifdef DISCUSY_LOGGING
-                log::Logger{}("When on_callback_destroyed post exception");
+                detail::callback_log_noexcept("When on_callback_destroyed post exception");
                 #endif
             }
         }
     };
 
+    struct initiate_when {
+        using executor_type = ctx::io_context::executor_t;
+
+        ctx::io_context::executor_t executor;
+
+        // left out on purpose so users are explicit
+        // [[nodiscard]] executor_type get_executor() const noexcept {
+        //     return executor;
+        // }
+
+        template <discusy::asio::chf<T> Handler, typename Pred>
+        void operator()(Handler&& handler, std::weak_ptr<Core> weak_core, Pred&& p) const {
+            using handler_t = std::decay_t<Handler>;
+
+            auto alloc = boost::asio::get_associated_allocator(
+                handler,
+                boost::asio::recycling_allocator<void>{}
+            );
+
+            auto ex = boost::asio::get_associated_executor(handler, executor);
+            using executor_type_h = decltype(ex);
+            using pred_t = std::decay_t<Pred>;
+
+            auto core = weak_core.lock();
+            if (!core) {
+                auto ex_imm = boost::asio::get_associated_immediate_executor(handler, executor);
+                boost::asio::dispatch(
+                    ex_imm,
+                    boost::asio::append(std::forward<decltype(handler)>(handler), boost::asio::error::make_error_code(boost::asio::error::operation_aborted), T{})
+                );
+                return;
+            }
+
+            using node_t = when_node<pred_t, handler_t, executor_type_h>;
+
+            auto node = std::allocate_shared<node_t>(
+                alloc,
+                std::forward<Pred>(p),
+                std::forward<Handler>(handler),
+                ex
+            );
+
+            auto slot = boost::asio::get_associated_cancellation_slot(node->handler);
+            if (slot.is_connected()) {
+                slot.assign([node_weak = std::weak_ptr<node_t>{node}, ex, alloc, weak_core](boost::asio::cancellation_type type) noexcept {
+                    if (type == boost::asio::cancellation_type::none) return;
+                    auto n = node_weak.lock();
+                    if (!n) return;
+
+                    if (n->completed.exchange(true, std::memory_order_acq_rel)) return;
+
+                    try {
+                        boost::asio::post(ex,
+                            boost::asio::bind_allocator(alloc, [n = std::move(n), weak_core]() mutable {
+                                {
+                                    std::scoped_lock lock{n->match_mtx};
+                                }
+                                if (auto c = weak_core.lock()) {
+                                    c->clear_completed_waiter(n);
+                                }
+                                node_t::complete(std::move(n), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                            })
+                        );
+                    } catch (...) {
+                        #ifdef DISCUSY_LOGGING
+                        detail::callback_log_noexcept("When cancellation post exception");
+                        #endif
+                    }
+                });
+            }
+
+            const auto push_res = core->push_when_waiter(node);
+            if (push_res == push_waiter_result::destroyed || push_res == push_waiter_result::no_memory) {
+                if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
+
+                auto h = std::move(node->handler);
+                auto cancel_slot = boost::asio::get_associated_cancellation_slot(h);
+                if (cancel_slot.is_connected()) cancel_slot.clear();
+                auto ex_imm = boost::asio::get_associated_immediate_executor(h, executor);
+                node->work.reset();
+                node.reset();
+
+                const auto ec = (push_res == push_waiter_result::destroyed)
+                    ? boost::asio::error::make_error_code(boost::asio::error::operation_aborted)
+                    : boost::asio::error::make_error_code(boost::asio::error::no_memory);
+
+                boost::asio::dispatch(
+                    ex_imm,
+                    boost::asio::append(std::move(h), ec, T{})
+                );
+            }
+        }
+    };
+
+public:
     // makes a copy of the data, unideal
     // if you want to use it with awaitable operators, pass in boost::asio::use_awaitable
     template <typename Predicate, discusy::asio::ctf<T> CompletionToken = ctx::io_context::dct_t>
-    requires ( std::invocable<Predicate&, const T&> && std::is_same_v<std::invoke_result_t<Predicate&, const T&>, bool> )
+    requires ( std::invocable<std::decay_t<Predicate>&, const T&> && std::is_same_v<std::invoke_result_t<std::decay_t<Predicate>&, const T&>, bool> )
     auto when(Predicate&& pred, CompletionToken&& token = ctx::io_context::dct_t()) {
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code, T)>(
-            [](discusy::asio::chf<T> auto&& handler, std::weak_ptr<Core> weak_core, ctx::io_context::executor_t executor, auto&& p) mutable {
-                using handler_t = std::decay_t<decltype(handler)>;
-
-                auto alloc = boost::asio::get_associated_allocator(
-                    handler, 
-                    boost::asio::recycling_allocator<void>{}
-                );
-
-                auto ex = boost::asio::get_associated_executor(handler, executor);
-                using executor_type = decltype(ex);
-                using pred_t = std::decay_t<decltype(p)>;
-
-                auto core = weak_core.lock();
-                if (!core) {
-                    auto ex_imm = boost::asio::get_associated_immediate_executor(handler, executor);
-                    boost::asio::dispatch(
-                        ex_imm,
-                        boost::asio::append(
-                            std::forward<decltype(handler)>(handler),
-                            boost::asio::error::make_error_code(boost::asio::error::operation_aborted),
-                            T{}
-                        )
-                    );
-                    return;
-                }
-
-                using node_t = when_node<pred_t, handler_t, executor_type>;
-
-                auto node = std::allocate_shared<node_t>(
-                    alloc,
-                    std::forward<decltype(p)>(p),
-                    std::forward<decltype(handler)>(handler),
-                    ex
-                );
-
-                auto slot = boost::asio::get_associated_cancellation_slot(node->handler);
-                if (slot.is_connected()) {
-                    slot.assign([node_weak = std::weak_ptr<node_t>{node}, ex, alloc, executor, weak_core](boost::asio::cancellation_type type) noexcept {
-                        if (type == boost::asio::cancellation_type::none) return;
-                        auto node = node_weak.lock();
-                        if (!node) return;
-
-                        if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
-
-                        try {
-                            boost::asio::post(executor, 
-                                boost::asio::bind_allocator(alloc, [node, alloc, ex, weak_core]() mutable {
-                                    if (auto core = weak_core.lock()) {
-                                        core->clear_completed_waiter(node);
-                                    }
-
-                                    boost::asio::dispatch(ex, 
-                                        boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
-                                            node_t::complete(std::move(node), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
-                                        })
-                                    );
-                                })
-                            );
-                        } catch (...) {
-                            #ifdef DISCUSY_LOGGING
-                            log::Logger{}("When cancellation post exception");
-                            #endif
-                        }
-                    });
-                }
-
-                if (!core->push_when_waiter(node)) {
-                    if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
-
-                    auto h = std::move(node->handler);
-                    auto cancel_slot = boost::asio::get_associated_cancellation_slot(h);
-                    if (cancel_slot.is_connected()) cancel_slot.clear();
-                    auto work = std::move(node->work);
-                    auto ex_imm = boost::asio::get_associated_immediate_executor(h, executor);
-                    node.reset();
-
-                    boost::asio::dispatch(
-                        ex_imm,
-                        boost::asio::append(
-                            std::move(h),
-                            boost::asio::error::make_error_code(boost::asio::error::no_memory),
-                            T{}
-                        )
-                    );
-                }
-            },
+            initiate_when{io_ctx_.executor_},
             token,
             std::weak_ptr<Core>(core_),
-            io_ctx_.executor_,
             std::forward<Predicate>(pred)
         );
     }
 };
 
 template <std::integral N>
+requires (!std::same_as<N, bool>)
 class CounterCallback {
 public:
-    CounterCallback(N target, 
+    CounterCallback(N target,
     #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
-        std::move_only_function<void()> 
+        std::move_only_function<void()>
     #else
-        std::function<void()> 
+        std::function<void()>
     #endif
         callback) noexcept
         : counter_{target}, callback_{std::move(callback)} {}
 
+    CounterCallback(const CounterCallback&) = delete;
+    CounterCallback& operator=(const CounterCallback&) = delete;
+    CounterCallback(CounterCallback&&) = delete;
+    CounterCallback& operator=(CounterCallback&&) = delete;
+
     void arrive() {
-        if (counter_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            std::invoke(callback_);
+        N cur = counter_.load(std::memory_order_acquire);
+        while (cur > 0) {
+            if (counter_.compare_exchange_weak(cur, static_cast<N>(cur - 1),
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {
+                if (cur == 1 && callback_) {
+                    auto cb = std::move(callback_);
+                    std::invoke(cb);
+                }
+                return;
+            }
         }
     }
 

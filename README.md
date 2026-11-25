@@ -67,7 +67,7 @@ However there are some basic concepts to know:
 - Coroutines are `discusy::coro::awaitable<T>`, which is an alias for `boost::asio::awaitable<T>`, make sure you know how to use coroutines before writing your own ones, including how they handle their arguments
 - The callbacks run in this order: system listeners, when predicates (executed in no guaranteed order and can be concurrent), user listeners (cancellable, can be concurrent)
     - Listeners are meant to be registered once and then left alone (it is more expensive to register and unregister), whereas the when predicates are intended to be registered and unregistered with high concurrency
-    - Predicates can run concurrently, be sure to not make them mutable or add protections!
+    - Predicates cannot run concurrently
     - When using `.when(...)` with timeouts (`token::cancel_after`) in a multi-threaded bot (`threads > 1`), the operation must be initiated from within a strand (e.g., via `co_await boost::asio::dispatch(strand, ...)`), and the timer/token must be bound to that same strand. See [`examples/multithreading`](./examples/multithreading).
 ### **Make sure to check out the examples to have some code to work from!**
 
