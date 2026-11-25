@@ -843,11 +843,14 @@ public:
               work(boost::asio::make_work_guard(e)),
               ex(std::forward<decltype(e)>(e)) {}
 
-        void complete(boost::system::error_code ec, T data = T{}) {
-            auto slot = boost::asio::get_associated_cancellation_slot(handler);
-            if (slot.is_connected()) slot.clear(); // TODO: is this actually necessary?
-            work.reset();
-            std::move(handler)(ec, std::move(data));
+        static void complete(std::shared_ptr<when_interface> self_ptr, boost::system::error_code ec, T data = T{}) {
+            auto* self = static_cast<when_node*>(self_ptr.get());
+            auto h = std::move(self->handler);
+            auto slot = boost::asio::get_associated_cancellation_slot(h);
+            if (slot.is_connected()) slot.clear();
+            self->work.reset();
+            self_ptr.reset();
+            std::move(h)(ec, std::move(data));
         }
 
         void try_match(const T& data) noexcept(noexcept(std::atomic_bool().load()) && noexcept(std::atomic_bool().exchange(true, std::memory_order_acq_rel))) override final {
@@ -880,7 +883,7 @@ public:
             try {
                 boost::asio::dispatch(ex,
                     boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = data]() mutable {
-                        static_cast<when_node*>(self.get())->complete(boost::system::error_code{}, std::move(d));
+                        when_node::complete(std::move(self), boost::system::error_code{}, std::move(d));
                     })
                 );
             } catch (...) {
@@ -890,7 +893,7 @@ public:
                 try {
                     boost::asio::dispatch(ex,
                         boost::asio::bind_allocator(alloc, [self = this->shared_from_this()]() mutable {
-                            static_cast<when_node*>(self.get())->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
+                            when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::no_memory));
                         })
                     );
                 } catch (...) {} // NOLINT(bugprone-empty-catch)
@@ -910,7 +913,7 @@ public:
                     boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc]() mutable {
                         boost::asio::dispatch(ex,
                             boost::asio::bind_allocator(alloc, [self = std::move(self)]() mutable {
-                                static_cast<when_node*>(self.get())->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                                when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                             })
                         );
                     })
@@ -944,10 +947,13 @@ public:
                 auto core = weak_core.lock();
                 if (!core) {
                     auto ex_imm = boost::asio::get_associated_immediate_executor(handler, executor);
-                    boost::asio::dispatch(ex_imm,
-                        boost::asio::bind_allocator(alloc, [h = std::forward<decltype(handler)>(handler)]() mutable {
-                            std::move(h)(boost::asio::error::make_error_code(boost::asio::error::operation_aborted), T{});
-                        })
+                    boost::asio::dispatch(
+                        ex_imm,
+                        boost::asio::append(
+                            std::forward<decltype(handler)>(handler),
+                            boost::asio::error::make_error_code(boost::asio::error::operation_aborted),
+                            T{}
+                        )
                     );
                     return;
                 }
@@ -979,7 +985,7 @@ public:
 
                                     boost::asio::dispatch(ex, 
                                         boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
-                                            node->complete(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
+                                            node_t::complete(std::move(node), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                                         })
                                     );
                                 })
@@ -995,12 +1001,20 @@ public:
                 if (!core->push_when_waiter(node)) {
                     if (node->completed.exchange(true, std::memory_order_acq_rel)) return;
 
-                    // TODO: not 100% sure here
-                    auto ex_imm = boost::asio::get_associated_immediate_executor(node->handler, executor);
-                    boost::asio::dispatch(ex_imm, 
-                        boost::asio::bind_allocator(alloc, [node = std::move(node)]() mutable {
-                            node->complete(boost::asio::error::make_error_code(boost::asio::error::no_memory));
-                        })
+                    auto h = std::move(node->handler);
+                    auto cancel_slot = boost::asio::get_associated_cancellation_slot(h);
+                    if (cancel_slot.is_connected()) cancel_slot.clear();
+                    auto work = std::move(node->work);
+                    auto ex_imm = boost::asio::get_associated_immediate_executor(h, executor);
+                    node.reset();
+
+                    boost::asio::dispatch(
+                        ex_imm,
+                        boost::asio::append(
+                            std::move(h),
+                            boost::asio::error::make_error_code(boost::asio::error::no_memory),
+                            T{}
+                        )
                     );
                 }
             },

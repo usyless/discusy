@@ -173,11 +173,25 @@ public:
                     handler, 
                     boost::asio::recycling_allocator<void>{}
                 );
+                auto slot = boost::asio::get_associated_cancellation_slot(handler);
 
                 auto timer = std::allocate_shared<boost::asio::steady_timer>(alloc, ex, time);
+                auto* raw_timer = timer.get();
                 
-                timer->async_wait(
-                    boost::asio::bind_allocator(alloc, boost::asio::consign(std::forward<decltype(handler)>(handler), timer))
+                raw_timer->async_wait(
+                    boost::asio::bind_executor(
+                        ex,
+                        boost::asio::bind_cancellation_slot(
+                            slot,
+                            boost::asio::bind_allocator(
+                                alloc,
+                                [h = std::forward<decltype(handler)>(handler), timer = std::move(timer)](boost::system::error_code ec) mutable {
+                                    timer.reset();
+                                    std::move(h)(ec);
+                                }
+                            )
+                        )
+                    )
                 );
             },
             token,

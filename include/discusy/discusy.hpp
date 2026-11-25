@@ -237,13 +237,12 @@ public:
                     boost::asio::recycling_allocator<void>{}
                 );
 
-                auto early_complete = [&handler, self, &alloc](boost::system::error_code ec, recieve_event::guild_members_chunk result = {}) mutable -> void {
+                auto early_complete = [&handler, self](boost::system::error_code ec, recieve_event::guild_members_chunk result = {}) mutable -> void {
                     auto exec = boost::asio::get_associated_immediate_executor(handler, self->io_ctx.executor_);
 
-                    boost::asio::dispatch(exec,
-                        boost::asio::bind_allocator(alloc, [h = std::move(handler), ec, res = std::move(result)]() mutable {
-                            std::move(h)(ec, std::move(res));
-                        })
+                    boost::asio::dispatch(
+                        exec,
+                        boost::asio::append(std::move(handler), ec, std::move(result))
                     );
                 };
 
@@ -301,11 +300,13 @@ public:
                         boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, std::declval<ctx::io_context::executor_t>()))
                     ) work_guard_;
 
-                    void complete(boost::system::error_code ec, recieve_event::guild_members_chunk&& data = {}) {
-                        auto slot = boost::asio::get_associated_cancellation_slot(handler);
+                    static void complete(std::shared_ptr<chunk_state> self_ptr, boost::system::error_code ec, recieve_event::guild_members_chunk&& data = {}) {
+                        auto h = std::move(self_ptr->handler);
+                        auto slot = boost::asio::get_associated_cancellation_slot(h);
                         if (slot.is_connected()) slot.clear();
-                        work_guard_.reset();
-                        std::move(handler)(ec, std::move(data));
+                        self_ptr->work_guard_.reset();
+                        self_ptr.reset();
+                        std::move(h)(ec, std::move(data));
                     }
 
                     chunk_state(alloc_type a, const ctx::io_context::strand_t& strand, handler_t handler_, const ctx::io_context::executor_t& default_exec) 
@@ -315,6 +316,24 @@ public:
                 auto exec_strand = self->io_ctx.make_strand();
                 std::shared_ptr<chunk_state> state = std::allocate_shared<chunk_state>(alloc, alloc, exec_strand, std::forward<decltype(handler)>(handler), self->io_ctx.executor_);
                 state->accumulated.nonce = std::string(nonce.data(), nonce.size());
+
+                if (!self->send_request_guild_members(std::forward<decltype(members)>(members))) {
+                    auto h = std::move(state->handler);
+                    auto work = std::move(state->work_guard_);
+                    auto exec = boost::asio::get_associated_immediate_executor(h, self->io_ctx.executor_);
+                    { auto drop_nonce = std::move(nonce); }
+                    state.reset();
+
+                    boost::asio::dispatch(
+                        exec,
+                        boost::asio::append(
+                            std::move(h),
+                            boost::asio::error::make_error_code(boost::asio::error::not_connected),
+                            recieve_event::guild_members_chunk{}
+                        )
+                    );
+                    return;
+                }
 
                 auto on_members_chunk = self->gateway_callbacks.on_guild_members_chunk.when([state, nonce = std::move(nonce), alloc](const recieve_event::guild_members_chunk& e) -> bool {
                     if (!e.nonce || (*e.nonce != std::string_view{nonce})) {
@@ -400,18 +419,6 @@ public:
                     return false;
                 }, boost::asio::bind_executor(exec_strand, boost::asio::bind_allocator(alloc, boost::asio::deferred)));
 
-                
-                if (!self->send_request_guild_members(std::forward<decltype(members)>(members))) {
-                    auto exec = boost::asio::get_associated_immediate_executor(state->handler, self->io_ctx.executor_);
-
-                    boost::asio::dispatch(exec,
-                        boost::asio::bind_allocator(alloc, [st = std::move(state)]() mutable {
-                            st->complete(boost::asio::error::not_connected);
-                        })
-                    );
-                    return;
-                }
-
                 auto slot = boost::asio::get_associated_cancellation_slot(state->handler);
 
                 if (slot.is_connected()) {
@@ -460,7 +467,7 @@ public:
                                             : members_chunk_ec;
                                         boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
-                                                self_ptr->complete(ec);
+                                                chunk_state::complete(std::move(self_ptr), ec);
                                             })
                                         );
                                     } else {
@@ -471,7 +478,7 @@ public:
                                         }
                                         boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
-                                                self_ptr->complete(boost::system::error_code{}, std::move(data));
+                                                chunk_state::complete(std::move(self_ptr), boost::system::error_code{}, std::move(data));
                                             })
                                         );
                                     }
@@ -524,13 +531,12 @@ public:
                     boost::asio::recycling_allocator<void>{}
                 );
 
-                auto early_complete = [&handler, self, &alloc](boost::system::error_code ec, recieve_event::channel_info result = {}) mutable -> void {
+                auto early_complete = [&handler, self](boost::system::error_code ec, recieve_event::channel_info result = {}) mutable -> void {
                     auto exec = boost::asio::get_associated_immediate_executor(handler, self->io_ctx.executor_);
 
-                    boost::asio::dispatch(exec,
-                        boost::asio::bind_allocator(alloc, [h = std::move(handler), ec, res = std::move(result)]() mutable {
-                            std::move(h)(ec, std::move(res));
-                        })
+                    boost::asio::dispatch(
+                        exec,
+                        boost::asio::append(std::move(handler), ec, std::move(result))
                     );
                 };
 
@@ -547,11 +553,13 @@ public:
                         boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, std::declval<ctx::io_context::executor_t>()))
                     ) work_guard_;
 
-                    void complete(boost::system::error_code ec, recieve_event::channel_info&& data = {}) {
-                        auto slot = boost::asio::get_associated_cancellation_slot(handler);
+                    static void complete(std::shared_ptr<request_state> self_ptr, boost::system::error_code ec, recieve_event::channel_info&& data = {}) {
+                        auto h = std::move(self_ptr->handler);
+                        auto slot = boost::asio::get_associated_cancellation_slot(h);
                         if (slot.is_connected()) slot.clear();
-                        work_guard_.reset();
-                        std::move(handler)(ec, std::move(data));
+                        self_ptr->work_guard_.reset();
+                        self_ptr.reset();
+                        std::move(h)(ec, std::move(data));
                     }
 
                     request_state(const ctx::io_context::strand_t& strand, handler_t handler_, const ctx::io_context::executor_t& default_exec) 
@@ -561,20 +569,27 @@ public:
                 auto exec_strand = self->io_ctx.make_strand();
                 std::shared_ptr<request_state> state = std::allocate_shared<request_state>(alloc, exec_strand, std::forward<decltype(handler)>(handler), self->io_ctx.executor_);
 
-                auto channel_info = self->gateway_callbacks.on_channel_info.when([id = info.guild_id](const recieve_event::channel_info& e) -> bool {
-                    return e.guild_id == id;
-                }, boost::asio::bind_executor(exec_strand, boost::asio::bind_allocator(alloc, boost::asio::deferred)));
-
+                const auto guild_id = info.guild_id;
                 if (!self->send_request_channel_info(std::forward<decltype(info)>(info))) {
-                    auto exec = boost::asio::get_associated_immediate_executor(state->handler, self->io_ctx.executor_);
+                    auto h = std::move(state->handler);
+                    auto work = std::move(state->work_guard_);
+                    auto exec = boost::asio::get_associated_immediate_executor(h, self->io_ctx.executor_);
+                    state.reset();
 
-                    boost::asio::dispatch(exec,
-                        boost::asio::bind_allocator(alloc, [st = std::move(state)]() mutable {
-                            st->complete(boost::asio::error::not_connected);
-                        })
+                    boost::asio::dispatch(
+                        exec,
+                        boost::asio::append(
+                            std::move(h),
+                            boost::asio::error::make_error_code(boost::asio::error::not_connected),
+                            recieve_event::channel_info{}
+                        )
                     );
                     return;
                 }
+
+                auto channel_info = self->gateway_callbacks.on_channel_info.when([id = guild_id](const recieve_event::channel_info& e) -> bool {
+                    return e.guild_id == id;
+                }, boost::asio::bind_executor(exec_strand, boost::asio::bind_allocator(alloc, boost::asio::deferred)));
 
                 auto slot = boost::asio::get_associated_cancellation_slot(state->handler);
 
@@ -619,13 +634,13 @@ public:
                                             : channel_info_ec;
                                         boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
-                                                self_ptr->complete(ec);
+                                                request_state::complete(std::move(self_ptr), ec);
                                             })
                                         );
                                     } else {
                                         boost::asio::dispatch(target_exec,
                                             boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
-                                                self_ptr->complete(boost::system::error_code{}, std::move(data));
+                                                request_state::complete(std::move(self_ptr), boost::system::error_code{}, std::move(data));
                                             })
                                         );
                                     }
@@ -783,12 +798,14 @@ public:
 
                 auto ex_imm = boost::asio::get_associated_immediate_executor(state->handler, self->io_ctx.executor_);
 
-                auto early_complete = [&state, &ex_imm, &alloc](boost::system::error_code ec, std::string result = {}) mutable {
-                    if (state->completed.exchange(true, std::memory_order_acq_rel)) return;
-                    boost::asio::dispatch(ex_imm,
-                        boost::asio::bind_allocator(alloc, [state, ec, res = std::move(result)]() mutable {
-                            state->complete(ec, std::move(res));
-                        })
+                auto early_complete = [&state, &ex_imm](boost::system::error_code ec, std::string result = {}) {
+                    auto h = std::move(state->handler);
+                    auto work = std::move(state->work); // keep work alive until dispatch submits
+                    state.reset();                      // closes file & frees state_t before handler runs
+
+                    boost::asio::dispatch(
+                        ex_imm,
+                        boost::asio::append(std::move(h), ec, std::move(result))
                     );
                 };
 
@@ -831,16 +848,28 @@ public:
                     boost::asio::bind_cancellation_slot(
                         state->child_signal.slot(),
                         boost::asio::bind_allocator(alloc, [state, ex, alloc](const boost::system::error_code& read_ec, std::size_t bytes_transferred) mutable {
-                            if (state->completed.exchange(true, std::memory_order_acq_rel)) return;
+                            boost::system::error_code ignored;
+                            state->file.close(ignored); // close on file's strand before handing off
 
                             boost::asio::dispatch(ex,
-                                boost::asio::bind_allocator(alloc, [state, read_ec, bytes_transferred]() mutable {
+                                boost::asio::bind_allocator(alloc, [state = std::move(state), read_ec, bytes_transferred]() mutable {
+                                    auto h = std::move(state->handler);
+                                    auto slot = boost::asio::get_associated_cancellation_slot(h);
+                                    if (slot.is_connected()) slot.clear();
+
+                                    boost::system::error_code ec;
+                                    std::string result;
                                     if (read_ec && read_ec != boost::asio::error::eof) {
-                                        state->complete(read_ec, std::string{});
+                                        ec = read_ec;
                                     } else {
                                         state->data.resize(bytes_transferred);
-                                        state->complete(boost::system::error_code{}, std::move(state->data));
+                                        result = std::move(state->data);
                                     }
+
+                                    state->work.reset();
+                                    state.reset(); // deallocate via alloc BEFORE calling h
+
+                                    std::move(h)(ec, std::move(result));
                                 })
                             );
                         })

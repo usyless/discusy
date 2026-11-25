@@ -919,14 +919,12 @@ public:
             [](discusy::asio::chf<> auto&& handler, connection* self, const std::chrono::milliseconds batch_duration, auto&& owned_buffer) mutable {
                 if (self->closed_.load(std::memory_order_acquire) || (self->udp_client() == nullptr)) {
                     auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
-                    auto allocator = boost::asio::get_associated_allocator(
-                        handler,
-                        boost::asio::recycling_allocator<void>{}
-                    );
-                    boost::asio::dispatch(ex_imm,
-                        boost::asio::bind_allocator(allocator, [handler = std::forward<decltype(handler)>(handler)]() mutable {
-                            std::move(handler)(boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
-                        })
+                    boost::asio::dispatch(
+                        ex_imm,
+                        boost::asio::append(
+                            std::forward<decltype(handler)>(handler),
+                            boost::asio::error::make_error_code(boost::asio::error::operation_aborted)
+                        )
                     );
                     return;
                 }
@@ -1024,8 +1022,11 @@ public:
                                 handler,
                                 boost::asio::recycling_allocator<void>{}
                             );
+                            auto h = std::move(this->handler);
+                            auto work_guard = std::move(this->work_guard_);
+                            ptr.reset();
 
-                            boost::asio::dispatch(ex, boost::asio::bind_allocator(alloc, [handler = std::move(this->handler), work_guard = std::move(this->work_guard_), ec]() mutable {
+                            boost::asio::dispatch(ex, boost::asio::bind_allocator(alloc, [handler = std::move(h), work_guard = std::move(work_guard), ec]() mutable {
                                 auto slot = boost::asio::get_associated_cancellation_slot(handler);
                                 if (slot.is_connected()) slot.clear();
                                 work_guard.reset();

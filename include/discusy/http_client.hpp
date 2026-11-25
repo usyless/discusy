@@ -1283,19 +1283,13 @@ private:
             [](discusy::asio::chf<http::response> auto&& handler, http_client_callback* self, const http::method m, auto&& url, auto&& body, auto&& req_headers, auto&& opts) {
                 auto parsed = http::parse_http_url(url);
                 if (!parsed) {
-                    const auto alloc = boost::asio::get_associated_allocator(
-                        handler,
-                        boost::asio::recycling_allocator<void>{}
-                    );
-                    const auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
                     const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
                     boost::asio::dispatch(
                         ex_imm,
-                        boost::asio::bind_allocator(
-                            alloc,
-                            [h = std::forward<decltype(handler)>(handler)] mutable {
-                                std::move(h)(boost::asio::error::invalid_argument, http::response{});
-                            }
+                        boost::asio::append(
+                            std::forward<decltype(handler)>(handler),
+                            boost::asio::error::make_error_code(boost::asio::error::invalid_argument),
+                            http::response{}
                         )
                     );
                     return;

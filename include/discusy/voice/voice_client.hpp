@@ -384,11 +384,13 @@ private:
             return boost::asio::get_associated_immediate_executor(handler, self->bot_.io_ctx.executor_);
         }
 
-        void complete(boost::system::error_code ec, connection_ref&& conn = nullptr) {
-            auto slot = boost::asio::get_associated_cancellation_slot(handler);
+        static void complete(std::shared_ptr<join_state> self_ptr, boost::system::error_code ec, connection_ref&& conn = nullptr) {
+            auto h = std::move(self_ptr->handler);
+            auto slot = boost::asio::get_associated_cancellation_slot(h);
             if (slot.is_connected()) slot.clear();
-            work_guard_.reset();
-            std::move(handler)(ec, std::move(conn));
+            self_ptr->work_guard_.reset();
+            self_ptr.reset();
+            std::move(h)(ec, std::move(conn));
         }
 
         void finish(std::shared_ptr<join_state> self_ptr, boost::system::error_code ec, connection_ref conn = nullptr) {
@@ -398,7 +400,7 @@ private:
 
             boost::asio::dispatch(ex,
                 boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, conn = std::move(conn)]() mutable {
-                    self_ptr->complete(ec, std::move(conn));
+                    join_state::complete(std::move(self_ptr), ec, std::move(conn));
                 })
             );
         }
@@ -413,12 +415,16 @@ private:
         void early_finish(std::shared_ptr<join_state> self_ptr, boost::system::error_code ec, connection_ref conn = nullptr) {
             if (completed.exchange(true, std::memory_order_acq_rel)) return;
 
-            auto ex_imm = get_immediate_executor();
+            auto h = std::move(self_ptr->handler);
+            auto slot = boost::asio::get_associated_cancellation_slot(h);
+            if (slot.is_connected()) slot.clear();
+            auto work = std::move(self_ptr->work_guard_);
+            auto ex_imm = boost::asio::get_associated_immediate_executor(h, self_ptr->self->bot_.io_ctx.executor_);
+            self_ptr.reset();
 
-            boost::asio::dispatch(ex_imm,
-                boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, conn = std::move(conn)]() mutable {
-                    self_ptr->complete(ec, std::move(conn));
-                })
+            boost::asio::dispatch(
+                ex_imm,
+                boost::asio::append(std::move(h), ec, std::move(conn))
             );
         }
 

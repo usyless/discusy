@@ -213,17 +213,16 @@ private:
             [](discusy::asio::chf<discusy::api::result<RetType>> auto&& handler, http_api* self, discusy::http::method m, auto&& url, auto&& body_res, auto&& req_headers) {
                 if (!body_res) {
                     auto exec = boost::asio::get_associated_immediate_executor(handler, self->state_.client.io_ctx_.executor_);
-                    auto alloc = boost::asio::get_associated_allocator(
-                        handler,
-                        boost::asio::recycling_allocator<void>{}
-                    );
 
-                    boost::asio::dispatch(exec,
-                        boost::asio::bind_allocator(alloc, [h = std::forward<decltype(handler)>(handler), err = std::forward<decltype(body_res)>(body_res).error()]() mutable {
-                            std::move(h)(boost::asio::error::invalid_argument, discusy::api::result<RetType>{
-                                .error_info_{{.message = std::move(err)}},
-                            });
-                        })
+                    boost::asio::dispatch(
+                        exec,
+                        boost::asio::append(
+                            std::forward<decltype(handler)>(handler),
+                            boost::asio::error::make_error_code(boost::asio::error::invalid_argument),
+                            discusy::api::result<RetType>{
+                                .error_info_{{.message = std::forward<decltype(body_res)>(body_res).error()}},
+                            }
+                        )
                     );
                     return;
                 }
