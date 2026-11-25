@@ -2,6 +2,7 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
+#include <boost/asio/experimental/promise.hpp>
 #include <boost/asio/experimental/use_promise.hpp>
 
 namespace discusy::coro {
