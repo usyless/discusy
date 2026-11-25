@@ -137,10 +137,10 @@ public:
         ws_.stop();
         ws_.pause();
 
-        ws_.on_connect_ready(connect_cb{nullptr});
-        ws_.on_close(close_cb{nullptr});
-        ws_.on_message(message_cb{nullptr});
-        ws_.on_open(open_cb{nullptr});
+        ws_.on_connect_ready({});
+        ws_.on_close({});
+        ws_.on_message({});
+        ws_.on_open({});
 
         ws_.clear();
     }
@@ -351,10 +351,10 @@ private:
     }
 
     void setup_gateway_callbacks() {
-        ws_.on_open(open_cb{this});
-        ws_.on_connect_ready(connect_cb{this});
-        ws_.on_close(close_cb{this});
-        ws_.on_message(message_cb{this});
+        ws_.on_open(ws_client_t::open_callback::bind<&shard::handle_ws_open>(this));
+        ws_.on_connect_ready(ws_client_t::connect_ready_callback::bind<&shard::handle_ws_connect_ready>(this));
+        ws_.on_close(ws_client_t::close_callback::bind<&shard::handle_ws_close>(this));
+        ws_.on_message(ws_client_t::message_callback::bind<&shard::handle_ws_message>(this));
     }
 
     void reconnect_internal() {
@@ -721,12 +721,7 @@ private:
 public:
     const ctx::io_context::strand_t strand_;
 private:
-    struct open_cb    { shard* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_open(); } };
-    struct connect_cb { shard* s{nullptr}; void operator()() const { if(s != nullptr) s->handle_ws_connect_ready(); } };
-    struct close_cb   { shard* s{nullptr}; void operator()(std::uint16_t c) const { if(s != nullptr) s->handle_ws_close(c); } };
-    struct message_cb { shard* s{nullptr}; void operator()(std::string_view m, bool b) const { if(s != nullptr) s->handle_ws_message(m, b); } };
-
-    using ws_client_t = ws::websocket_client<open_cb, close_cb, message_cb, connect_cb>;
+    using ws_client_t = ws::websocket_client;
 
     std::shared_ptr<ws_client_t> ws_shared_;
     ws_client_t& ws_;

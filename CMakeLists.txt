@@ -231,11 +231,8 @@ else()
     )
 
     if(DISCUSY_ENABLE_PCH)
-        set(USYLIBPP_ENABLE_PCH ON CACHE BOOL "" FORCE)
         if(PROJECT_IS_TOP_LEVEL)
-            target_precompile_headers(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
-                "<${PROJECT_NAME}/pch_top_level.hpp>"
-            )
+            set(USYLIBPP_ENABLE_PCH ON CACHE BOOL "" FORCE)
         else()
             set(USYLIBPP_ENABLE_PCH OFF CACHE BOOL "" FORCE)
             target_precompile_headers(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
@@ -730,6 +727,21 @@ if(PROJECT_IS_TOP_LEVEL)
         )
     endif()
 
+    if(DISCUSY_ENABLE_PCH AND NOT DISCUSY_USE_MODULES)
+        set(DISCUSY_PCH_ANCHOR "${CMAKE_CURRENT_BINARY_DIR}/discusy_pch_anchor.cpp")
+        if(NOT EXISTS "${DISCUSY_PCH_ANCHOR}")
+            file(WRITE "${DISCUSY_PCH_ANCHOR}" "// Anchor source for shared top-level precompiled header target.\n")
+        endif()
+        add_library(discusy_pch STATIC "${DISCUSY_PCH_ANCHOR}")
+        target_link_libraries(discusy_pch PRIVATE
+            discusy::discusy
+            discusy_exe_options
+        )
+        target_precompile_headers(discusy_pch PRIVATE
+            "<${PROJECT_NAME}/pch_top_level.hpp>"
+        )
+    endif()
+
     set(TEST_LIBRARY_NAME "${PROJECT_NAME}_test")
     add_executable(${TEST_LIBRARY_NAME}
         "${PROJECT_SOURCE_DIR}/src/test.cpp"
@@ -740,6 +752,10 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy_exe_options
     )
 
+    if(TARGET discusy_pch)
+        target_precompile_headers(${TEST_LIBRARY_NAME} REUSE_FROM discusy_pch)
+    endif()
+
     set(BENCHMARK_JSON_ETF_LIBRARY_NAME "${PROJECT_NAME}_benchmark_json_etf")
     add_executable(${BENCHMARK_JSON_ETF_LIBRARY_NAME}
         "${PROJECT_SOURCE_DIR}/src/benchmark_json_etf.cpp"
@@ -749,6 +765,10 @@ if(PROJECT_IS_TOP_LEVEL)
         discusy::discusy
         discusy_exe_options
     )
+
+    if(TARGET discusy_pch)
+        target_precompile_headers(${BENCHMARK_JSON_ETF_LIBRARY_NAME} REUSE_FROM discusy_pch)
+    endif()
 
     if(WIN32)
         file(GLOB DISCUSY_MAIN_OPENSSL_DLLS

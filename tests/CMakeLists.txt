@@ -33,6 +33,10 @@ target_link_libraries(discusy_unit_tests PRIVATE
     Catch2::Catch2WithMain
 )
 
+if(TARGET discusy_pch)
+    target_precompile_headers(discusy_unit_tests REUSE_FROM discusy_pch)
+endif()
+
 if(WIN32)
     file(GLOB DISCUSY_TEST_OPENSSL_DLLS
         "${PROJECT_SOURCE_DIR}/3rdparty/openssl/bin/*.dll"

@@ -53,12 +53,40 @@ struct message_t {
 };
 
 // all methods must be called from the strand_ itself
-template <typename openHandler, typename closeHandler, typename messageHandler, typename connectHandler>
-requires (
-    std::invocable<std::decay_t<openHandler>&> && std::invocable<std::decay_t<connectHandler>&> &&
-    std::invocable<std::decay_t<closeHandler>&, std::uint16_t> && std::invocable<std::decay_t<messageHandler>&, std::string_view, bool>
-)
-class websocket_client : public std::enable_shared_from_this<websocket_client<openHandler, closeHandler, messageHandler, connectHandler>> {
+class websocket_client : public std::enable_shared_from_this<websocket_client> {
+public:
+    template <typename Sig>
+    struct callback_ref;
+
+    template <typename... Args>
+    struct callback_ref<void(Args...)> {
+        void* ctx{nullptr};
+        void (*fn)(void*, Args...){nullptr};
+
+        constexpr void operator()(Args... args) const {
+            if (fn != nullptr) {
+                fn(ctx, std::forward<Args>(args)...);
+            }
+        }
+
+        template <auto Method, typename Obj>
+        [[nodiscard]] static constexpr callback_ref bind(Obj* obj) noexcept {
+            if (obj == nullptr) return {};
+            return {
+                static_cast<void*>(obj),
+                [](void* p, Args... args) {
+                    (static_cast<Obj*>(p)->*Method)(std::forward<Args>(args)...);
+                }
+            };
+        }
+    };
+
+    using open_callback = callback_ref<void()>;
+    using connect_ready_callback = callback_ref<void()>;
+    using close_callback = callback_ref<void(std::uint16_t)>;
+    using message_callback = callback_ref<void(std::string_view, bool)>;
+
+private:
     using stream_t = websocket::stream<net::ssl::stream<ctx::io_context::strand_tcp_stream_t>>;
 
     static constexpr std::size_t INITIAL_PRIORITY_QUEUE_CAPACITY = 16;
@@ -105,10 +133,10 @@ class websocket_client : public std::enable_shared_from_this<websocket_client<op
     std::string host_header_;
     std::string target_;
 
-    std::decay_t<openHandler> on_open_cb_{};
-    std::decay_t<closeHandler> on_close_cb_{};
-    std::decay_t<messageHandler> on_message_cb_{};
-    std::decay_t<connectHandler> on_connect_ready_{};
+    open_callback on_open_cb_{};
+    close_callback on_close_cb_{};
+    message_callback on_message_cb_{};
+    connect_ready_callback on_connect_ready_{};
 
     static void push_queue(boost::circular_buffer<message_t>& q, message_t&& msg, const std::size_t initial_cap) {
         if (q.full()) {
@@ -213,21 +241,13 @@ public:
 
     [[nodiscard]] bool is_open() const noexcept { return open_ && !closed_ && !stopped_; }
 
-    template <typename F>
-    requires ( std::invocable<F&> )
-    void on_open(F&& cb) { on_open_cb_ = std::forward<F>(cb); }
+    void on_open(const open_callback cb) noexcept { on_open_cb_ = cb; }
 
-    template <typename F>
-    requires ( std::invocable<F&> )
-    void on_connect_ready(F&& cb) { on_connect_ready_ = std::forward<F>(cb); }
+    void on_connect_ready(const connect_ready_callback cb) noexcept { on_connect_ready_ = cb; }
 
-    template <typename F>
-    requires ( std::invocable<F&, std::uint16_t> )
-    void on_close(F&& cb) { on_close_cb_ = std::forward<F>(cb); }
+    void on_close(const close_callback cb) noexcept { on_close_cb_ = cb; }
 
-    template <typename F>
-    requires ( std::invocable<F&, std::string_view, bool> )
-    void on_message(F&& cb) { on_message_cb_ = std::forward<F>(cb); }
+    void on_message(const message_callback cb) noexcept { on_message_cb_ = cb; }
 
     [[nodiscard]] bool connect(const std::string_view url) {
         if (stopped_) return false;

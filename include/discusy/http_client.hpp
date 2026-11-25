@@ -502,11 +502,95 @@ class http_client_callback final : public http_client_base {
 private:
     static constexpr std::chrono::seconds ssl_shutdown_timeout_{2};
 
-    template <bool Api, typename Handler>
-    struct request_state {
+    struct completion_base {
+        virtual ~completion_base() noexcept = default;
+        virtual void complete_and_destroy(boost::system::error_code ec, http::response res) = 0;
+        virtual void destroy() noexcept = 0;
+    };
+
+    template <typename Handler>
+    struct completion_holder final : completion_base {
+        using alloc_t = std::decay_t<decltype(
+            boost::asio::get_associated_allocator(std::declval<const Handler&>(), boost::asio::recycling_allocator<void>{})
+        )>;
+        using exec_t = std::decay_t<decltype(
+            boost::asio::get_associated_executor(std::declval<const Handler&>(), std::declval<ctx::io_context::executor_t>())
+        )>;
+        using rebind_alloc_t = std::allocator_traits<alloc_t>::template rebind_alloc<completion_holder>;
+
         Handler handler;
+        alloc_t alloc;
+        exec_t ex;
+        boost::asio::executor_work_guard<exec_t> work_guard;
+
+        completion_holder(Handler&& h, const ctx::io_context::executor_t& default_ex)
+            : handler{std::move(h)},
+              alloc{boost::asio::get_associated_allocator(handler, boost::asio::recycling_allocator<void>{})},
+              ex{boost::asio::get_associated_executor(handler, default_ex)},
+              work_guard{boost::asio::make_work_guard(ex)} {}
+
+        static completion_holder* create(Handler&& h, const ctx::io_context::executor_t& default_ex) {
+            auto base_alloc = boost::asio::get_associated_allocator(h, boost::asio::recycling_allocator<void>{});
+            rebind_alloc_t ra{base_alloc};
+            completion_holder* p = std::allocator_traits<rebind_alloc_t>::allocate(ra, 1);
+            try {
+                std::allocator_traits<rebind_alloc_t>::construct(ra, p, std::move(h), default_ex);
+            } catch (...) {
+                std::allocator_traits<rebind_alloc_t>::deallocate(ra, p, 1);
+                throw;
+            }
+            return p;
+        }
+
+        void destroy() noexcept override final {
+            rebind_alloc_t ra{alloc};
+            std::allocator_traits<rebind_alloc_t>::destroy(ra, this);
+            std::allocator_traits<rebind_alloc_t>::deallocate(ra, this, 1);
+        }
+
+        void complete_and_destroy(const boost::system::error_code ec, http::response res) override final {
+            struct holder_guard {
+                completion_holder* ptr;
+                explicit holder_guard(completion_holder* p) noexcept : ptr{p} {}
+                holder_guard(holder_guard&& other) noexcept : ptr{std::exchange(other.ptr, nullptr)} {}
+                holder_guard(const holder_guard&) = delete;
+                holder_guard& operator=(const holder_guard&) = delete;
+                holder_guard& operator=(holder_guard&&) = delete;
+                ~holder_guard() noexcept {
+                    if (ptr != nullptr) ptr->destroy();
+                }
+            };
+
+            const auto local_ex = ex;
+            const auto local_alloc = alloc;
+            boost::asio::dispatch(
+                local_ex,
+                boost::asio::bind_allocator(
+                    local_alloc,
+                    [g = holder_guard{this}, ec, res = std::move(res)]() mutable {
+                        auto* self_h = g.ptr;
+                        auto h = std::move(self_h->handler); // NOLINT(misc-const-correctness)
+                        auto slot = boost::asio::get_associated_cancellation_slot(h);
+                        if (slot.is_connected()) slot.clear();
+                        auto wg = std::move(self_h->work_guard);
+                        // Release holder allocated with the associated allocator before invoking handler.
+                        g.ptr = nullptr;
+                        self_h->destroy();
+                        wg.reset();
+                        std::move(h)(ec, std::move(res));
+                    }
+                )
+            );
+        }
+    };
+
+    struct request_state {
+        using io_alloc_t = boost::asio::recycling_allocator<void>;
+
+        completion_base* completion_{nullptr};
         http_client_callback* self;
         http::method current_method;
+        bool is_api{false};
         std::string url;
 
         std::string body;
@@ -542,22 +626,27 @@ private:
         std::size_t redirect_count{0};
         http::cookies accumulated_cookies;
 
-        decltype(
-            boost::asio::get_associated_allocator(handler, boost::asio::recycling_allocator<void>{})
-        ) allocator;
+        io_alloc_t allocator{};
 
-        decltype(
-            boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, std::declval<ctx::io_context::executor_t>()))
-        ) work_guard_;
-
-        request_state(auto&& h, http_client_callback* s, const http::method m, auto&& u, http::parsed_url parsed, auto&& b, auto&& hdrs, auto&& o)
-            : handler{std::forward<decltype(h)>(h)},
+        request_state(
+            completion_base* comp,
+            http_client_callback* s,
+            const bool api,
+            const http::method m,
+            std::string u,
+            http::parsed_url parsed,
+            std::string b,
+            headers hdrs,
+            http::options o
+        )
+            : completion_{comp},
               self{s},
               current_method{m},
-              url{std::forward<decltype(u)>(u)},
-              body{std::forward<decltype(b)>(b)},
-              req_headers{std::forward<decltype(hdrs)>(hdrs)},
-              opts{std::forward<decltype(o)>(o)},
+              is_api{api},
+              url{std::move(u)},
+              body{std::move(b)},
+              req_headers{std::move(hdrs)},
+              opts{std::move(o)},
               strand_{s->io_ctx_.make_strand()},
               host{std::move(parsed.host)},
               host_header{std::move(parsed.host_header)},
@@ -566,9 +655,19 @@ private:
               is_ssl{parsed.is_ssl},
               host_is_name{parsed.host_is_name},
               resolver{strand_},
-              timer{strand_},
-              allocator{boost::asio::get_associated_allocator(handler, boost::asio::recycling_allocator<void>{})},
-              work_guard_{boost::asio::make_work_guard(boost::asio::get_associated_executor(handler, s->io_ctx_.executor_))} {}
+              timer{strand_} {}
+
+        ~request_state() noexcept {
+            if (completion_ != nullptr) {
+                completion_->destroy();
+                completion_ = nullptr;
+            }
+        }
+
+        request_state(const request_state&) = delete;
+        request_state& operator=(const request_state&) = delete;
+        request_state(request_state&&) = delete;
+        request_state& operator=(request_state&&) = delete;
 
         [[nodiscard]] bool is_cancelled() const noexcept {
             return cancelled_type != boost::asio::cancellation_type::none;
@@ -588,10 +687,6 @@ private:
             });
         }
 
-        auto get_executor() {
-            return boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
-        }
-
         void close_stream_immediately() noexcept {
             if (stream) {
                 http::get_lowest_layer(*stream).close();
@@ -605,24 +700,11 @@ private:
             // Ensure stream is closed/destroyed on its own strand before completing on handler's executor.
             close_stream_immediately();
 
-            const auto ex = get_executor();
-            const auto alloc = allocator;
-
-            boost::asio::dispatch(
-                ex,
-                boost::asio::bind_allocator(
-                    alloc,
-                    [self_ptr = std::move(self_ptr), ec, res = std::move(res)] mutable {
-                        auto h = std::move(self_ptr->handler); // NOLINT(misc-const-correctness)
-                        auto slot = boost::asio::get_associated_cancellation_slot(h);
-                        if (slot.is_connected()) slot.clear();
-                        self_ptr->work_guard_.reset();
-                        // Release state allocated with the associated allocator before invoking handler.
-                        self_ptr.reset();
-                        std::move(h)(ec, std::move(res));
-                    }
-                )
-            );
+            auto* comp = std::exchange(completion_, nullptr);
+            self_ptr.reset();
+            if (comp != nullptr) {
+                comp->complete_and_destroy(ec, std::move(res));
+            }
         }
 
         void operation_cancelled(std::shared_ptr<request_state> self_ptr) {
@@ -646,7 +728,7 @@ private:
 
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
-            if constexpr (Api) {
+            if (is_api) {
                 route_key = http::generate_route_key(current_method, url);
 
                 if (!route_key.empty()) {
@@ -1181,7 +1263,7 @@ private:
 
             const bool repooled = try_repool_connection(res.keep_alive());
 
-            if constexpr (Api) {
+            if (is_api) {
                 if (!route_key.empty()) {
                     self->rate_limiter_.update(route_key, res);
 
@@ -1250,8 +1332,7 @@ private:
             finish(std::move(self_ptr), boost::system::error_code{}, std::move(final_resp));
         }
 
-        template <typename Rep, typename Period>
-        void step_wait_429(std::shared_ptr<request_state> self_ptr, const std::chrono::duration<Rep, Period> delay) {
+        void step_wait_429(std::shared_ptr<request_state> self_ptr, const std::chrono::steady_clock::duration delay) {
             if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
 
             timer.expires_after(delay);
@@ -1277,6 +1358,44 @@ private:
         }
     };
 
+    static void start_request_state(
+        completion_base* comp,
+        boost::asio::cancellation_slot slot,
+        http_client_callback* self,
+        const bool is_api,
+        const http::method m,
+        std::string url,
+        http::parsed_url parsed,
+        std::string body,
+        headers req_headers,
+        http::options opts
+    ) {
+        std::shared_ptr<request_state> state;
+        try {
+            state = std::allocate_shared<request_state>(
+                boost::asio::recycling_allocator<void>{},
+                comp,
+                self, is_api, m, std::move(url), std::move(parsed),
+                std::move(body), std::move(req_headers), std::move(opts)
+            );
+        } catch (...) {
+            if (comp != nullptr) comp->destroy();
+            throw;
+        }
+
+        if (slot.is_connected()) {
+            slot.assign([weak_state = std::weak_ptr<request_state>{state}](const boost::asio::cancellation_type type) {
+                if (std::shared_ptr<request_state> st = weak_state.lock()) {
+                    auto* raw = st.get();
+                    raw->handle_cancel(std::move(st), type);
+                }
+            });
+        }
+
+        request_state* raw = state.get();
+        raw->init(std::move(state));
+    }
+
     template <bool Api, discusy::asio::ctf<http::response> CompletionToken>
     auto request_impl_(const http::method m, std::string&& url, std::string&& body, headers&& req_headers, http::options&& opts, CompletionToken&& token) {
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code, http::response)>(
@@ -1296,33 +1415,23 @@ private:
                 }
 
                 using handler_t = std::decay_t<decltype(handler)>;
-                using state_type = request_state<Api, handler_t>;
-
-                const auto alloc = boost::asio::get_associated_allocator(
-                    handler,
-                    boost::asio::recycling_allocator<void>{}
-                );
-
-                std::shared_ptr<state_type> state = std::allocate_shared<state_type>(
-                    alloc,
+                auto* comp = completion_holder<handler_t>::create(
                     std::forward<decltype(handler)>(handler),
-                    self, m, std::forward<decltype(url)>(url), std::move(*parsed),
-                    std::forward<decltype(body)>(body), std::forward<decltype(req_headers)>(req_headers), std::forward<decltype(opts)>(opts)
+                    self->io_ctx_.executor_
                 );
-
-                auto slot = boost::asio::get_associated_cancellation_slot(state->handler);
-
-                if (slot.is_connected()) {
-                    slot.assign([weak_state = std::weak_ptr<state_type>{state}](const boost::asio::cancellation_type type) {
-                        if (std::shared_ptr<state_type> st = weak_state.lock()) {
-                            auto* raw = st.get();
-                            raw->handle_cancel(std::move(st), type);
-                        }
-                    });
-                }
-
-                state_type* raw = state.get();
-                raw->init(std::move(state));
+                auto slot = boost::asio::get_associated_cancellation_slot(comp->handler);
+                start_request_state(
+                    comp,
+                    slot,
+                    self,
+                    Api,
+                    m,
+                    std::forward<decltype(url)>(url),
+                    std::move(*parsed),
+                    std::forward<decltype(body)>(body),
+                    std::forward<decltype(req_headers)>(req_headers),
+                    std::forward<decltype(opts)>(opts)
+                );
             },
             token,
             this, m, std::move(url), std::move(body), std::move(req_headers), std::move(opts)
