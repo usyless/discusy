@@ -175,7 +175,7 @@ public:
                 );
                 const auto slot = boost::asio::get_associated_cancellation_slot(handler);
 
-                auto timer = std::allocate_shared<boost::asio::steady_timer>(alloc, ex, time);
+                auto timer = std::allocate_shared<boost::asio::steady_timer>(alloc, self->executor_, time);
                 auto* raw_timer = timer.get();
                 
                 raw_timer->async_wait(
