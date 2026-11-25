@@ -23,6 +23,9 @@ include(FetchContent)
 
 # Core Features & Build Configuration
 option(DISCUSY_USE_MODULES "Enable C++20 Modules support for discusy (NOT WORKING)" OFF)
+if(PROJECT_IS_TOP_LEVEL AND NOT DISCUSY_USE_MODULES)
+    set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+endif()
 cmake_dependent_option(DISCUSY_ENABLE_PCH "Enable PCH for quicker compilation" ON "NOT DISCUSY_USE_MODULES" OFF)
 option(DISCUSY_LOGGING_ENABLED "Enable logging in release mode" OFF)
 option(DISCUSY_USE_MIMALLOC "Replace default allocator with mimalloc" OFF)
