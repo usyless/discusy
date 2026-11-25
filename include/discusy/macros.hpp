@@ -4,7 +4,7 @@
 
 #pragma push_macro("DISCUSY_NO_UNIQUE_ADDRESS")
 #undef DISCUSY_NO_UNIQUE_ADDRESS
-#if defined(__has_cpp_attribute)
+#ifdef __has_cpp_attribute
 #  if defined(_MSC_VER) && __has_cpp_attribute(msvc::no_unique_address)
 #    define DISCUSY_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #  elif __has_cpp_attribute(no_unique_address)

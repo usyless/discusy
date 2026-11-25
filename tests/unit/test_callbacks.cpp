@@ -68,7 +68,7 @@ TEST_CASE("Callback: Unregister listener", "[callback]") {
     discusy::Callback<int> cb{ctx};
 
     int call_count = 0;
-    auto id = cb.listen([&](int) {
+    const auto id = cb.listen([&](int) {
         call_count++;
     });
 
@@ -84,14 +84,14 @@ TEST_CASE("CounterCallback: Thread-safe rendezvous trigger", "[callback]") {
     std::atomic<int> completions{0};
     constexpr int TARGET = 10;
 
-    discusy::CounterCallback barrier{TARGET, [&]() {
+    discusy::CounterCallback barrier{TARGET, [&] {
         completions.fetch_add(1, std::memory_order_relaxed);
     }};
 
     std::vector<std::thread> workers;
     workers.reserve(TARGET);
     for (int i = 0; i < TARGET; ++i) {
-        workers.emplace_back([&barrier]() {
+        workers.emplace_back([&barrier] {
             barrier.arrive();
         });
     }
@@ -229,12 +229,12 @@ TEST_CASE("Callback: when() coroutine awaitable support", "[callback]") {
     bool coroutine_completed = false;
     int result = 0;
 
-    ctx.co_launch_detached([&]() -> discusy::coro::awaitable<void> {
+    ctx.co_launch_detached([&] -> discusy::coro::awaitable<void> {
         result = co_await cb.when([](int x) { return x == 777; }, boost::asio::use_awaitable);
         coroutine_completed = true;
     });
 
-    ctx.post([&]() {
+    ctx.post([&] {
         cb.fire(1);
         cb.fire(777);
     });
@@ -256,7 +256,7 @@ TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
     static constexpr std::size_t num_threads = 4;
     threads.reserve(num_threads);
     for (std::size_t t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&, t] {
             for (std::size_t i = 0; i < NUM_WAITERS / num_threads; ++i) {
                 cb.when(
                     [val = (t * 100) + i](std::size_t x) { return x == val; },
@@ -277,7 +277,7 @@ TEST_CASE("Callback: Concurrent when() and fire() stress test", "[callback]") {
 
     // Fire matching events concurrently
     for (std::size_t t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&, t] {
             for (std::size_t i = 0; i < NUM_WAITERS / num_threads; ++i) {
                 cb.fire((t * 100) + i);
             }
@@ -300,7 +300,7 @@ TEST_CASE("Callback: Async and mixed sync/async callbacks with strand and short-
     std::vector<std::string> log;
     std::mutex log_mtx;
     auto push = [&](std::string s) {
-        std::scoped_lock lock{log_mtx};
+        const std::scoped_lock lock{log_mtx};
         log.emplace_back(std::move(s));
     };
 
@@ -343,7 +343,7 @@ TEST_CASE("Callback: Async and mixed sync/async callbacks with strand and short-
 TEST_CASE("Callback: Sync callback on strand exception does not halt subsequent callbacks", "[callback]") {
     discusy::ctx::io_context ctx{1};
     discusy::Callback<int> cb{ctx};
-    auto strand = ctx.make_strand();
+    const auto strand = ctx.make_strand();
 
     bool second_ran = false;
 
@@ -388,7 +388,7 @@ struct PropagatingInlineExecutor {
     bool operator==(const PropagatingInlineExecutor&) const noexcept = default;
 
     auto require(boost::asio::execution::blocking_t::never_t) const {
-        return boost::asio::require(fallback, boost::asio::execution::blocking.never);
+        return boost::asio::require(fallback, boost::asio::execution::blocking_t::never);
     }
 
     auto require(boost::asio::execution::blocking_t::possibly_t) const noexcept {
@@ -396,7 +396,7 @@ struct PropagatingInlineExecutor {
     }
 
     static constexpr boost::asio::execution::blocking_t query(boost::asio::execution::blocking_t) noexcept {
-        return boost::asio::execution::blocking.possibly;
+        return boost::asio::execution::blocking_t::possibly;
     }
 
     template <typename F>
@@ -459,7 +459,7 @@ TEST_CASE("Callback: Deferred when() initiated after destruction respects bound 
     bool completed_on_strand = false;
     boost::system::error_code captured_ec;
 
-    auto deferred_op = [&]() {
+    auto deferred_op = [&] {
         discusy::Callback<int> cb{ctx};
         return cb.when([](int) { return true; }, boost::asio::deferred);
     }();
@@ -514,11 +514,11 @@ TEST_CASE("Callback: Multi-threaded when() predicate reference lifetime vs cance
     std::atomic<int> done{0};
     std::atomic<bool> stop_firing{false};
 
-    std::thread firer([&]() {
+    std::thread firer([&] {
         int v = 0;
         while (!stop_firing.load(std::memory_order_relaxed)) {
             cb.fire(v++);
-            if ((v & 15) == 0) {
+            if ((v & 15U) == 0) {
                 std::this_thread::yield();
             }
         }
@@ -526,13 +526,14 @@ TEST_CASE("Callback: Multi-threaded when() predicate reference lifetime vs cance
 
     auto work = boost::asio::make_work_guard(ctx.io_ctx_);
     std::vector<std::thread> workers;
+    workers.reserve(3);
     for (int i = 0; i < 3; ++i) {
-        workers.emplace_back([&]() { ctx->run(); });
+        workers.emplace_back([&] { ctx->run(); });
     }
 
     for (int i = 0; i < ITERS; ++i) {
-        auto strand = ctx.make_strand();
-        ctx.co_launch_detached([&, strand]() -> discusy::coro::awaitable<void> {
+        const auto strand = ctx.make_strand();
+        ctx.co_launch_detached([&, strand] -> discusy::coro::awaitable<void> {
             co_await boost::asio::dispatch(strand, boost::asio::deferred);
             std::string local_sentinel = "alive_sentinel_value_for_uaf_check";
             discusy::ctx::io_context::strand_timer_t timer{strand};
@@ -565,7 +566,7 @@ TEST_CASE("Callback: Multi-threaded when() predicate reference lifetime vs cance
 
 TEST_CASE("CounterCallback: Saturates without wrap-around and supports self-destruction", "[callback]") {
     int count = 0;
-    discusy::CounterCallback<std::uint8_t> narrow{2, [&]() { ++count; }};
+    discusy::CounterCallback<std::uint8_t> narrow{2, [&] { ++count; }};
     for (int i = 0; i < 300; ++i) {
         narrow.arrive();
     }
@@ -574,7 +575,7 @@ TEST_CASE("CounterCallback: Saturates without wrap-around and supports self-dest
     // Self-destruction inside callback
     std::unique_ptr<discusy::CounterCallback<int>> self_ptr;
     bool self_fired = false;
-    self_ptr = std::make_unique<discusy::CounterCallback<int>>(1, [&]() {
+    self_ptr = std::make_unique<discusy::CounterCallback<int>>(1, [&] {
         self_fired = true;
         self_ptr.reset();
     });

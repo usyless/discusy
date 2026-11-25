@@ -202,20 +202,20 @@ namespace user {
     };
 
     enum class user_flags : std::uint32_t {
-        STAFF = 1ULL << 0, // Discord Employee
-        PARTNER = 1ULL << 1, // Partnered Server Owner
-        HYPESQUAD = 1ULL << 2, // HypeSquad Events Member
-        BUG_HUNTER_LEVEL_1 = 1ULL << 3, // Bug Hunter Level 1
-        HYPESQUAD_ONLINE_HOUSE_1 = 1ULL << 6, // House Bravery Member
-        HYPESQUAD_ONLINE_HOUSE_2 = 1ULL << 7, // House Brilliance Member
-        HYPESQUAD_ONLINE_HOUSE_3 = 1ULL << 8, // House Balance Member
-        PREMIUM_EARLY_SUPPORTER = 1ULL << 9, // Early Nitro Supporter
-        TEAM_PSEUDO_USER = 1ULL << 10, // User is a team
-        BUG_HUNTER_LEVEL_2 = 1ULL << 14, // Bug Hunter Level 2
-        VERIFIED_BOT = 1ULL << 16, // Verified Bot
-        VERIFIED_DEVELOPER = 1ULL << 17, // Early Verified Bot Developer
-        CERTIFIED_MODERATOR = 1ULL << 18, // Moderator Programs Alumni
-        BOT_HTTP_INTERACTIONS = 1ULL << 19, // Bot uses only HTTP interactions and is shown in the online member list
+        STAFF = 1ULL << 0U, // Discord Employee
+        PARTNER = 1ULL << 1U, // Partnered Server Owner
+        HYPESQUAD = 1ULL << 2U, // HypeSquad Events Member
+        BUG_HUNTER_LEVEL_1 = 1ULL << 3U, // Bug Hunter Level 1
+        HYPESQUAD_ONLINE_HOUSE_1 = 1ULL << 6U, // House Bravery Member
+        HYPESQUAD_ONLINE_HOUSE_2 = 1ULL << 7U, // House Brilliance Member
+        HYPESQUAD_ONLINE_HOUSE_3 = 1ULL << 8U, // House Balance Member
+        PREMIUM_EARLY_SUPPORTER = 1ULL << 9U, // Early Nitro Supporter
+        TEAM_PSEUDO_USER = 1ULL << 10U, // User is a team
+        BUG_HUNTER_LEVEL_2 = 1ULL << 14U, // Bug Hunter Level 2
+        VERIFIED_BOT = 1ULL << 16U, // Verified Bot
+        VERIFIED_DEVELOPER = 1ULL << 17U, // Early Verified Bot Developer
+        CERTIFIED_MODERATOR = 1ULL << 18U, // Moderator Programs Alumni
+        BOT_HTTP_INTERACTIONS = 1ULL << 19U, // Bot uses only HTTP interactions and is shown in the online member list
     };
 
     enum class premium_type : std::uint8_t {
@@ -491,7 +491,7 @@ namespace permissions {
     };
 
     enum class role_flags : std::uint8_t {
-        IN_PROMPT = 1ULL << 0, // role can be selected by members in an onboarding prompt
+        IN_PROMPT = 1ULL << 0U, // role can be selected by members in an onboarding prompt
     };
 
     struct role_tags {
@@ -796,16 +796,16 @@ namespace guild {
     };
 
     enum class guild_member_flags : std::uint16_t {
-        DID_REJOIN = 1ULL << 0, // Member has left and rejoined the guild	false
-        COMPLETED_ONBOARDING = 1ULL << 1, // Member has completed onboarding	false
-        BYPASSES_VERIFICATION = 1ULL << 2, // Member is exempt from guild verification requirements	true
-        STARTED_ONBOARDING = 1ULL << 3, // Member has started onboarding	false
-        IS_GUEST = 1ULL << 4, // Member is a guest and can only access the voice channel they were invited to	false
-        STARTED_HOME_ACTIONS = 1ULL << 5, // Member has started Server Guide new member actions	false
-        COMPLETED_HOME_ACTIONS = 1ULL << 6, // Member has completed Server Guide new member actions	false
-        AUTOMOD_QUARANTINED_USERNAME = 1ULL << 7, // Member’s username, display name, or nickname is blocked by AutoMod	false
-        DM_SETTINGS_UPSELL_ACKNOWLEDGED = 1ULL << 9, // Member has dismissed the DM settings upsell	false
-        AUTOMOD_QUARANTINED_GUILD_TAG = 1ULL << 10, // Member’s guild tag is blocked by AutoMod	false
+        DID_REJOIN = 1ULL << 0U, // Member has left and rejoined the guild	false
+        COMPLETED_ONBOARDING = 1ULL << 1U, // Member has completed onboarding	false
+        BYPASSES_VERIFICATION = 1ULL << 2U, // Member is exempt from guild verification requirements	true
+        STARTED_ONBOARDING = 1ULL << 3U, // Member has started onboarding	false
+        IS_GUEST = 1ULL << 4U, // Member is a guest and can only access the voice channel they were invited to	false
+        STARTED_HOME_ACTIONS = 1ULL << 5U, // Member has started Server Guide new member actions	false
+        COMPLETED_HOME_ACTIONS = 1ULL << 6U, // Member has completed Server Guide new member actions	false
+        AUTOMOD_QUARANTINED_USERNAME = 1ULL << 7U, // Member’s username, display name, or nickname is blocked by AutoMod	false
+        DM_SETTINGS_UPSELL_ACKNOWLEDGED = 1ULL << 9U, // Member has dismissed the DM settings upsell	false
+        AUTOMOD_QUARANTINED_GUILD_TAG = 1ULL << 10U, // Member’s guild tag is blocked by AutoMod	false
     };
 
     struct guild_member {
@@ -1013,12 +1013,12 @@ namespace guild {
     };
 
     enum class system_channel_flags : std::uint8_t {
-        SUPPRESS_JOIN_NOTIFICATIONS = 1ULL << 0, // Suppress member join notifications
-        SUPPRESS_PREMIUM_SUBSCRIPTIONS = 1ULL << 1, // Suppress server boost notifications
-        SUPPRESS_GUILD_REMINDER_NOTIFICATIONS = 1ULL << 2, // Suppress server setup tips
-        SUPPRESS_JOIN_NOTIFICATION_REPLIES = 1ULL << 3, // Hide member join sticker reply buttons
-        SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATIONS = 1ULL << 4, // Suppress role subscription purchase and renewal notifications
-        SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATION_REPLIES = 1ULL << 5, // Hide role subscription sticker reply buttons
+        SUPPRESS_JOIN_NOTIFICATIONS = 1ULL << 0U, // Suppress member join notifications
+        SUPPRESS_PREMIUM_SUBSCRIPTIONS = 1ULL << 1U, // Suppress server boost notifications
+        SUPPRESS_GUILD_REMINDER_NOTIFICATIONS = 1ULL << 2U, // Suppress server setup tips
+        SUPPRESS_JOIN_NOTIFICATION_REPLIES = 1ULL << 3U, // Hide member join sticker reply buttons
+        SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATIONS = 1ULL << 4U, // Suppress role subscription purchase and renewal notifications
+        SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATION_REPLIES = 1ULL << 5U, // Hide role subscription sticker reply buttons
     };
 
     enum class premium_tier : std::uint8_t {
@@ -1407,11 +1407,11 @@ namespace channel {
     };
 
     enum class channel_flags : std::uint32_t {
-        PINNED = 1ULL << 1, // this thread is pinned to the top of its parent GUILD_FORUM or GUILD_MEDIA channel
-        REQUIRE_TAG = 1ULL << 4, // whether a tag is required to be specified when creating a thread in a GUILD_FORUM or a GUILD_MEDIA channel. Tags are specified in the applied_tags field.
-        HIDE_MEDIA_DOWNLOAD_OPTIONS = 1ULL << 15, // when set hides the embedded media download options. Available only for media channels
-        CHANNEL_OBFUSCATED = 1ULL << 17, // this channel’s metadata has been obfuscated because the current user cannot view it. Only ever set on channels received over the Gateway; the HTTP API never sets this flag. See Obfuscated Channels.
-        IS_SPOILER_CHANNEL = 1ULL << 21, // this channel is a Spoiler Channel i.e. users must opt in to view its contents. Can be set on all textual guild channels and voice channels (not GUILD_STAGE). Can only be set if channel's nsfw is false
+        PINNED = 1ULL << 1U, // this thread is pinned to the top of its parent GUILD_FORUM or GUILD_MEDIA channel
+        REQUIRE_TAG = 1ULL << 4U, // whether a tag is required to be specified when creating a thread in a GUILD_FORUM or a GUILD_MEDIA channel. Tags are specified in the applied_tags field.
+        HIDE_MEDIA_DOWNLOAD_OPTIONS = 1ULL << 15U, // when set hides the embedded media download options. Available only for media channels
+        CHANNEL_OBFUSCATED = 1ULL << 17U, // this channel’s metadata has been obfuscated because the current user cannot view it. Only ever set on channels received over the Gateway; the HTTP API never sets this flag. See Obfuscated Channels.
+        IS_SPOILER_CHANNEL = 1ULL << 21U, // this channel is a Spoiler Channel i.e. users must opt in to view its contents. Can be set on all textual guild channels and voice channels (not GUILD_STAGE). Can only be set if channel's nsfw is false
     };
 
     struct forum_tag {
@@ -1780,16 +1780,16 @@ namespace application {
     };
 
     enum class application_flags : std::uint32_t {
-        APPLICATION_AUTO_MODERATION_RULE_CREATE_BADGE = 1ULL << 6,
-        GATEWAY_PRESENCE = 1ULL << 12,
-        GATEWAY_PRESENCE_LIMITED = 1ULL << 13,
-        GATEWAY_GUILD_MEMBERS = 1ULL << 14,
-        GATEWAY_GUILD_MEMBERS_LIMITED = 1ULL << 15,
-        VERIFICATION_PENDING_GUILD_LIMIT = 1ULL << 16,
-        EMBEDDED = 1ULL << 17,
-        GATEWAY_MESSAGE_CONTENT = 1ULL << 18,
-        GATEWAY_MESSAGE_CONTENT_LIMITED = 1ULL << 19,
-        APPLICATION_COMMAND_BADGE = 1ULL << 23,
+        APPLICATION_AUTO_MODERATION_RULE_CREATE_BADGE = 1ULL << 6U,
+        GATEWAY_PRESENCE = 1ULL << 12U,
+        GATEWAY_PRESENCE_LIMITED = 1ULL << 13U,
+        GATEWAY_GUILD_MEMBERS = 1ULL << 14U,
+        GATEWAY_GUILD_MEMBERS_LIMITED = 1ULL << 15U,
+        VERIFICATION_PENDING_GUILD_LIMIT = 1ULL << 16U,
+        EMBEDDED = 1ULL << 17U,
+        GATEWAY_MESSAGE_CONTENT = 1ULL << 18U,
+        GATEWAY_MESSAGE_CONTENT_LIMITED = 1ULL << 19U,
+        APPLICATION_COMMAND_BADGE = 1ULL << 23U,
     };
 
     enum class application_event_webhook_status : std::uint8_t {
@@ -2902,7 +2902,7 @@ namespace invite {
     };
 
     enum class guild_invite_flags : std::uint8_t {
-        IS_GUEST_INVITE = 1ULL << 0, // this invite is a guest invite for a voice channel
+        IS_GUEST_INVITE = 1ULL << 0U, // this invite is a guest invite for a voice channel
     };
 
     struct invite {
@@ -3218,14 +3218,14 @@ namespace poll {
 
 namespace message {
     enum class attachment_flags : std::uint8_t {
-        IS_CLIP = 1ULL << 0, // this attachment is a Clip from a stream
-        IS_THUMBNAIL = 1ULL << 1, // this attachment is the thumbnail of a thread in a media channel, displayed in the grid but not on the message
-        IS_REMIX = 1ULL << 2, // this attachment has been edited using the remix feature on mobile (deprecated)
-        IS_SPOILER = 1ULL << 3, // this attachment was marked as a spoiler and is blurred until clicked
-        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4, // this attachment was flagged as explicit by Discord's content scanning
-        IS_ANIMATED = 1ULL << 5, // this attachment is an animated image
-        CONTAINS_GORE_CONTENT = 1ULL << 6, // this attachment was flagged as gore by Discord's content scanning
-        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7, // this attachment was flagged as self-harm by Discord's content scanning
+        IS_CLIP = 1ULL << 0U, // this attachment is a Clip from a stream
+        IS_THUMBNAIL = 1ULL << 1U, // this attachment is the thumbnail of a thread in a media channel, displayed in the grid but not on the message
+        IS_REMIX = 1ULL << 2U, // this attachment has been edited using the remix feature on mobile (deprecated)
+        IS_SPOILER = 1ULL << 3U, // this attachment was marked as a spoiler and is blurred until clicked
+        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4U, // this attachment was flagged as explicit by Discord's content scanning
+        IS_ANIMATED = 1ULL << 5U, // this attachment is an animated image
+        CONTAINS_GORE_CONTENT = 1ULL << 6U, // this attachment was flagged as gore by Discord's content scanning
+        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7U, // this attachment was flagged as self-harm by Discord's content scanning
     };
 
 
@@ -3297,7 +3297,7 @@ namespace message {
     };
 
     enum class embed_media_flags : std::uint8_t {
-        IS_ANIMATED = 1ULL << 5, // this image is animated
+        IS_ANIMATED = 1ULL << 5U, // this image is animated
     };
 
     struct embed_footer {
@@ -3449,10 +3449,10 @@ namespace message {
     };
 
     enum class embed_flags : std::uint8_t {
-        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4, // this embed's media was flagged as explicit by Discord's content scanning
-        IS_CONTENT_INVENTORY_ENTRY = 1ULL << 5, // this embed is a fallback for a reply to an activity card
-        CONTAINS_GORE_CONTENT = 1ULL << 6, // this embed's media was flagged as gore by Discord's content scanning
-        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7, // this embed's media was flagged as self-harm by Discord's content scanning
+        CONTAINS_EXPLICIT_CONTENT = 1ULL << 4U, // this embed's media was flagged as explicit by Discord's content scanning
+        IS_CONTENT_INVENTORY_ENTRY = 1ULL << 5U, // this embed is a fallback for a reply to an activity card
+        CONTAINS_GORE_CONTENT = 1ULL << 6U, // this embed's media was flagged as gore by Discord's content scanning
+        CONTAINS_SELF_HARM_CONTENT = 1ULL << 7U, // this embed's media was flagged as self-harm by Discord's content scanning
     };
 
     struct embed {
@@ -3629,19 +3629,19 @@ namespace message {
     };
 
     enum class message_flags : std::uint16_t {
-        CROSSPOSTED = 1ULL << 0, // this message has been published to subscribed channels (via Channel Following)
-        IS_CROSSPOST = 1ULL << 1, // this message originated from a message in another channel (via Channel Following)
-        SUPPRESS_EMBEDS = 1ULL << 2, // do not include any embeds when serializing this message
-        SOURCE_MESSAGE_DELETED = 1ULL << 3, // the source message for this crosspost has been deleted (via Channel Following)
-        URGENT = 1ULL << 4, // this message came from the urgent message system
-        HAS_THREAD = 1ULL << 5, // this message has an associated thread, with the same id as the message
-        EPHEMERAL = 1ULL << 6, // this message is only visible to the user who invoked the Interaction
-        LOADING = 1ULL << 7, // this message is an Interaction Response and the bot is “thinking”
-        FAILED_TO_MENTION_SOME_ROLES_IN_THREAD = 1ULL << 8, // this message failed to mention some roles and add their members to the thread
-        SUPPRESS_NOTIFICATIONS = 1ULL << 12, // this message will not trigger push and desktop notifications
-        IS_VOICE_MESSAGE = 1ULL << 13, // this message is a voice message
-        HAS_SNAPSHOT = 1ULL << 14, // this message has a snapshot (via Message Forwarding)
-        IS_COMPONENTS_V2 = 1ULL << 15, // allows you to create fully component-driven messages
+        CROSSPOSTED = 1ULL << 0U, // this message has been published to subscribed channels (via Channel Following)
+        IS_CROSSPOST = 1ULL << 1U, // this message originated from a message in another channel (via Channel Following)
+        SUPPRESS_EMBEDS = 1ULL << 2U, // do not include any embeds when serializing this message
+        SOURCE_MESSAGE_DELETED = 1ULL << 3U, // the source message for this crosspost has been deleted (via Channel Following)
+        URGENT = 1ULL << 4U, // this message came from the urgent message system
+        HAS_THREAD = 1ULL << 5U, // this message has an associated thread, with the same id as the message
+        EPHEMERAL = 1ULL << 6U, // this message is only visible to the user who invoked the Interaction
+        LOADING = 1ULL << 7U, // this message is an Interaction Response and the bot is “thinking”
+        FAILED_TO_MENTION_SOME_ROLES_IN_THREAD = 1ULL << 8U, // this message failed to mention some roles and add their members to the thread
+        SUPPRESS_NOTIFICATIONS = 1ULL << 12U, // this message will not trigger push and desktop notifications
+        IS_VOICE_MESSAGE = 1ULL << 13U, // this message is a voice message
+        HAS_SNAPSHOT = 1ULL << 14U, // this message has a snapshot (via Message Forwarding)
+        IS_COMPONENTS_V2 = 1ULL << 15U, // allows you to create fully component-driven messages
     };
 
     enum class message_reference_type : std::uint8_t {
@@ -3777,13 +3777,13 @@ namespace components {
     };
 
     enum class unfurled_media_item_flags : std::uint8_t {
-        IS_ANIMATED = 1ULL << 0, // This image is animated
+        IS_ANIMATED = 1ULL << 0U, // This image is animated
     };
 
     enum class content_scan_metadata_flags : std::uint8_t {
-        IS_EXPLICIT_CONTENT = 1ULL << 0, // This media was flagged as explicit by Discord's content scanning
-        IS_GORE_CONTENT = 1ULL << 1, // This media was flagged as gore by Discord's content scanning
-        IS_SELF_HARM_CONTENT = 1ULL << 2, // This media was flagged as self-harm by Discord's content scanning
+        IS_EXPLICIT_CONTENT = 1ULL << 0U, // This media was flagged as explicit by Discord's content scanning
+        IS_GORE_CONTENT = 1ULL << 1U, // This media was flagged as gore by Discord's content scanning
+        IS_SELF_HARM_CONTENT = 1ULL << 2U, // This media was flagged as self-harm by Discord's content scanning
     };
 
     enum class separator_spacing : std::uint8_t {
@@ -3841,7 +3841,7 @@ namespace components {
 
         template <typename OtherDerived, typename... OtherTs>
             requires (!std::is_same_v<Derived, OtherDerived> && (std::is_constructible_v<variant_base, OtherTs> && ...))
-        constexpr decltype(auto) operator=(this auto&& self, const component_variant<OtherDerived, OtherTs...>& other) {
+        constexpr decltype(auto) operator=(this auto&& self, const component_variant<OtherDerived, OtherTs...>& other) { // NOLINT(misc-unconventional-assign-operator)
             other.visit([&self](const auto& val) {
                 self.template emplace<std::decay_t<decltype(val)>>(val);
             });
@@ -3850,7 +3850,7 @@ namespace components {
 
         template <typename OtherDerived, typename... OtherTs>
             requires (!std::is_same_v<Derived, OtherDerived> && (std::is_constructible_v<variant_base, OtherTs> && ...))
-        constexpr decltype(auto) operator=(this auto&& self, component_variant<OtherDerived, OtherTs...>&& other) {
+        constexpr decltype(auto) operator=(this auto&& self, component_variant<OtherDerived, OtherTs...>&& other) { // NOLINT(misc-unconventional-assign-operator)
             std::move(other).visit([&self](auto&& val) {
                 self.template emplace<std::decay_t<decltype(val)>>(std::forward<decltype(val)>(val));
             });
@@ -4336,7 +4336,7 @@ namespace components {
         opt<bool> disabled{};
         opt<std::vector<channel::channel_type>> channel_types{}; // for ChannelSelect
 
-        static GenericSelect create(std::string custom_id_ = {}, opt<std::string> placeholder_ = {}) {
+        static GenericSelect create(std::string custom_id_ = {}, opt<std::string> placeholder_ = {}) { // NOLINT(performance-unnecessary-value-param)
             return GenericSelect{
                 .custom_id = std::move(custom_id_),
                 .placeholder = std::move(placeholder_),
@@ -4378,7 +4378,7 @@ namespace components {
         interaction::resolved resolved{};
         std::vector<snowflake> values{};
 
-        static generic_select_interaction_response create(std::int32_t id_ = 0, std::string custom_id_ = {}, std::vector<snowflake> values_ = {}) {
+        static generic_select_interaction_response create(std::int32_t id_ = 0, std::string custom_id_ = {}, std::vector<snowflake> values_ = {}) { // NOLINT(performance-unnecessary-value-param)
             return generic_select_interaction_response{
                 .id = id_,
                 .custom_id = std::move(custom_id_),
@@ -5717,9 +5717,9 @@ namespace sku {
     };
 
     enum class sku_flags : std::uint16_t {
-        AVAILABLE = 1ULL << 2, // SKU is available for purchase
-        GUILD_SUBSCRIPTION = 1ULL << 7, // Recurring SKU that can be purchased by a user and applied to a single server
-        USER_SUBSCRIPTION = 1ULL << 8, // Recurring SKU purchased by a user for themselves
+        AVAILABLE = 1ULL << 2U, // SKU is available for purchase
+        GUILD_SUBSCRIPTION = 1ULL << 7U, // Recurring SKU that can be purchased by a user and applied to a single server
+        USER_SUBSCRIPTION = 1ULL << 8U, // Recurring SKU purchased by a user for themselves
     };
 
     struct sku {
@@ -5784,7 +5784,7 @@ namespace guild_template {
 
 namespace lobby {
     enum class lobby_member_flags : std::uint8_t {
-        CanLinkLobby = 1ULL << 0, // user can link a text channel to a lobby
+        CanLinkLobby = 1ULL << 0U, // user can link a text channel to a lobby
     };
 
     using lobby_metadata = std::unordered_map<std::string, std::string>;
@@ -6092,7 +6092,7 @@ struct glz::from<glz::JSON, discusy::components::name> { \
         } \
         \
         switch (ext.type) { \
-            macro \
+            macro /* NOLINT(bugprone-macro-parentheses) */ \
             default: { \
                 ctx.error = glz::error_code::parse_error; \
                 ctx.custom_error_message = "Unknown component type"; \
@@ -6158,7 +6158,7 @@ struct glz::from<glz::EETF, discusy::components::name> { \
         } \
         \
         switch (ext_type) { \
-            macro \
+            macro /* NOLINT(bugprone-macro-parentheses) */ \
             default: { \
                 it = start_it; \
                 ctx.error = glz::error_code::parse_error; \

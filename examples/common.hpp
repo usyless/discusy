@@ -11,7 +11,7 @@ namespace h = discusy::helpers;
 
 // Retrieves the bot token from environment variables
 static std::string get_bot_token() {
-    auto clean = [](const char* env) -> std::string {
+    const auto clean = [](const char* env) -> std::string {
         if (!env) return {};
         std::string s{env};
         if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {

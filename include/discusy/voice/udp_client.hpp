@@ -104,7 +104,7 @@ public:
     }
 
     void reset_session() {
-        boost::asio::post(strand_, [s = this->shared_from_this()]() {
+        boost::asio::post(strand_, [s = this->shared_from_this()] {
             auto& self = *s;
             if (self.closed_) return;
 
@@ -115,7 +115,7 @@ public:
     template <typename F>
     requires ( std::invocable<F&, std::string, std::uint16_t> )
     void send_ip_discovery(std::string host, std::uint16_t port, std::uint32_t ssrc, F&& cb) {
-        boost::asio::post(strand_, [s = this->shared_from_this(), host = std::move(host), port, ssrc, cb = std::forward<F>(cb)]() mutable {
+        boost::asio::post(strand_, [s = this->shared_from_this(), host = std::move(host), port, ssrc, cb = std::forward<F>(cb)] mutable {
             auto& self = *s;
             if (self.closed_) return std::invoke(std::move(cb), std::string{}, std::uint16_t{0});
 
@@ -127,7 +127,7 @@ public:
         std::array<std::uint8_t, 32> key{};
         std::memcpy(key.data(), secret_key.data(), key.size());
 
-        boost::asio::post(strand_, [s = this->shared_from_this(), mode, key]() {
+        boost::asio::post(strand_, [s = this->shared_from_this(), mode, key] {
             auto& self = *s;
             if (self.closed_) return;
 
@@ -140,7 +140,7 @@ public:
     }
 
     void kick_drain() {
-        boost::asio::post(strand_, [s = this->shared_from_this()]() {
+        boost::asio::post(strand_, [s = this->shared_from_this()] {
             if (s->closed_) return;
             s->drain();
         });
@@ -151,7 +151,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return false;
 
         try {
-            boost::asio::dispatch(strand_, [s = this->shared_from_this(), frame = discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>{opus_frame}]() mutable {
+            boost::asio::dispatch(strand_, [s = this->shared_from_this(), frame = discusy::voice::store<discusy::voice::MAX_OPUS_FRAME_BYTES>{opus_frame}] mutable {
                 auto& self = *s;
                 if (self.closed_) return;
 
@@ -161,7 +161,7 @@ public:
                     self.next_idle_reason_ = discusy::voice::audio_stop_reason::finished;
                     self.drain();
                 }
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     self.log("send_audio_packet dispatch unknown exception");
                     #endif
@@ -179,7 +179,7 @@ public:
         if (closed_.load(std::memory_order_acquire)) return false;
 
         try {
-            boost::asio::dispatch(strand_, [s = this->shared_from_this(), frames = std::move(frames)]() mutable {
+            boost::asio::dispatch(strand_, [s = this->shared_from_this(), frames = std::move(frames)] mutable {
                 auto& self = *s;
                 if (self.closed_) return;
 
@@ -192,7 +192,7 @@ public:
                     self.next_idle_reason_ = discusy::voice::audio_stop_reason::finished;
                     self.drain();
                 }
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     self.log("send_audio_packets dispatch unknown exception");
                     #endif
@@ -219,7 +219,7 @@ public:
     }
 
     void close() {
-        boost::asio::post(strand_, [self = this->shared_from_this()]() {
+        boost::asio::post(strand_, [self = this->shared_from_this()] {
             if (self->closed_.load(std::memory_order_relaxed)) return;
             self->closed_.store(true, std::memory_order_release);
             self->armed_ = false;
@@ -241,7 +241,7 @@ public:
     }
 
     void stop_audio() {
-        boost::asio::dispatch(strand_, [s = this->shared_from_this()]() mutable {
+        boost::asio::dispatch(strand_, [s = this->shared_from_this()] mutable {
             auto& self = *s;
             if (self.closed_) return;
 
@@ -257,7 +257,7 @@ public:
     }
 
     void pause_audio() {
-        boost::asio::dispatch(strand_, [s = this->shared_from_this()]() mutable {
+        boost::asio::dispatch(strand_, [s = this->shared_from_this()] mutable {
             auto& self = *s;
             if (self.closed_ || self.paused_) return;
 
@@ -271,7 +271,7 @@ public:
     }
 
     void resume_audio() {
-        boost::asio::dispatch(strand_, [s = this->shared_from_this()]() mutable {
+        boost::asio::dispatch(strand_, [s = this->shared_from_this()] mutable {
             auto& self = *s;
             if (self.closed_) return;
 

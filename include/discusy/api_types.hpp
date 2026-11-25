@@ -49,9 +49,9 @@ struct result {
 
     [[nodiscard]] constexpr decltype(auto) value(this auto&& self) { return std::forward<decltype(self)>(self).data.value(); }
 
-    [[nodiscard]] constexpr auto* operator->(this auto&& self) noexcept { return std::addressof(*self.data); }
+    [[nodiscard]] constexpr auto* operator->(this auto&& self) noexcept { return std::addressof(*self.data); } // NOLINT(bugprone-unchecked-optional-access)
 
-    [[nodiscard]] constexpr decltype(auto) operator*(this auto&& self) noexcept { return *std::forward<decltype(self)>(self).data; }
+    [[nodiscard]] constexpr decltype(auto) operator*(this auto&& self) noexcept { return *std::forward<decltype(self)>(self).data; } // NOLINT(bugprone-unchecked-optional-access)
 
     [[nodiscard]] const std::string& error() const noexcept { 
         static const std::string empty;

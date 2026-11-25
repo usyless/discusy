@@ -13,7 +13,7 @@
 namespace discusy {
 
 inline void init_dave_logging() noexcept {
-    static const bool initialized = []() noexcept {
+    static const bool initialized = [] noexcept {
 #ifdef DISCUSY_LOGGING
         discord::dave::SetLogSink([](discord::dave::LoggingSeverity severity,
                                      const char* file,

@@ -361,15 +361,15 @@ namespace presence {
     };
 
     enum class activity_flags : std::uint16_t {
-        INSTANCE = 1ULL << 0,
-        JOIN = 1ULL << 1,
-        SPECTATE = 1ULL << 2,
-        JOIN_REQUEST = 1ULL << 3,
-        SYNC = 1ULL << 4,
-        PLAY = 1ULL << 5,
-        PARTY_PRIVACY_FRIENDS = 1ULL << 6,
-        PARTY_PRIVACY_VOICE_CHANNEL = 1ULL << 7,
-        EMBEDDED = 1ULL << 8,
+        INSTANCE = 1ULL << 0U,
+        JOIN = 1ULL << 1U,
+        SPECTATE = 1ULL << 2U,
+        JOIN_REQUEST = 1ULL << 3U,
+        SYNC = 1ULL << 4U,
+        PLAY = 1ULL << 5U,
+        PARTY_PRIVACY_FRIENDS = 1ULL << 6U,
+        PARTY_PRIVACY_VOICE_CHANNEL = 1ULL << 7U,
+        EMBEDDED = 1ULL << 8U,
     };
 
     struct activity_button {
@@ -535,7 +535,7 @@ namespace guilds {
 
         constexpr auto* operator->(this auto&& self) noexcept { return std::addressof(self.guild); }
         constexpr decltype(auto) operator*(this auto&& self) noexcept { return (std::forward<decltype(self)>(self).guild); }
-        constexpr decltype(auto) operator()(this auto&& self) noexcept { return (std::forward<decltype(self)>(self).other); }
+        constexpr decltype(auto) operator()(this auto&& self) noexcept { return std::forward<decltype(self)>(self).other; }
 
         struct glaze {
             using T = guild_create_struct;

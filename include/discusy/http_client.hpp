@@ -248,6 +248,11 @@ private:
     static constexpr std::chrono::seconds ssl_shutdown_timeout_{2};
 
     struct completion_base {
+        completion_base() = default;
+        completion_base(const completion_base&) = delete;
+        completion_base& operator=(const completion_base&) = delete;
+        completion_base(completion_base&&) = delete;
+        completion_base& operator=(completion_base&&) = delete;
         virtual ~completion_base() noexcept = default;
         virtual void complete_and_destroy(boost::system::error_code ec, http::response res) = 0;
         virtual void destroy() noexcept = 0;
@@ -275,7 +280,7 @@ private:
               work_guard{boost::asio::make_work_guard(ex)} {}
 
         static completion_holder* create(Handler&& h, const ctx::io_context::executor_t& default_ex) {
-            auto base_alloc = boost::asio::get_associated_allocator(h, boost::asio::recycling_allocator<void>{});
+            const auto base_alloc = boost::asio::get_associated_allocator(h, boost::asio::recycling_allocator<void>{});
             rebind_alloc_t ra{base_alloc};
             completion_holder* p = std::allocator_traits<rebind_alloc_t>::allocate(ra, 1);
             try {
@@ -312,7 +317,7 @@ private:
                 local_ex,
                 boost::asio::bind_allocator(
                     local_alloc,
-                    [g = holder_guard{this}, ec, res = std::move(res)]() mutable {
+                    [g = holder_guard{this}, ec, res = std::move(res)] mutable {
                         auto* self_h = g.ptr;
                         auto h = std::move(self_h->handler); // NOLINT(misc-const-correctness)
                         auto slot = boost::asio::get_associated_cancellation_slot(h);
@@ -367,7 +372,7 @@ private:
                     std::forward<decltype(handler)>(handler),
                     self->io_ctx_.executor_
                 );
-                auto slot = boost::asio::get_associated_cancellation_slot(comp->handler);
+                const auto slot = boost::asio::get_associated_cancellation_slot(comp->handler);
                 start_request_state(
                     comp,
                     slot,

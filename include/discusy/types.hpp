@@ -169,7 +169,7 @@ struct snowflake {
     [[nodiscard]] inline std::string mention_command(std::string_view name, std::string_view group, std::string_view subcommand) const;
 
     [[nodiscard]] constexpr std::uint64_t get_timestamp() const noexcept {
-        return (value >> 22) + DISCORD_EPOCH;
+        return (value >> 22U) + DISCORD_EPOCH;
     }
 
     [[nodiscard]] constexpr std::chrono::time_point<std::chrono::system_clock> get_chrono_timestamp() const noexcept {
@@ -179,26 +179,26 @@ struct snowflake {
     }
 
     [[nodiscard]] constexpr std::uint8_t get_internal_worker_id() const noexcept {
-        return static_cast<std::uint8_t>((value & 0x3E0000) >> 17);
+        return static_cast<std::uint8_t>((value & 0x3E0000U) >> 17U);
     }
 
     [[nodiscard]] constexpr std::uint8_t get_internal_process_id() const noexcept {
-        return static_cast<std::uint8_t>((value & 0x1F000) >> 12);
+        return static_cast<std::uint8_t>((value & 0x1F000U) >> 12U);
     }
 
     // For every ID that is generated on that process, this number is incremented
     [[nodiscard]] constexpr std::uint16_t get_increment() const noexcept {
-        return value & 0xFFF;
+        return value & 0xFFFU;
     }
 
     // For when the snowflake is a guild id
     [[nodiscard]] constexpr std::size_t guild_shard_id(const std::uint64_t total_shards) const noexcept {
-        return (value >> 22) % total_shards;
+        return (value >> 22U) % total_shards;
     }
 
     // Timestamp is time since unix epoch in ms
     [[nodiscard]] constexpr static snowflake from_unix_time(const std::uint64_t time_since_epoch_ms) noexcept {
-        return (time_since_epoch_ms - DISCORD_EPOCH) << 22;
+        return (time_since_epoch_ms - DISCORD_EPOCH) << 22U;
     }
 
     [[nodiscard]] constexpr explicit operator std::uint64_t() const noexcept {
@@ -207,9 +207,9 @@ struct snowflake {
 
     [[nodiscard]] friend constexpr std::size_t hash_value(const snowflake s) noexcept {
         std::uint64_t x = s.value;
-        x ^= x >> 33;
+        x ^= x >> 33U;
         x *= 0xff51afd7ed558ccdULL;
-        x ^= x >> 33;
+        x ^= x >> 33U;
         return static_cast<std::size_t>(x);
     }
 
@@ -246,12 +246,7 @@ struct basic_number_str : ulp::str::FixedString<N> {
                 }
                 std::array<char, N> temp{};
                 std::size_t i = 0;
-                bool negative = false;
-                if constexpr (std::is_signed_v<Decayed>) {
-                    if (val < 0) {
-                        negative = true;
-                    }
-                }
+                bool const negative = std::is_signed_v<Decayed> && (val < 0);
                 using UnsignedT = std::make_unsigned_t<Decayed>;
                 UnsignedT uval = negative ? static_cast<UnsignedT>(0 - static_cast<UnsignedT>(val)) : static_cast<UnsignedT>(val);
                 while (uval > 0) {
@@ -638,8 +633,8 @@ struct explicit_null {
     std::variant<std::nullptr_t, T> val{nullptr};
 
     constexpr explicit_null() noexcept = default;
-    constexpr explicit_null(std::nullopt_t) noexcept : val{nullptr} {}
-    constexpr explicit_null(std::nullptr_t) noexcept : val{nullptr} {}
+    constexpr explicit_null(std::nullopt_t) noexcept {}
+    constexpr explicit_null(std::nullptr_t) noexcept {}
 
     template <typename U = T>
         requires (!std::is_same_v<std::remove_cvref_t<U>, explicit_null> &&

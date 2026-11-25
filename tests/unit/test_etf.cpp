@@ -329,7 +329,7 @@ struct OnlyName {
     std::string name{"present_name"};
 };
 
-enum class TestReflectedEnum {
+enum class TestReflectedEnum : std::uint8_t {
     FOO,
     BAR,
 };
@@ -378,9 +378,9 @@ struct glz::meta<test_etf_types::HexColorWrapper> {
         obj.rgb = val;
     };
     static constexpr auto write_hex = [](const test_etf_types::HexColorWrapper& obj) -> std::string {
-        char buf[16];
-        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), obj.rgb, 16);
-        std::string hex(buf, ptr);
+        std::array<char, 16> buf{};
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), obj.rgb, 16);
+        std::string const hex(buf.data(), ptr);
         return "#" + hex;
     };
     static constexpr auto value = glz::custom<read_hex, write_hex>;
@@ -572,7 +572,7 @@ TEST_CASE("ETF: Basic types serialization and deserialization", "[etf]") {
     }
 
     SECTION("Floating point numbers") {
-        double d = std::numbers::pi;
+        double const d = std::numbers::pi;
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(d, encoded));
 
@@ -700,11 +700,11 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
 
     SECTION("Snowflake deserialization from STRING_EXT") {
         // Manually construct STRING_EXT payload
-        std::string raw_str = "175928847299117063";
+        std::string const raw_str = "175928847299117063";
         std::string custom_etf;
         custom_etf.push_back(static_cast<char>(glz::etf::magic_version));
         custom_etf.push_back(static_cast<char>(glz::etf::tag::STRING_EXT));
-        std::uint16_t len = static_cast<std::uint16_t>(raw_str.size());
+        auto len = static_cast<std::uint16_t>(raw_str.size());
         std::uint16_t be_len = glz::etf::detail::to_big_endian(len);
         custom_etf.append(reinterpret_cast<const char*>(&be_len), 2);
         custom_etf.append(raw_str);
@@ -791,10 +791,10 @@ TEST_CASE("ETF: Snowflake handling (integer and string transmissions)", "[etf][s
             REQUIRE_FALSE(glz::write_etf(id_key, key_etf));
             etf_str_payload.append(key_etf.data() + 1, key_etf.size() - 1);
 
-            std::string val_etf;
+            std::string id_etf_buf;
             std::string str_id = "175928847299117063";
-            REQUIRE_FALSE(glz::write_etf(str_id, val_etf));
-            etf_str_payload.append(val_etf.data() + 1, val_etf.size() - 1);
+            REQUIRE_FALSE(glz::write_etf(str_id, id_etf_buf));
+            etf_str_payload.append(id_etf_buf.data() + 1, id_etf_buf.size() - 1);
 
             // "name" => "test"
             std::string name_key = "name";
@@ -839,7 +839,7 @@ TEST_CASE("ETF: Containers, Vectors, Maps, and Tuples", "[etf][containers]") {
     }
 
     SECTION("Empty vectors (NIL_EXT)") {
-        std::vector<int> empty_vec;
+        std::vector<int> const empty_vec;
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(empty_vec, encoded));
 
@@ -892,7 +892,7 @@ TEST_CASE("ETF: Containers, Vectors, Maps, and Tuples", "[etf][containers]") {
         REQUIRE_FALSE(glz::read_etf(dec_uset, enc_uset));
         CHECK(dec_uset == str_set);
 
-        std::set<int> empty_set;
+        std::set<int> const empty_set;
         std::string enc_empty;
         REQUIRE_FALSE(glz::write_etf(empty_set, enc_empty));
         std::set<int> dec_empty = {1, 2, 3};
@@ -911,7 +911,7 @@ TEST_CASE("ETF: Containers, Vectors, Maps, and Tuples", "[etf][containers]") {
     }
 
     SECTION("Raw JSON and Text views (guild_members_chunk not_found)") {
-        std::vector<int> numbers = {10, 20, 30};
+        std::vector<int> const numbers = {10, 20, 30};
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(numbers, encoded));
 
@@ -945,7 +945,7 @@ TEST_CASE("ETF: Compile-time hash map object serialization and string keys enfor
         CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::MAP_EXT);
 
         // 3. Arity check: 5 pairs
-        auto arity = glz::etf::detail::read_be<std::uint32_t>(&encoded[2]);
+        const auto arity = glz::etf::detail::read_be<std::uint32_t>(&encoded[2]);
         CHECK(arity == 5);
 
         // 4. CRITICAL: Keys must NOT be atoms! Discord 4002 error requires STRING KEYS ONLY (BINARY_EXT 109)
@@ -973,7 +973,7 @@ TEST_CASE("ETF: Compile-time hash map object serialization and string keys enfor
         REQUIRE_FALSE(glz::write_etf(without_desc, encoded));
 
         // Arity should be back-patched to exactly 4!
-        auto arity = glz::etf::detail::read_be<std::uint32_t>(&encoded[2]);
+        const auto arity = glz::etf::detail::read_be<std::uint32_t>(&encoded[2]);
         CHECK(arity == 4);
 
         // "description" should not appear in the encoded output
@@ -1016,10 +1016,10 @@ TEST_CASE("ETF: Compile-time hash map object serialization and string keys enfor
 
 TEST_CASE("ETF: Discord Gateway Events & Payloads", "[etf][gateway]") {
     SECTION("Hello payload") {
-        discusy::recieve_event::hello hello_data{
+        discusy::recieve_event::hello const hello_data{
             .heartbeat_interval = 41250,
         };
-        discusy::recieve_event::payload<discusy::recieve_event::hello> payload{
+        discusy::recieve_event::payload<discusy::recieve_event::hello> const payload{
             .d = hello_data,
         };
 
@@ -1032,12 +1032,12 @@ TEST_CASE("ETF: Discord Gateway Events & Payloads", "[etf][gateway]") {
     }
 
     SECTION("Identify payload") {
-        discusy::send_event::identify id_data{
+        discusy::send_event::identify const id_data{
             .token = "my_super_secret_bot_token",
             .shard{{0, 8}},
             .intents = static_cast<discusy::intent>(3276799),
         };
-        discusy::send_event::identify_payload payload{id_data};
+        discusy::send_event::identify_payload const payload{id_data};
 
         std::string encoded;
         REQUIRE_FALSE(discusy::etf::write_etf(payload, encoded));
@@ -1056,12 +1056,12 @@ TEST_CASE("ETF: Discord Gateway Events & Payloads", "[etf][gateway]") {
     }
 
     SECTION("Resume payload") {
-        discusy::send_event::resume resume_data{
+        discusy::send_event::resume const resume_data{
             .token = "resume_bot_token",
             .session_id = "abc123session",
             .seq = 450,
         };
-        discusy::send_event::resume_payload payload{resume_data};
+        discusy::send_event::resume_payload const payload{resume_data};
 
         std::string encoded;
         REQUIRE_FALSE(discusy::etf::write_etf(payload, encoded));
@@ -1074,8 +1074,8 @@ TEST_CASE("ETF: Discord Gateway Events & Payloads", "[etf][gateway]") {
     }
 
     SECTION("Heartbeat payload") {
-        discusy::send_event::heartbeat hb{42};
-        discusy::send_event::heartbeat_payload payload{hb};
+        discusy::send_event::heartbeat const hb{42};
+        discusy::send_event::heartbeat_payload const payload{hb};
 
         std::string encoded;
         REQUIRE_FALSE(discusy::etf::write_etf(payload, encoded));
@@ -1111,7 +1111,7 @@ TEST_CASE("ETF: Error Handling and Malformed Input", "[etf][errors]") {
         malformed.push_back(static_cast<char>(1));
 
         int val = 0;
-        auto ec = glz::read_etf(val, malformed);
+        const auto ec = glz::read_etf(val, malformed);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::version_mismatch);
     }
@@ -1119,7 +1119,7 @@ TEST_CASE("ETF: Error Handling and Malformed Input", "[etf][errors]") {
     SECTION("Empty input buffer") {
         std::string empty;
         int val = 0;
-        auto ec = glz::read_etf(val, empty);
+        const auto ec = glz::read_etf(val, empty);
         CHECK(static_cast<bool>(ec));
     }
 
@@ -1133,22 +1133,22 @@ TEST_CASE("ETF: Error Handling and Malformed Input", "[etf][errors]") {
         truncated.push_back(static_cast<char>(10)); // claims 10 bytes follow, but buffer ends here
 
         std::string str;
-        auto ec = glz::read_etf(str, truncated);
+        const auto ec = glz::read_etf(str, truncated);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::unexpected_end);
     }
 }
 
 TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") {
-    auto append_be32 = [](std::string& s, uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
-    auto append_be16 = [](std::string& s, uint16_t val) {
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be16 = [](std::string& s, uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("LARGE_BIG_EXT integer overflow protection (n = 0xFFFFFFFF)") {
@@ -1161,12 +1161,12 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         buf.push_back(static_cast<char>(1)); // 1 digit byte
 
         uint64_t num = 0;
-        auto ec_read = glz::read_etf(num, buf);
+        const auto ec_read = glz::read_etf(num, buf);
         CHECK(static_cast<bool>(ec_read));
         CHECK(ec_read.ec == glz::error_code::unexpected_end);
 
         glz::skip s{};
-        auto ec_skip = glz::read_etf(s, buf);
+        const auto ec_skip = glz::read_etf(s, buf);
         CHECK(static_cast<bool>(ec_skip));
         CHECK(ec_skip.ec == glz::error_code::unexpected_end);
 
@@ -1175,7 +1175,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         buf2.push_back(static_cast<char>(glz::etf::magic_version));
         buf2.push_back(static_cast<char>(glz::etf::tag::LARGE_BIG_EXT));
         append_be32(buf2, 0xFFFFFFFEU);
-        auto ec_read2 = glz::read_etf(num, buf2);
+        const auto ec_read2 = glz::read_etf(num, buf2);
         CHECK(static_cast<bool>(ec_read2));
         CHECK(ec_read2.ec == glz::error_code::unexpected_end);
 
@@ -1188,7 +1188,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         buf3.push_back(static_cast<char>(1));
         buf3.push_back(static_cast<char>(2));
         buf3.push_back(static_cast<char>(3));
-        auto ec_read3 = glz::read_etf(num, buf3);
+        const auto ec_read3 = glz::read_etf(num, buf3);
         CHECK(static_cast<bool>(ec_read3));
         CHECK(ec_read3.ec == glz::error_code::unexpected_end);
     }
@@ -1202,19 +1202,19 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         buf.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
 
         std::vector<int> vec;
-        auto ec = glz::read_etf(vec, buf);
+        const auto ec = glz::read_etf(vec, buf);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::unexpected_end);
         CHECK(vec.empty());
 
         // parse_etf wrapper must return failure without throwing std::bad_alloc
-        bool failed = discusy::etf::parse_etf(vec, buf);
+        bool const failed = discusy::etf::parse_etf(vec, buf);
         CHECK(failed);
         CHECK(vec.empty());
 
         // skip_value must also reject the bogus length
         glz::skip s{};
-        auto ec_skip = glz::read_etf(s, buf);
+        const auto ec_skip = glz::read_etf(s, buf);
         CHECK(static_cast<bool>(ec_skip));
         CHECK(ec_skip.ec == glz::error_code::unexpected_end);
 
@@ -1225,7 +1225,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         append_be32(buf_no_tail, 1);
         buf_no_tail.push_back(static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT));
         buf_no_tail.push_back(static_cast<char>(42));
-        auto ec_no_tail = glz::read_etf(vec, buf_no_tail);
+        const auto ec_no_tail = glz::read_etf(vec, buf_no_tail);
         CHECK(static_cast<bool>(ec_no_tail));
         CHECK(ec_no_tail.ec == glz::error_code::unexpected_end);
     }
@@ -1238,13 +1238,13 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         append_be32(buf, 1000000U);
 
         std::vector<int> vec;
-        auto ec = glz::read_etf(vec, buf);
+        const auto ec = glz::read_etf(vec, buf);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::unexpected_end);
         CHECK(vec.empty());
 
         glz::skip s{};
-        auto ec_skip = glz::read_etf(s, buf);
+        const auto ec_skip = glz::read_etf(s, buf);
         CHECK(static_cast<bool>(ec_skip));
         CHECK(ec_skip.ec == glz::error_code::unexpected_end);
     }
@@ -1257,13 +1257,13 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         append_be32(buf, 1000000000U);
 
         std::map<std::string, int> m;
-        auto ec_map = glz::read_etf(m, buf);
+        const auto ec_map = glz::read_etf(m, buf);
         CHECK(static_cast<bool>(ec_map));
         CHECK(ec_map.ec == glz::error_code::unexpected_end);
         CHECK(m.empty());
 
         test_etf_types::SampleStruct sample{};
-        auto ec_struct = glz::read_etf(sample, buf);
+        const auto ec_struct = glz::read_etf(sample, buf);
         CHECK(static_cast<bool>(ec_struct));
         CHECK(ec_struct.ec == glz::error_code::unexpected_end);
 
@@ -1272,7 +1272,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         CHECK(discusy::etf::parse_payload_base(base_event, buf));
 
         glz::skip s{};
-        auto ec_skip = glz::read_etf(s, buf);
+        const auto ec_skip = glz::read_etf(s, buf);
         CHECK(static_cast<bool>(ec_skip));
         CHECK(ec_skip.ec == glz::error_code::unexpected_end);
     }
@@ -1354,7 +1354,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         append_be32(non_num, 6);
         non_num.append("foobar");
         int num = 0;
-        auto ec_num = glz::read_etf(num, non_num);
+        const auto ec_num = glz::read_etf(num, non_num);
         CHECK(static_cast<bool>(ec_num));
         CHECK(ec_num.ec == glz::error_code::parse_number_failure);
 
@@ -1365,7 +1365,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         append_be32(bad_sf, 7);
         bad_sf.append("1234abc");
         discusy::snowflake sf{};
-        auto ec_sf = glz::read_etf(sf, bad_sf);
+        const auto ec_sf = glz::read_etf(sf, bad_sf);
         CHECK(static_cast<bool>(ec_sf));
         CHECK(ec_sf.ec == glz::error_code::parse_number_failure);
 
@@ -1376,7 +1376,7 @@ TEST_CASE("ETF: Security and Robustness Edge Cases", "[etf][security][errors]") 
         bad_bool.push_back(static_cast<char>(5));
         bad_bool.append("maybe");
         bool b = false;
-        auto ec_bool = glz::read_etf(b, bad_bool);
+        const auto ec_bool = glz::read_etf(b, bad_bool);
         CHECK(static_cast<bool>(ec_bool));
         CHECK(ec_bool.ec == glz::error_code::syntax_error);
 
@@ -1493,7 +1493,7 @@ TEST_CASE("ETF: Gateway payload base quick route and skipping payload data", "[e
         REQUIRE_FALSE(glz::write_etf(full, encoded_full));
 
         SubsetStruct subset{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(subset, encoded_full);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(subset, encoded_full);
         REQUIRE_FALSE(static_cast<bool>(ec));
         CHECK(subset.name == "test_name");
         CHECK(subset.count == 42);
@@ -1544,7 +1544,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE(std::holds_alternative<int>(decoded_int));
         CHECK(std::get<int>(decoded_int) == 100);
 
-        Var v_dbl = 3.14159;
+        Var v_dbl = 3.14159; // NOLINT(modernize-use-std-numbers)
         std::string encoded_dbl;
         REQUIRE_FALSE(glz::write_etf(v_dbl, encoded_dbl));
 
@@ -1797,7 +1797,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(str_val, enc));
 
         Var dec{};
-        auto ec = glz::read_etf(dec, enc);
+        const auto ec = glz::read_etf(dec, enc);
         REQUIRE(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::no_matching_variant_type);
     }
@@ -1810,7 +1810,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(full, encoded_full));
 
         Var dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, encoded_full);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, encoded_full);
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(std::holds_alternative<test_etf_types::SubsetStruct>(dec));
         CHECK(std::get<test_etf_types::SubsetStruct>(dec).name == "test_name");
@@ -1826,7 +1826,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(list, enc));
 
         std::vector<test_etf_types::SubsetStruct> dec{};
-        auto ec = glz::read_etf(dec, enc);
+        const auto ec = glz::read_etf(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(dec.size() == 2);
         CHECK(dec[0].name == "test_name");
@@ -1842,7 +1842,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(list, enc));
 
         std::vector<test_etf_types::SubsetStruct> dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(dec.size() == 2);
         CHECK(dec[0].name == "test_name");
@@ -1857,7 +1857,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(full, enc));
 
         test_etf_types::NestedSubsetPayload dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         CHECK(dec.payload.name == "test_name");
         CHECK(dec.payload.count == 42);
@@ -1874,7 +1874,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(list, enc));
 
         std::vector<Var> dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(dec.size() == 2);
         REQUIRE(std::holds_alternative<test_etf_types::SubsetStruct>(dec[0]));
@@ -1891,7 +1891,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(full, enc));
 
         test_etf_types::OuterSingleFieldSubset dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         CHECK(dec.single.name == "single_name");
         CHECK(dec.trailing == 999);
@@ -1906,7 +1906,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(list, enc));
 
         std::vector<test_etf_types::SingleFieldSubset> dec{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(dec, enc);
         REQUIRE_FALSE(static_cast<bool>(ec));
         REQUIRE(dec.size() == 2);
         CHECK(dec[0].name == "single_name");
@@ -1919,7 +1919,7 @@ TEST_CASE("ETF: Variant serialization and deserialization", "[etf][variants]") {
         REQUIRE_FALSE(glz::write_etf(full, enc));
 
         test_etf_types::SubsetStruct sub{};
-        auto ec = glz::read<glz::etf_opts_partial_read>(sub, enc);
+        const auto ec = glz::read<glz::etf_opts_partial_read>(sub, enc);
         CHECK(ec.ec == glz::error_code::none);
         CHECK_FALSE(static_cast<bool>(ec));
     }
@@ -1992,7 +1992,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
     }
 
     SECTION("glz::generic_i64 correctly falls back to double on > INT64_MAX") {
-        uint64_t huge_u64 = 0xF000000000000000ULL;
+        uint64_t const huge_u64 = 0xF000000000000000ULL;
         std::string huge_etf;
         REQUIRE_FALSE(glz::write_etf(huge_u64, huge_etf));
 
@@ -2025,7 +2025,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         REQUIRE_FALSE(glz::write_etf(OnlyName{}, enc_only_name));
 
         test_etf_types::OptionalFieldStruct opt_s{};
-        auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(opt_s, enc_only_name);
+        const auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(opt_s, enc_only_name);
         CHECK(ec.ec == glz::error_code::none);
         CHECK_FALSE(static_cast<bool>(ec));
         CHECK(opt_s.name == "present_name");
@@ -2056,7 +2056,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         dup_etf.append(v2_etf.data() + 1, v2_etf.size() - 1);
 
         test_etf_types::TwoRequiredFieldsStruct req_s{};
-        auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(req_s, dup_etf);
+        const auto ec = glz::read<glz::etf_opts_error_on_missing_keys>(req_s, dup_etf);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::missing_key);
     }
@@ -2079,7 +2079,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         CHECK(sf_vec[2] == discusy::snowflake{30});
 
         // Test append_arrays preserves existing elements
-        auto ec_app = glz::read<glz::etf_opts_append_arrays>(sf_vec, str_ext_buf);
+        const auto ec_app = glz::read<glz::etf_opts_append_arrays>(sf_vec, str_ext_buf);
         REQUIRE_FALSE(static_cast<bool>(ec_app));
         CHECK(sf_vec.size() == 6);
         CHECK(sf_vec[3] == discusy::snowflake{10});
@@ -2093,7 +2093,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         std::vector<uint8_t> new_bytes{3, 4, 5};
         REQUIRE_FALSE(glz::write_etf(new_bytes, bin_buf));
 
-        auto ec = glz::read<glz::etf_opts_append_arrays>(byte_vec, bin_buf);
+        const auto ec = glz::read<glz::etf_opts_append_arrays>(byte_vec, bin_buf);
         REQUIRE_FALSE(static_cast<bool>(ec));
         CHECK(byte_vec.size() == 5);
         CHECK(byte_vec == std::vector<uint8_t>{1, 2, 3, 4, 5});
@@ -2137,10 +2137,10 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
 
     SECTION("Branchless 8-byte SMALL_BIG_EXT store and load") {
         // Values with varying byte widths (1..8 bytes)
-        uint64_t val1 = 0x12ULL;                                // 1 byte
-        uint64_t val3 = 0x123456ULL;                            // 3 bytes
-        uint64_t val5 = 0x123456789aULL;                        // 5 bytes
-        uint64_t val8 = 0x123456789abcdef0ULL;                  // 8 bytes (Snowflake range)
+        uint64_t const val1 = 0x12ULL;                                // 1 byte
+        uint64_t const val3 = 0x123456ULL;                            // 3 bytes
+        uint64_t const val5 = 0x123456789aULL;                        // 5 bytes
+        uint64_t const val8 = 0x123456789abcdef0ULL;                  // 8 bytes (Snowflake range)
 
         std::string enc1;
         std::string enc3;
@@ -2166,7 +2166,7 @@ TEST_CASE("ETF: Advanced fixes: atom keys in maps, generic integers, missing key
         CHECK(dec8 == val8);
 
         // uint32_t with bit 31 set (SMALL_BIG_EXT with exactly 4 bytes)
-        uint32_t u32_val = 0xFEDCBA98U;
+        uint32_t const u32_val = 0xFEDCBA98U;
         std::string enc_u32;
         REQUIRE_FALSE(glz::write_etf(u32_val, enc_u32));
         REQUIRE(enc_u32.size() == 1 + 7);
@@ -2689,11 +2689,11 @@ TEST_CASE("ETF: Component and Modal Interaction payloads and when-handler matchi
 }
 
 TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "[etf][security][integers]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Signed 32-bit integer boundaries (INTEGER_EXT min, max, zero)") {
@@ -2734,11 +2734,11 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
         CHECK(dec_s == -1);
 
         std::uint32_t dec_u32 = 0;
-        auto ec_u32 = glz::read_etf(dec_u32, enc_neg);
+        const auto ec_u32 = glz::read_etf(dec_u32, enc_neg);
         CHECK(static_cast<bool>(ec_u32));
 
         std::uint64_t dec_u64 = 0;
-        auto ec_u64 = glz::read_etf(dec_u64, enc_neg);
+        const auto ec_u64 = glz::read_etf(dec_u64, enc_neg);
         CHECK(static_cast<bool>(ec_u64));
     }
 
@@ -2749,15 +2749,15 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
         append_be32(enc_large, 100000); // 100,000 exceeds int16_t (max 32767)
 
         std::int16_t dec_i16 = 0;
-        auto ec_i16 = glz::read_etf(dec_i16, enc_large);
+        const auto ec_i16 = glz::read_etf(dec_i16, enc_large);
         CHECK(static_cast<bool>(ec_i16));
 
         std::int8_t dec_i8 = 0;
-        auto ec_i8 = glz::read_etf(dec_i8, enc_large);
+        const auto ec_i8 = glz::read_etf(dec_i8, enc_large);
         CHECK(static_cast<bool>(ec_i8));
 
         std::uint8_t dec_u8 = 0;
-        auto ec_u8 = glz::read_etf(dec_u8, enc_large);
+        const auto ec_u8 = glz::read_etf(dec_u8, enc_large);
         CHECK(static_cast<bool>(ec_u8));
     }
 
@@ -2769,7 +2769,7 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
         buf_zero.push_back(static_cast<char>(0)); // len 0
         buf_zero.push_back(static_cast<char>(0)); // sign 0
         std::uint64_t dec_bz = 999;
-        auto ec_bz = glz::read_etf(dec_bz, buf_zero);
+        const auto ec_bz = glz::read_etf(dec_bz, buf_zero);
         if (!static_cast<bool>(ec_bz)) {
             CHECK(dec_bz == 0);
         }
@@ -2787,7 +2787,7 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
 
         // UINT64_MAX into int64_t must fail due to signed overflow
         std::int64_t dec_i64 = 0;
-        auto ec_i64 = glz::read_etf(dec_i64, buf_u64max);
+        const auto ec_i64 = glz::read_etf(dec_i64, buf_u64max);
         CHECK(static_cast<bool>(ec_i64));
 
         // INT64_MAX (9223372036854775807)
@@ -2816,7 +2816,7 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
 
         // Negative bignum into uint64_t must fail
         std::uint64_t dec_u_neg = 0;
-        auto ec_u_neg = glz::read_etf(dec_u_neg, buf_i64min);
+        const auto ec_u_neg = glz::read_etf(dec_u_neg, buf_i64min);
         CHECK(static_cast<bool>(ec_u_neg));
     }
 
@@ -2830,15 +2830,15 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
         buf_ovf.push_back(static_cast<char>(0x01)); // 2^64
 
         std::uint64_t dec_ovf_u = 0;
-        auto ec_ovf_u = glz::read_etf(dec_ovf_u, buf_ovf);
+        const auto ec_ovf_u = glz::read_etf(dec_ovf_u, buf_ovf);
         CHECK(static_cast<bool>(ec_ovf_u));
 
         std::int64_t dec_ovf_i = 0;
-        auto ec_ovf_i = glz::read_etf(dec_ovf_i, buf_ovf);
+        const auto ec_ovf_i = glz::read_etf(dec_ovf_i, buf_ovf);
         CHECK(static_cast<bool>(ec_ovf_i));
 
         discusy::snowflake sf{};
-        auto ec_ovf_sf = glz::read_etf(sf, buf_ovf);
+        const auto ec_ovf_sf = glz::read_etf(sf, buf_ovf);
         CHECK(static_cast<bool>(ec_ovf_sf));
     }
 
@@ -2856,7 +2856,7 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
 
         // Truncated LARGE_BIG_EXT missing sign byte (5 bytes total: magic + tag + 3 len bytes)
         std::string trunc_hdr = buf_lbig.substr(0, 5);
-        auto ec_thdr = glz::read_etf(dec_lbig, trunc_hdr);
+        const auto ec_thdr = glz::read_etf(dec_lbig, trunc_hdr);
         CHECK(static_cast<bool>(ec_thdr));
         CHECK(ec_thdr.ec == glz::error_code::unexpected_end);
     }
@@ -2864,7 +2864,7 @@ TEST_CASE("ETF: Integer boundaries, signedness, and bignum overflow security", "
 
 TEST_CASE("ETF: Floating-point standards, special values, and legacy float corruption", "[etf][security][floats]") {
     SECTION("IEEE 754 special values (Infinity, NaN, -0.0, denorm_min)") {
-        double inf = std::numeric_limits<double>::infinity();
+        double const inf = std::numeric_limits<double>::infinity();
         std::string enc_inf;
         REQUIRE_FALSE(glz::write_etf(inf, enc_inf));
         double dec_inf = 0.0;
@@ -2872,7 +2872,7 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
         CHECK(std::isinf(dec_inf));
         CHECK(dec_inf > 0);
 
-        double neg_inf = -std::numeric_limits<double>::infinity();
+        double const neg_inf = -std::numeric_limits<double>::infinity();
         std::string enc_ninf;
         REQUIRE_FALSE(glz::write_etf(neg_inf, enc_ninf));
         double dec_ninf = 0.0;
@@ -2880,14 +2880,14 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
         CHECK(std::isinf(dec_ninf));
         CHECK(dec_ninf < 0);
 
-        double qnan = std::numeric_limits<double>::quiet_NaN();
+        double const qnan = std::numeric_limits<double>::quiet_NaN();
         std::string enc_nan;
         REQUIRE_FALSE(glz::write_etf(qnan, enc_nan));
         double dec_nan = 0.0;
         REQUIRE_FALSE(glz::read_etf(dec_nan, enc_nan));
         CHECK(std::isnan(dec_nan));
 
-        double neg_zero = -0.0;
+        double const neg_zero = -0.0;
         std::string enc_nzero;
         REQUIRE_FALSE(glz::write_etf(neg_zero, enc_nzero));
         double dec_nzero = 1.0;
@@ -2895,7 +2895,7 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
         CHECK(dec_nzero == 0.0);
         CHECK(std::signbit(dec_nzero));
 
-        double denorm = std::numeric_limits<double>::denorm_min();
+        double const denorm = std::numeric_limits<double>::denorm_min();
         std::string enc_denorm;
         REQUIRE_FALSE(glz::write_etf(denorm, enc_denorm));
         double dec_denorm = 0.0;
@@ -2904,7 +2904,7 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
     }
 
     SECTION("Type confusion: Float into integer, snowflake, and string rejection") {
-        double valid_d = 42.5;
+        double const valid_d = 42.5;
         std::string enc_d;
         REQUIRE_FALSE(glz::write_etf(valid_d, enc_d));
 
@@ -2925,7 +2925,7 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
         std::string legacy_valid;
         legacy_valid.push_back(static_cast<char>(glz::etf::magic_version));
         legacy_valid.push_back(static_cast<char>(glz::etf::tag::FLOAT_EXT));
-        std::string float_str = "3.14159265358979311600e+00";
+        std::string const float_str = "3.14159265358979311600e+00";
         legacy_valid.append(float_str);
         legacy_valid.append(31 - float_str.size(), '\0');
         REQUIRE(legacy_valid.size() == 1 + 1 + 31);
@@ -2955,15 +2955,15 @@ TEST_CASE("ETF: Floating-point standards, special values, and legacy float corru
 }
 
 TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservation", "[etf][security][strings]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
-    auto append_be16 = [](std::string& s, std::uint16_t val) {
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Binary-safe strings: preservation of embedded null bytes") {
@@ -3016,7 +3016,7 @@ TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservat
         dos_bin.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
         append_be32(dos_bin, 0xFFFFFFFFU);
         dos_bin.append("short");
-        auto ec_dos1 = glz::read_etf(s_out, dos_bin);
+        const auto ec_dos1 = glz::read_etf(s_out, dos_bin);
         CHECK(static_cast<bool>(ec_dos1));
         CHECK(ec_dos1.ec == glz::error_code::unexpected_end);
 
@@ -3026,7 +3026,7 @@ TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservat
         dos_bin2.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
         append_be32(dos_bin2, 0x7FFFFFFFU);
         dos_bin2.append("short");
-        auto ec_dos2 = glz::read_etf(s_out, dos_bin2);
+        const auto ec_dos2 = glz::read_etf(s_out, dos_bin2);
         CHECK(static_cast<bool>(ec_dos2));
         CHECK(ec_dos2.ec == glz::error_code::unexpected_end);
 
@@ -3036,7 +3036,7 @@ TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservat
         dos_str.push_back(static_cast<char>(glz::etf::tag::STRING_EXT));
         append_be16(dos_str, 0xFFFFU);
         dos_str.append("short");
-        auto ec_dos3 = glz::read_etf(s_out, dos_str);
+        const auto ec_dos3 = glz::read_etf(s_out, dos_str);
         CHECK(static_cast<bool>(ec_dos3));
         CHECK(ec_dos3.ec == glz::error_code::unexpected_end);
     }
@@ -3048,7 +3048,7 @@ TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservat
         off1.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
         append_be32(off1, 5);
         off1.append("1234"); // only 4 bytes
-        auto ec_off1 = glz::read_etf(s_out, off1);
+        const auto ec_off1 = glz::read_etf(s_out, off1);
         CHECK(static_cast<bool>(ec_off1));
         CHECK(ec_off1.ec == glz::error_code::unexpected_end);
     }
@@ -3072,19 +3072,19 @@ TEST_CASE("ETF: String, binary, atom length attacks, and embedded null preservat
 }
 
 TEST_CASE("ETF: Snowflake parser security, malicious strings, and overflow boundaries", "[etf][security][snowflake]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Rejection of malformed, negative, decimal, and hex strings") {
-        auto check_bad_sf = [&](std::string_view bad) {
+        const auto check_bad_sf = [&](std::string_view bad) {
             std::string enc;
             REQUIRE_FALSE(glz::write_etf(std::string{bad}, enc));
             discusy::snowflake sf{};
-            auto ec = glz::read_etf(sf, enc);
+            const auto ec = glz::read_etf(sf, enc);
             CHECK(static_cast<bool>(ec));
         };
 
@@ -3165,7 +3165,7 @@ TEST_CASE("ETF: Snowflake parser security, malicious strings, and overflow bound
         CHECK(static_cast<bool>(glz::read_etf(sf, enc_b)));
 
         // List
-        std::vector<int> list_val = {1, 2, 3};
+        std::vector<int> const list_val = {1, 2, 3};
         std::string enc_l;
         REQUIRE_FALSE(glz::write_etf(list_val, enc_l));
         CHECK(static_cast<bool>(glz::read_etf(sf, enc_l)));
@@ -3179,11 +3179,11 @@ TEST_CASE("ETF: Snowflake parser security, malicious strings, and overflow bound
 }
 
 TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key resilience", "[etf][security][maps]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Truncated key-value pairs in MAP_EXT (unexpected_end)") {
@@ -3203,12 +3203,12 @@ TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key res
         trunc_kv.append("name");
 
         test_etf_types::SampleStruct dec_sample{};
-        auto ec_tkv = glz::read_etf(dec_sample, trunc_kv);
+        const auto ec_tkv = glz::read_etf(dec_sample, trunc_kv);
         CHECK(static_cast<bool>(ec_tkv));
         CHECK(ec_tkv.ec == glz::error_code::unexpected_end);
 
         std::map<std::string, int> dec_map;
-        auto ec_tmap = glz::read_etf(dec_map, trunc_kv);
+        const auto ec_tmap = glz::read_etf(dec_map, trunc_kv);
         CHECK(static_cast<bool>(ec_tmap));
         CHECK(ec_tmap.ec == glz::error_code::unexpected_end);
     }
@@ -3226,7 +3226,7 @@ TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key res
 
         test_etf_types::SampleStruct s_bad{};
         // Parser must reject or handle gracefully without crashing
-        auto ec_sbad = glz::read_etf(s_bad, bad_key_map);
+        const auto ec_sbad = glz::read_etf(s_bad, bad_key_map);
         (void)ec_sbad;
     }
 
@@ -3267,7 +3267,7 @@ TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key res
         std::vector<int> dec_vec;
         CHECK(static_cast<bool>(glz::read_etf(dec_vec, enc_map)));
 
-        std::vector<int> list_src = {1, 2, 3};
+        std::vector<int> const list_src = {1, 2, 3};
         std::string enc_list;
         REQUIRE_FALSE(glz::write_etf(list_src, enc_list));
 
@@ -3306,7 +3306,7 @@ TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key res
         complex_map.push_back(static_cast<char>(99));
 
         test_etf_types::SubsetStruct sub{};
-        auto ec_sub = glz::read<glz::etf_opts_partial_read>(sub, complex_map);
+        const auto ec_sub = glz::read<glz::etf_opts_partial_read>(sub, complex_map);
         REQUIRE_FALSE(static_cast<bool>(ec_sub));
         CHECK(sub.name == "special_agent");
         CHECK(sub.count == 99);
@@ -3314,11 +3314,11 @@ TEST_CASE("ETF: Map key-value corruption, non-string keys, and duplicate key res
 }
 
 TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "[etf][security][lists][tuples]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Improper lists (LIST_EXT with non-nil tail) resilience") {
@@ -3335,11 +3335,11 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         improper.push_back(static_cast<char>(30));
 
         std::vector<int> v_imp;
-        auto ec_imp = glz::read_etf(v_imp, improper);
+        const auto ec_imp = glz::read_etf(v_imp, improper);
         (void)ec_imp; // Handled without crash or infinite loop
 
         glz::skip sk{};
-        auto ec_sk = glz::read_etf(sk, improper);
+        const auto ec_sk = glz::read_etf(sk, improper);
         (void)ec_sk;
     }
 
@@ -3354,7 +3354,7 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         trunc_elem.push_back(static_cast<char>(glz::etf::tag::INTEGER_EXT));
         // Buffer ends prematurely before 4 bytes of INTEGER_EXT
         std::vector<int> v_out;
-        auto ec_te = glz::read_etf(v_out, trunc_elem);
+        const auto ec_te = glz::read_etf(v_out, trunc_elem);
         CHECK(static_cast<bool>(ec_te));
         CHECK(ec_te.ec == glz::error_code::unexpected_end);
 
@@ -3370,7 +3370,7 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         mismatch_elem.append("bad");
         mismatch_elem.push_back(static_cast<char>(glz::etf::tag::NIL_EXT));
 
-        auto ec_me = glz::read_etf(v_out, mismatch_elem);
+        const auto ec_me = glz::read_etf(v_out, mismatch_elem);
         CHECK(static_cast<bool>(ec_me));
     }
 
@@ -3387,7 +3387,7 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         tup_buf.push_back(static_cast<char>(3));
 
         std::tuple<int, int> dec_tup2;
-        auto ec_t2 = glz::read_etf(dec_tup2, tup_buf);
+        const auto ec_t2 = glz::read_etf(dec_tup2, tup_buf);
         CHECK(static_cast<bool>(ec_t2)); // 3 elements into 2-tuple must fail
     }
 
@@ -3401,7 +3401,7 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         // Buffer ends prematurely
 
         std::tuple<int, int, int> dec_t3;
-        auto ec_tt = glz::read_etf(dec_t3, trunc_tup);
+        const auto ec_tt = glz::read_etf(dec_t3, trunc_tup);
         CHECK(static_cast<bool>(ec_tt));
         CHECK(ec_tt.ec == glz::error_code::unexpected_end);
 
@@ -3413,18 +3413,18 @@ TEST_CASE("ETF: Improper lists, tuple arity mismatches, and container bounds", "
         dos_tup.append("short");
 
         glz::skip sk{};
-        auto ec_dos_tup = glz::read_etf(sk, dos_tup);
+        const auto ec_dos_tup = glz::read_etf(sk, dos_tup);
         CHECK(static_cast<bool>(ec_dos_tup));
         CHECK(ec_dos_tup.ec == glz::error_code::unexpected_end);
     }
 }
 
 TEST_CASE("ETF: Gateway parse_payload_base attack vectors and malformed payloads", "[etf][security][gateway]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Rejection of non-map top-level payloads (ints, lists, strings, short buffers)") {
@@ -3447,7 +3447,7 @@ TEST_CASE("ETF: Gateway parse_payload_base attack vectors and malformed payloads
         one_byte.push_back(static_cast<char>(glz::etf::magic_version));
         CHECK(discusy::etf::parse_payload_base(pb, one_byte));
 
-        std::string empty_buf;
+        std::string const empty_buf;
         CHECK(discusy::etf::parse_payload_base(pb, empty_buf));
     }
 
@@ -3503,7 +3503,7 @@ TEST_CASE("ETF: Gateway parse_payload_base attack vectors and malformed payloads
         bad_s_map.append("not_an_int");
 
         // Should handle without throwing or crashing
-        auto res = discusy::etf::parse_payload_base(pb, bad_s_map);
+        const auto res = discusy::etf::parse_payload_base(pb, bad_s_map);
         (void)res;
     }
 
@@ -3514,7 +3514,7 @@ TEST_CASE("ETF: Gateway parse_payload_base attack vectors and malformed payloads
         append_be32(flood_map, 23); // 20 unknown + op, s, t
 
         for (int i = 0; i < 20; ++i) {
-            std::string k = "junk_" + std::to_string(i);
+            std::string const k = "junk_" + std::to_string(i);
             flood_map.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
             append_be32(flood_map, static_cast<std::uint32_t>(k.size()));
             flood_map.append(k);
@@ -3555,57 +3555,57 @@ TEST_CASE("ETF: Gateway parse_payload_base attack vectors and malformed payloads
 }
 
 TEST_CASE("ETF: Skip parser coverage on all tags and deep recursion protection", "[etf][security][skip]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("glz::skip on every valid ETF tag") {
-        auto check_skip = [](const std::string& b) {
+        const auto check_skip = [](const std::string& b) {
             glz::skip sk{};
             return !static_cast<bool>(glz::read_etf(sk, b));
         };
 
         // SMALL_INTEGER_EXT
-        std::string b_sint{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT), 42};
+        std::string const b_sint{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_INTEGER_EXT), 42};
         CHECK(check_skip(b_sint));
 
         // INTEGER_EXT
-        std::string b_int{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::INTEGER_EXT), 0, 0, 1, 0};
+        std::string const b_int{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::INTEGER_EXT), 0, 0, 1, 0};
         CHECK(check_skip(b_int));
 
         // SMALL_BIG_EXT
-        std::string b_sbig{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_BIG_EXT), 2, 0, 1, 2};
+        std::string const b_sbig{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_BIG_EXT), 2, 0, 1, 2};
         CHECK(check_skip(b_sbig));
 
         // NIL_EXT
-        std::string b_nil{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::NIL_EXT)};
+        std::string const b_nil{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::NIL_EXT)};
         CHECK(check_skip(b_nil));
 
         // STRING_EXT
-        std::string b_str{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::STRING_EXT), 0, 2, 'a', 'b'};
+        std::string const b_str{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::STRING_EXT), 0, 2, 'a', 'b'};
         CHECK(check_skip(b_str));
 
         // BINARY_EXT
-        std::string b_bin{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::BINARY_EXT), 0, 0, 0, 2, 'x', 'y'};
+        std::string const b_bin{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::BINARY_EXT), 0, 0, 0, 2, 'x', 'y'};
         CHECK(check_skip(b_bin));
 
         // BIT_BINARY_EXT
-        std::string b_bbin{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::BIT_BINARY_EXT), 0, 0, 0, 1, 8, 'z'};
+        std::string const b_bbin{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::BIT_BINARY_EXT), 0, 0, 0, 1, 8, 'z'};
         CHECK(check_skip(b_bbin));
 
         // SMALL_ATOM_UTF8_EXT
-        std::string b_satom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT), 3, 'a', 'b', 'c'};
+        std::string const b_satom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_ATOM_UTF8_EXT), 3, 'a', 'b', 'c'};
         CHECK(check_skip(b_satom));
 
         // SMALL_ATOM_EXT
-        std::string b_latom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_ATOM_EXT), 3, 'a', 'b', 'c'};
+        std::string const b_latom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::SMALL_ATOM_EXT), 3, 'a', 'b', 'c'};
         CHECK(check_skip(b_latom));
 
         // ATOM_EXT
-        std::string b_atom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::ATOM_EXT), 0, 3, 'a', 'b', 'c'};
+        std::string const b_atom{static_cast<char>(glz::etf::magic_version), static_cast<char>(glz::etf::tag::ATOM_EXT), 0, 3, 'a', 'b', 'c'};
         CHECK(check_skip(b_atom));
     }
 
@@ -3634,11 +3634,11 @@ TEST_CASE("ETF: Variant deduction edge cases, type backtracking, and malformed i
         CHECK(std::get<std::string>(dec_text) == text_val);
 
         // 3. Boolean payload -> fails no_matching_variant_type
-        bool bool_val = true;
+        bool const bool_val = true;
         std::string enc_bool;
         REQUIRE_FALSE(glz::write_etf(bool_val, enc_bool));
         SfOrStr dec_bad{};
-        auto ec_bad = glz::read_etf(dec_bad, enc_bool);
+        const auto ec_bad = glz::read_etf(dec_bad, enc_bool);
         CHECK(static_cast<bool>(ec_bad));
         CHECK(ec_bad.ec == glz::error_code::no_matching_variant_type);
     }
@@ -3674,11 +3674,11 @@ TEST_CASE("ETF: Variant deduction edge cases, type backtracking, and malformed i
         CHECK(std::get<std::string>(dec_str) == "container_test");
 
         // Float payload: neither int, vector<int>, nor string -> must fail
-        double f_val = 3.14;
+        double const f_val = 3.14;
         std::string enc_f;
         REQUIRE_FALSE(glz::write_etf(f_val, enc_f));
         ContainerVar dec_f{};
-        auto ec_f = glz::read_etf(dec_f, enc_f);
+        const auto ec_f = glz::read_etf(dec_f, enc_f);
         CHECK(static_cast<bool>(ec_f));
         CHECK(ec_f.ec == glz::error_code::no_matching_variant_type);
     }
@@ -3726,13 +3726,13 @@ TEST_CASE("ETF: Single-byte buffers and protocol boundary fuzzing", "[etf][secur
 
         int val = 0;
         // Should parse the 42 without crashing
-        auto ec = glz::read_etf(val, buf_trail);
+        const auto ec = glz::read_etf(val, buf_trail);
         if (!static_cast<bool>(ec)) {
             CHECK(val == 42);
         }
 
         glz::skip sk{};
-        auto ec_sk = glz::read_etf(sk, buf_trail);
+        const auto ec_sk = glz::read_etf(sk, buf_trail);
         (void)ec_sk;
     }
 }
@@ -3768,7 +3768,7 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
 
         // Floating point
         std::string enc_flt;
-        double dval = 3.141592653589793;
+        double const dval = 3.141592653589793; // NOLINT(modernize-use-std-numbers)
         REQUIRE_FALSE(glz::write_etf(dval, enc_flt));
         glz::generic gen_flt;
         REQUIRE_FALSE(glz::read_etf(gen_flt, enc_flt));
@@ -3809,7 +3809,7 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
 
     SECTION("Arrays and Tuples in glz::generic") {
         // Empty list (NIL_EXT)
-        std::vector<int> empty_vec{};
+        std::vector<int> const empty_vec{};
         std::string enc_empty;
         REQUIRE_FALSE(glz::write_etf(empty_vec, enc_empty));
         glz::generic gen_empty;
@@ -3818,7 +3818,7 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
         CHECK(gen_empty.get_array().empty());
 
         // Homogeneous list (LIST_EXT)
-        std::vector<int> numbers = {10, 20, 30};
+        std::vector<int> const numbers = {10, 20, 30};
         std::string enc_nums;
         REQUIRE_FALSE(glz::write_etf(numbers, enc_nums));
         glz::generic gen_nums;
@@ -3882,7 +3882,7 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
         glz::generic::array_t arr;
         arr.emplace_back(1.0);
         arr.emplace_back("two");
-        original["items"] = std::move(arr);
+        original["items"] = arr;
 
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(original, encoded));
@@ -3901,15 +3901,15 @@ TEST_CASE("ETF: Generic JSON parsing and roundtrip (glz::generic)", "[etf][gener
 }
 
 TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][array][bounds]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
-    auto append_be16 = [](std::string& s, std::uint16_t val) {
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("Exact size std::array roundtrip from LIST_EXT") {
@@ -3924,7 +3924,7 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
     }
 
     SECTION("Underfilled std::array (ETF list has fewer elements than array size)") {
-        std::vector<int> short_list = {111, 222};
+        std::vector<int> const short_list = {111, 222};
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(short_list, encoded));
 
@@ -3939,18 +3939,18 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
 
     SECTION("Overfilled list / Out-of-bounds protection (exceeded_static_array_size vs partial_read)") {
         // Construct a LIST_EXT containing 6 elements: [10, 20, 30, 40, 50, 60]
-        std::vector<int> long_list = {10, 20, 30, 40, 50, 60};
+        std::vector<int> const long_list = {10, 20, 30, 40, 50, 60};
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(long_list, encoded));
 
         // In default mode: more elements than array capacity MUST be an error
         std::array<int, 2> small_arr = {0, 0};
-        auto ec = glz::read_etf(small_arr, encoded);
+        const auto ec = glz::read_etf(small_arr, encoded);
         CHECK(static_cast<bool>(ec));
         CHECK(ec.ec == glz::error_code::exceeded_static_array_size);
 
         // In partial_read mode: gracefully populates up to capacity without error
-        auto ec_partial = glz::read<glz::etf_opts_partial_read>(small_arr, encoded);
+        const auto ec_partial = glz::read<glz::etf_opts_partial_read>(small_arr, encoded);
         REQUIRE_FALSE(static_cast<bool>(ec_partial));
         CHECK(small_arr[0] == 10);
         CHECK(small_arr[1] == 20);
@@ -3989,12 +3989,12 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
 
         // In default mode, rejects with exceeded_static_array_size
         OverfilledStructTest result{};
-        auto ec_def = glz::read_etf(result, buf);
+        const auto ec_def = glz::read_etf(result, buf);
         CHECK(static_cast<bool>(ec_def));
         CHECK(ec_def.ec == glz::error_code::exceeded_static_array_size);
 
         // In partial_read mode, successfully skips excess elements and synchronizes stream
-        auto ec_part = glz::read<glz::etf_opts_partial_read>(result, buf);
+        const auto ec_part = glz::read<glz::etf_opts_partial_read>(result, buf);
         REQUIRE_FALSE(static_cast<bool>(ec_part));
         CHECK(result.coords[0] == 10);
         CHECK(result.coords[1] == 20);
@@ -4002,7 +4002,7 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
     }
 
     SECTION("Empty ETF list (NIL_EXT) into std::array") {
-        std::vector<int> empty_vec{};
+        std::vector<int> const empty_vec{};
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(empty_vec, encoded));
         CHECK(static_cast<std::uint8_t>(encoded[1]) == glz::etf::tag::NIL_EXT);
@@ -4032,11 +4032,11 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
         REQUIRE_FALSE(glz::write_etf(big_tup, enc_big_tup));
 
         std::array<int, 2> arr_small{};
-        auto ec_tup = glz::read_etf(arr_small, enc_big_tup);
+        const auto ec_tup = glz::read_etf(arr_small, enc_big_tup);
         CHECK(static_cast<bool>(ec_tup));
         CHECK(ec_tup.ec == glz::error_code::exceeded_static_array_size);
 
-        auto ec_tup_part = glz::read<glz::etf_opts_partial_read>(arr_small, enc_big_tup);
+        const auto ec_tup_part = glz::read<glz::etf_opts_partial_read>(arr_small, enc_big_tup);
         REQUIRE_FALSE(static_cast<bool>(ec_tup_part));
         CHECK(arr_small[0] == 1);
         CHECK(arr_small[1] == 2);
@@ -4081,11 +4081,11 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
 
         // Array of size 3 (overfilled): error in default mode, truncated in partial_read
         std::array<uint8_t, 3> b3 = {0, 0, 0};
-        auto ec_b3 = glz::read_etf(b3, enc_bin);
+        const auto ec_b3 = glz::read_etf(b3, enc_bin);
         CHECK(static_cast<bool>(ec_b3));
         CHECK(ec_b3.ec == glz::error_code::exceeded_static_array_size);
 
-        auto ec_b3_part = glz::read<glz::etf_opts_partial_read>(b3, enc_bin);
+        const auto ec_b3_part = glz::read<glz::etf_opts_partial_read>(b3, enc_bin);
         REQUIRE_FALSE(static_cast<bool>(ec_b3_part));
         CHECK(b3[0] == 'A');
         CHECK(b3[1] == 'B');
@@ -4104,11 +4104,11 @@ TEST_CASE("ETF: Fixed array (std::array) parsing and boundary security", "[etf][
         CHECK(c4[3] == 'Z');
 
         std::array<char, 2> c2 = {'\0', '\0'};
-        auto ec_c2 = glz::read_etf(c2, str_ext);
+        const auto ec_c2 = glz::read_etf(c2, str_ext);
         CHECK(static_cast<bool>(ec_c2));
         CHECK(ec_c2.ec == glz::error_code::exceeded_static_array_size);
 
-        auto ec_c2_part = glz::read<glz::etf_opts_partial_read>(c2, str_ext);
+        const auto ec_c2_part = glz::read<glz::etf_opts_partial_read>(c2, str_ext);
         REQUIRE_FALSE(static_cast<bool>(ec_c2_part));
         CHECK(c2[0] == 'W');
         CHECK(c2[1] == 'X');
@@ -4322,7 +4322,7 @@ TEST_CASE("ETF & JSON: struct glaze, glaze meta value, and glz::custom for permi
         std::string str_multi_payload;
         str_multi_payload.push_back(static_cast<char>(glz::etf::magic_version));
         str_multi_payload.push_back(static_cast<char>(glz::etf::tag::BINARY_EXT));
-        std::string str_3112 = "3112";
+        std::string const str_3112 = "3112";
         uint32_t be_len = glz::etf::detail::to_big_endian(static_cast<uint32_t>(str_3112.size()));
         str_multi_payload.append(reinterpret_cast<const char*>(&be_len), 4);
         str_multi_payload.append(str_3112);
@@ -4482,7 +4482,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         REQUIRE(etf_str.size() > 5);
         CHECK(static_cast<uint8_t>(etf_str[1]) == glz::etf::tag::MAP_EXT);
         // Map arity should be exactly 2 (name and direct_null)
-        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        const auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
         CHECK(arity == 2);
 
         // Deserialization roundtrip
@@ -4524,7 +4524,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // ETF: map arity should be exactly 4
         std::string etf_str;
         REQUIRE_FALSE(glz::write_etf(s, etf_str));
-        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        const auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
         CHECK(arity == 4);
 
         // Deserialization roundtrip
@@ -4566,7 +4566,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // ETF: map arity should be exactly 5
         std::string etf_str;
         REQUIRE_FALSE(glz::write_etf(s, etf_str));
-        auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        const auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
         CHECK(arity == 5);
 
         // Deserialization roundtrip
@@ -4646,7 +4646,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string etf_u;
         REQUIRE_FALSE(glz::write_etf(p_unengaged, etf_u));
-        uint32_t arity_u = glz::etf::detail::read_be<uint32_t>(&etf_u[2]);
+        const auto arity_u = glz::etf::detail::read_be<uint32_t>(&etf_u[2]);
         CHECK(arity_u == 1); // only "type" is written
 
         // Case 2: reset permissions to null (clear overrides)
@@ -4661,7 +4661,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string etf_n;
         REQUIRE_FALSE(glz::write_etf(p_null, etf_n));
-        uint32_t arity_n = glz::etf::detail::read_be<uint32_t>(&etf_n[2]);
+        const auto arity_n = glz::etf::detail::read_be<uint32_t>(&etf_n[2]);
         CHECK(arity_n == 3); // type, allow, deny
 
         discusy::api::channels::edit_channel_permissions dec_n{};
@@ -4682,7 +4682,7 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
 
         std::string etf_v;
         REQUIRE_FALSE(glz::write_etf(p_val, etf_v));
-        uint32_t arity_v = glz::etf::detail::read_be<uint32_t>(&etf_v[2]);
+        const auto arity_v = glz::etf::detail::read_be<uint32_t>(&etf_v[2]);
         CHECK(arity_v == 2); // type and allow
 
         discusy::api::channels::edit_channel_permissions dec_v{};
@@ -4699,13 +4699,13 @@ TEST_CASE("ETF & JSON: Explicit nulls (discusy::explicit_null and opt<explicit_n
         // Default: skip_null_members = true -> opt_val omitted
         std::string etf_skip;
         REQUIRE_FALSE(glz::write_etf(orig, etf_skip));
-        uint32_t arity_skip = glz::etf::detail::read_be<uint32_t>(&etf_skip[2]);
+        const auto arity_skip = glz::etf::detail::read_be<uint32_t>(&etf_skip[2]);
         CHECK(arity_skip == 1);
 
         // With skip_null_members = false -> opt_val written as nil
         std::string etf_no_skip;
         REQUIRE_FALSE(glz::write<glz::etf::etf_opts{.skip_null_members = false}>(orig, etf_no_skip));
-        uint32_t arity_no_skip = glz::etf::detail::read_be<uint32_t>(&etf_no_skip[2]);
+        const auto arity_no_skip = glz::etf::detail::read_be<uint32_t>(&etf_no_skip[2]);
         CHECK(arity_no_skip == 2);
 
         // In JSON with skip_null_members = false -> opt_val: null
@@ -4721,7 +4721,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
         NullableParityStruct dec_json{};
 
         // JSON payload with only "name", omitting std_opt, discusy_opt, exp_null, opt_exp_null
-        std::string json_payload = "{\"name\":\"omitted_test\"}";
+        std::string json_payload = R"({"name":"omitted_test"})";
         REQUIRE_FALSE(glz::read_json(dec_json, json_payload));
         CHECK(dec_json.name == "omitted_test");
         CHECK_FALSE(dec_json.std_opt.has_value());
@@ -4766,7 +4766,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
         };
         NullableParityStruct pre_etf = pre_json;
 
-        std::string json_payload = "{\"name\":\"new_name\"}";
+        std::string json_payload = R"({"name":"new_name"})";
         REQUIRE_FALSE(glz::read_json(pre_json, json_payload));
         CHECK(pre_json.name == "new_name");
         CHECK(pre_json.std_opt == 10);
@@ -4809,7 +4809,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
 
         // JSON: all fields explicitly set to null
         std::string json_null_payload =
-            "{\"name\":\"reset_test\",\"std_opt\":null,\"discusy_opt\":null,\"exp_null\":null,\"opt_exp_null\":null}";
+            R"({"name":"reset_test","std_opt":null,"discusy_opt":null,"exp_null":null,"opt_exp_null":null})";
         REQUIRE_FALSE(glz::read_json(pre_json, json_null_payload));
         CHECK_FALSE(pre_json.std_opt.has_value());
         CHECK_FALSE(pre_json.discusy_opt.has_value());
@@ -4824,7 +4824,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
             uint32_t arity = glz::etf::detail::to_big_endian(5U);
             etf_null_payload.append(reinterpret_cast<const char*>(&arity), 4);
 
-            auto add_pair = [&](std::string_view key, auto val_writer) {
+            const auto add_pair = [&](std::string_view key, auto val_writer) {
                 std::string k{key};
                 std::string enc_k;
                 REQUIRE_FALSE(glz::write_etf(k, enc_k));
@@ -4889,7 +4889,7 @@ TEST_CASE("ETF & JSON: Nullable parity (std::nullopt, explicit_null, nulls, and 
         // ETF: arity should be 2 (name, exp_null)
         std::string etf_str;
         REQUIRE_FALSE(glz::write_etf(obj, etf_str));
-        uint32_t arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
+        const auto arity = glz::etf::detail::read_be<uint32_t>(&etf_str[2]);
         CHECK(arity == 2);
 
         // Roundtrip parity
@@ -5104,16 +5104,16 @@ TEST_CASE("ETF & JSON: struct glaze and glz::meta with mimic support", "[etf][js
 }
 
 TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED skip, 32-bit overflow, tuple append, timestamp heuristics", "[etf][security][fixes]") {
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
-    auto append_be16 = [](std::string& s, std::uint16_t val) {
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("1. Map and Array DoS memory exhaustion protection and chunked reservation") {
@@ -5125,7 +5125,7 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
         malicious_map.append(60, '\x00'); // only 60 bytes left
 
         std::unordered_map<std::uint64_t, std::string> dec_map;
-        auto ec_map = glz::read_etf(dec_map, malicious_map);
+        const auto ec_map = glz::read_etf(dec_map, malicious_map);
         CHECK(static_cast<bool>(ec_map));
         CHECK(ec_map.ec == glz::error_code::unexpected_end);
 
@@ -5208,7 +5208,7 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
         large_big.push_back(0); // sign
 
         glz::skip sk_lb{};
-        auto ec_lb = glz::read_etf(sk_lb, large_big);
+        const auto ec_lb = glz::read_etf(sk_lb, large_big);
         CHECK(static_cast<bool>(ec_lb));
         CHECK(ec_lb.ec == glz::error_code::unexpected_end);
 
@@ -5219,7 +5219,7 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
         append_be32(list_ovf, 0xFFFFFFFFU);
 
         glz::skip sk_lo{};
-        auto ec_lo = glz::read_etf(sk_lo, list_ovf);
+        const auto ec_lo = glz::read_etf(sk_lo, list_ovf);
         CHECK(static_cast<bool>(ec_lo));
         CHECK(ec_lo.ec == glz::error_code::unexpected_end);
 
@@ -5234,7 +5234,7 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
         ref_ovf.append("node");
 
         glz::skip sk_ref{};
-        auto ec_ref = glz::read_etf(sk_ref, ref_ovf);
+        const auto ec_ref = glz::read_etf(sk_ref, ref_ovf);
         CHECK(static_cast<bool>(ec_ref));
         CHECK(ec_ref.ec == glz::error_code::unexpected_end);
     }
@@ -5285,7 +5285,7 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
 
         std::chrono::system_clock::time_point tp{};
         REQUIRE_FALSE(glz::read_etf(tp, enc_ms));
-        auto dur_ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+        const auto dur_ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
         CHECK(dur_ms == 50000000000LL);
 
         // Explicit milliseconds duration type
@@ -5311,15 +5311,15 @@ TEST_CASE("ETF: Protocol flaw fixes - DoS memory capping, FUN_EXT/COMPRESSED ski
 }
 
 TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
-    auto append_be16 = [](std::string& s, std::uint16_t val) {
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be16 = [](std::string& s, std::uint16_t val) {
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
-    auto append_be32 = [](std::string& s, std::uint32_t val) {
-        s.push_back(static_cast<char>((val >> 24) & 0xFF));
-        s.push_back(static_cast<char>((val >> 16) & 0xFF));
-        s.push_back(static_cast<char>((val >> 8) & 0xFF));
-        s.push_back(static_cast<char>(val & 0xFF));
+    const auto append_be32 = [](std::string& s, std::uint32_t val) {
+        s.push_back(static_cast<char>((val >> 24U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 16U) & 0xFFU));
+        s.push_back(static_cast<char>((val >> 8U) & 0xFFU));
+        s.push_back(static_cast<char>(val & 0xFFU));
     };
 
     SECTION("1.1 Negative int8_t and signed char bounds") {
@@ -5448,7 +5448,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         corrupt_float.resize(33, '\0');
 
         double d{};
-        auto ec_float = glz::read_etf(d, corrupt_float);
+        const auto ec_float = glz::read_etf(d, corrupt_float);
         CHECK(static_cast<bool>(ec_float));
         CHECK(ec_float.ec == glz::error_code::parse_number_failure);
 
@@ -5456,7 +5456,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         std::string valid_float;
         valid_float.push_back(static_cast<char>(glz::etf::magic_version));
         valid_float.push_back(static_cast<char>(glz::etf::tag::FLOAT_EXT));
-        std::string f_str = "3.14000000000000000000e+00";
+        std::string const f_str = "3.14000000000000000000e+00";
         valid_float.append(f_str);
         valid_float.append(31 - f_str.size(), '\0');
 
@@ -5472,7 +5472,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         short_comp.append("123"); // only 3 bytes < 6
 
         glz::skip sk_comp{};
-        auto ec_comp = glz::read_etf(sk_comp, short_comp);
+        const auto ec_comp = glz::read_etf(sk_comp, short_comp);
         CHECK(static_cast<bool>(ec_comp));
         CHECK(ec_comp.ec == glz::error_code::unexpected_end);
     }
@@ -5488,7 +5488,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
 
     SECTION("2.1 Vector and array primitive unrolling, fast-path wire decoding, and snowflake handling") {
         // 1. Vector of snowflakes with various counts (0, 1, 3, 4, 7, 16, 25, 100)
-        for (size_t count : {0, 1, 3, 4, 7, 16, 25, 100}) {
+        for (size_t const count : {0, 1, 3, 4, 7, 16, 25, 100}) {
             std::vector<discusy::snowflake> sfs;
             sfs.reserve(count);
             for (size_t i = 0; i < count; ++i) {
@@ -5503,7 +5503,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         }
 
         // 2. Vector of 32-bit integers with various counts (multiples and non-multiples of 4)
-        for (size_t count : {0, 1, 3, 4, 9, 32, 65}) {
+        for (size_t const count : {0, 1, 3, 4, 9, 32, 65}) {
             std::vector<std::int32_t> ints;
             ints.reserve(count);
             for (size_t i = 0; i < count; ++i) {
@@ -5600,7 +5600,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         std::string neg_buf = raw_buf;
         neg_buf[3] = 1; // sign = 1 (negative)
         std::uint64_t dec_neg = 0;
-        auto ec_neg = glz::read_etf(dec_neg, neg_buf);
+        const auto ec_neg = glz::read_etf(dec_neg, neg_buf);
         CHECK(static_cast<bool>(ec_neg));
     }
 
@@ -5711,7 +5711,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(dec_sf == large_sf);
 
         // Boundary check: exactly (1ULL << 56)
-        const uint64_t boundary_sf = 1ULL << 56;
+        const uint64_t boundary_sf = 1ULL << 56U;
         std::string enc_boundary;
         REQUIRE_FALSE(glz::write_etf(boundary_sf, enc_boundary));
         REQUIRE(enc_boundary.size() == 12);
@@ -5721,7 +5721,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         CHECK(dec_boundary == boundary_sf);
 
         // Sub-boundary check: (1ULL << 56) - 1 (takes 7 bytes in SMALL_BIG_EXT)
-        const uint64_t sub_sf = (1ULL << 56) - 1;
+        const uint64_t sub_sf = (1ULL << 56U) - 1;
         std::string enc_sub;
         REQUIRE_FALSE(glz::write_etf(sub_sf, enc_sub));
         REQUIRE(enc_sub.size() == 11); // 1 + 1 + 1 + 1 + 7
@@ -5779,7 +5779,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         };
         double d_empty = 0.0;
         static constexpr glz::etf::etf_opts glz_opts_quoted_num{.quoted_num = true};
-        auto ec_empty_d = glz::read_etf<glz_opts_quoted_num>(d_empty, empty_bin);
+        const auto ec_empty_d = glz::read_etf<glz_opts_quoted_num>(d_empty, empty_bin);
         CHECK(ec_empty_d.ec == glz::error_code::parse_number_failure);
 
         // 2. FLOAT_EXT consisting of 31 spaces at the end of buffer
@@ -5789,7 +5789,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         };
         spaces_float.append(31, ' ');
         double d_spaces = 0.0;
-        auto ec_spaces = glz::read_etf(d_spaces, spaces_float);
+        const auto ec_spaces = glz::read_etf(d_spaces, spaces_float);
         CHECK(ec_spaces.ec == glz::error_code::parse_number_failure);
 
         // 3. NEW_FLOAT_EXT finite double > FLT_MAX into float (float-cast-overflow)
@@ -5797,7 +5797,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         const double huge_d = 1e300;
         REQUIRE_FALSE(glz::write_etf(huge_d, huge_double_etf));
         float f_ovf = 0.0F;
-        auto ec_f_ovf = glz::read_etf(f_ovf, huge_double_etf);
+        const auto ec_f_ovf = glz::read_etf(f_ovf, huge_double_etf);
         CHECK(ec_f_ovf.ec == glz::error_code::parse_number_failure);
 
         // 4. Numeric timestamp overflow (signed int64_t duration multiplication overflow)
@@ -5805,7 +5805,7 @@ TEST_CASE("ETF: Fixes for Protocol Flaws, UB and Parity", "[etf]") {
         const int64_t huge_ts = std::numeric_limits<int64_t>::max();
         REQUIRE_FALSE(glz::write_etf(huge_ts, huge_ts_etf));
         std::chrono::system_clock::time_point tp{};
-        auto ec_tp = glz::read_etf(tp, huge_ts_etf);
+        const auto ec_tp = glz::read_etf(tp, huge_ts_etf);
         CHECK(static_cast<bool>(ec_tp));
 
         // 5. STRING_EXT into std::array<bool, 3> (non-0/1 bytes must not memcpy raw invalid bool representations)

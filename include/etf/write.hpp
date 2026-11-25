@@ -281,7 +281,7 @@ namespace glz
          else if constexpr (is_variant<V>) {
             size_t max_alt = 0;
             bool all_bounded = true;
-            for_each_short_circuit<std::variant_size_v<V>>([&]<auto I>() -> bool {
+            for_each_short_circuit<std::variant_size_v<V>>([&]<auto I> -> bool {
                using alt_t = std::decay_t<std::variant_alternative_t<I, V>>;
                if constexpr (std::same_as<alt_t, skip>) {
                   return false;
@@ -353,7 +353,7 @@ namespace glz
             else {
                size_t fixed = 5;
                bool all_bounded = true;
-               for_each_short_circuit<N>([&]<auto I>() -> bool {
+               for_each_short_circuit<N>([&]<auto I> -> bool {
                   if constexpr (skipped_by_meta<V, I, operation::serialize>) {
                      return false; // skip
                   }
@@ -415,7 +415,7 @@ namespace glz
             }
             else {
                size_t total = 0;
-               for_each_short_circuit<N - Start>([&]<auto J>() -> bool {
+               for_each_short_circuit<N - Start>([&]<auto J> -> bool {
                   constexpr size_t I = Start + J;
                   if constexpr (skipped_on_write<Opts, V, I>) {
                      return false; // skip field
@@ -705,7 +705,7 @@ namespace glz
       GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix)
       {
          const auto sv = str_view<T>(value);
-         if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+         if (sv.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
             ctx.error = error_code::invalid_length;
             return;
          }
@@ -727,7 +727,7 @@ namespace glz
       template <auto Opts>
       GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto& ctx, auto& b, auto& ix)
       {
-         if (value.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+         if (value.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
             ctx.error = error_code::invalid_length;
             return;
          }
@@ -778,7 +778,7 @@ namespace glz
             }
          }();
          if (has_val) {
-            decltype(auto) val = [&]() -> decltype(auto) {
+            decltype(auto) val = [&] -> decltype(auto) {
                if constexpr (nullable_like<std::decay_t<T>>) {
                   return *value;
                }
@@ -812,7 +812,7 @@ namespace glz
             }
             return;
          }
-         if (sz > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+         if (sz > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
             ctx.error = error_code::invalid_length;
             return;
          }
@@ -873,14 +873,14 @@ namespace glz
             etf::detail::dump_be_unchecked<uint32_t>(static_cast<uint32_t>(N), b, ix);
          }
          if constexpr (is_std_tuple<V>) {
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if (bool(ctx.error)) [[unlikely]] return;
                using item_t = std::decay_t<std::tuple_element_t<I, V>>;
                to<EETF, item_t>::template no_header<Opts>(std::get<I>(value), ctx, b, ix);
             });
          }
          else {
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if (bool(ctx.error)) [[unlikely]] return;
                using item_t = std::decay_t<glz::tuple_element_t<I, V>>;
                to<EETF, item_t>::template no_header<Opts>(glz::get<I>(value), ctx, b, ix);
@@ -907,7 +907,7 @@ namespace glz
             }
             return;
          }
-         if (sz > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+         if (sz > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
             ctx.error = error_code::invalid_length;
             return;
          }
@@ -975,7 +975,7 @@ namespace glz
             }
          }
 
-         [[maybe_unused]] decltype(auto) t = [&]() -> decltype(auto) {
+         [[maybe_unused]] decltype(auto) t = [&] -> decltype(auto) {
             if constexpr (reflectable<T>) {
                return to_tie(value);
             }
@@ -991,13 +991,13 @@ namespace glz
 
             uint32_t pair_count = 0;
 
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if constexpr (should_skip_field<Opts, I>()) {
                   return;
                }
                if (bool(ctx.error)) [[unlikely]] return;
 
-               decltype(auto) member_val = [&]() -> decltype(auto) {
+               decltype(auto) member_val = [&] -> decltype(auto) {
                   if constexpr (reflectable<T>) {
                      return get_member(value, get<I>(t));
                   }
@@ -1077,7 +1077,7 @@ namespace glz
 
                if constexpr (etf::detail::is_etf_str_like<val_t>) {
                   const auto sv = etf::detail::get_etf_str_view(member_val);
-                  if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                  if (sv.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
                      ctx.error = error_code::invalid_length;
                      return;
                   }
@@ -1095,7 +1095,7 @@ namespace glz
                }
                else if constexpr (Opts.skip_null_members && !nullable_wrapper<val_t> &&
                                   (nullable_like<val_t> || nullable_value_t<val_t>)) {
-                  decltype(auto) inner_val = [&]() -> decltype(auto) {
+                  decltype(auto) inner_val = [&] -> decltype(auto) {
                      if constexpr (nullable_like<val_t>) {
                         return *member_val;
                      }
@@ -1106,7 +1106,7 @@ namespace glz
                   using inner_t = std::decay_t<decltype(inner_val)>;
                   if constexpr (etf::detail::is_etf_str_like<inner_t>) {
                      const auto sv = etf::detail::get_etf_str_view(inner_val);
-                     if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                     if (sv.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
                         ctx.error = error_code::invalid_length;
                         return;
                      }
@@ -1184,13 +1184,13 @@ namespace glz
             constexpr auto count = static_cast<uint32_t>(count_to_write<Opts>());
             etf::detail::dump_tag_be_unchecked<uint32_t>(etf::tag::MAP_EXT, count, b, ix);
 
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if constexpr (should_skip_field<Opts, I>()) {
                   return;
                }
                if (bool(ctx.error)) [[unlikely]] return;
 
-               decltype(auto) member_val = [&]() -> decltype(auto) {
+               decltype(auto) member_val = [&] -> decltype(auto) {
                   if constexpr (reflectable<T>) {
                      return get_member(value, get<I>(t));
                   }
@@ -1205,7 +1205,7 @@ namespace glz
 
                if constexpr (etf::detail::is_etf_str_like<val_t>) {
                   const auto sv = etf::detail::get_etf_str_view(member_val);
-                  if (sv.size() > (std::numeric_limits<uint32_t>::max)()) [[unlikely]] {
+                  if (sv.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
                      ctx.error = error_code::invalid_length;
                      return;
                   }
@@ -1304,7 +1304,7 @@ namespace glz
       GLZ_ALWAYS_INLINE static void no_header(auto&& value, is_context auto&& ctx, auto&& b, auto& ix)
       {
          glz::visit<std::variant_size_v<std::decay_t<T>>>(
-            [&]<size_t I>() {
+            [&]<size_t I> {
                using var_t = std::decay_t<std::variant_alternative_t<I, std::decay_t<T>>>;
                to<EETF, var_t>::template no_header<Opts>(std::get<I>(value), ctx, b, ix);
             },
@@ -1321,7 +1321,7 @@ namespace glz
       static void no_header(const generic_json<Mode, MapType>& value, is_context auto& ctx, auto& b, auto& ix)
       {
          glz::visit<std::variant_size_v<decltype(value.data)>>(
-            [&]<size_t I>() {
+            [&]<size_t I> {
                using var_t = std::decay_t<std::variant_alternative_t<I, decltype(value.data)>>;
                to<EETF, var_t>::template no_header<Opts>(std::get<I>(value.data), ctx, b, ix);
             },

@@ -168,12 +168,12 @@ public:
     [[nodiscard]] auto sleep(std::chrono::duration<Rep, Period> time, CompletionToken&& token = ctx::io_context::dct_t()) {
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code)>(
             [](discusy::asio::chf<> auto&& handler, io_context* self, auto&& time) {
-                auto ex = boost::asio::get_associated_executor(handler, self->executor_);
-                auto alloc = boost::asio::get_associated_allocator(
+                const auto ex = boost::asio::get_associated_executor(handler, self->executor_);
+                const auto alloc = boost::asio::get_associated_allocator(
                     handler, 
                     boost::asio::recycling_allocator<void>{}
                 );
-                auto slot = boost::asio::get_associated_cancellation_slot(handler);
+                const auto slot = boost::asio::get_associated_cancellation_slot(handler);
 
                 auto timer = std::allocate_shared<boost::asio::steady_timer>(alloc, ex, time);
                 auto* raw_timer = timer.get();
@@ -339,7 +339,7 @@ public:
                                target_exec,
                                alloc,
                                work = boost::asio::make_work_guard(target_exec),
-                               ...bound_args = std::forward<decltype(bound_args)>(bound_args)]() mutable {
+                               ...bound_args = std::forward<decltype(bound_args)>(bound_args)] mutable {
                     std::invoke(
                         std::move(func),
                         std::move(bound_args)...,
@@ -348,7 +348,7 @@ public:
                                 target_exec,
                                 boost::asio::bind_allocator(
                                     alloc,
-                                    [h = std::move(handler), work = std::move(work), ...res = std::forward<decltype(result_args)>(result_args)]() mutable {
+                                    [h = std::move(handler), work = std::move(work), ...res = std::forward<decltype(result_args)>(result_args)] mutable {
                                         std::move(h)(std::forward<decltype(res)>(res)...);
                                     }
                                 )
@@ -414,7 +414,7 @@ public:
     void handle_callback_coro_normal(F&& cb, Args&&... args) noexcept {
         try {
             if constexpr (coro::IsAwaitable<std::invoke_result_t<F&, Args...>>) {
-                co_launch_detached<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> coro::awaitable<void> {
+                co_launch_detached<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)] mutable -> coro::awaitable<void> {
                     try {
                         co_await std::invoke(cb, std::move(args)...);
                     }
@@ -423,14 +423,14 @@ public:
                         log::Logger{}("handle_callback_coro_normal coroutine exception: {}", e.what());
                     }
                     #endif
-                    catch (...) {
+                    catch (...) { // NOLINT(bugprone-empty-catch)
                         #ifdef DISCUSY_LOGGING
                         log::Logger{}("handle_callback_coro_normal unknown coroutine exception");
                         #endif
                     }
                 });
             } else {
-                submit<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)]() mutable -> void {
+                submit<L>([cb = std::forward<F>(cb), ...args = std::forward<Args>(args)] mutable -> void {
                     try {
                         std::invoke(std::move(cb), std::move(args)...);
                     }
@@ -439,7 +439,7 @@ public:
                         log::Logger{}("handle_callback_coro_normal async post exception: {}", e.what());
                     }
                     #endif
-                    catch (...) {
+                    catch (...) { // NOLINT(bugprone-empty-catch)
                         #ifdef DISCUSY_LOGGING
                         log::Logger{}("handle_callback_coro_normal unknown async post exception");
                         #endif
@@ -452,7 +452,7 @@ public:
             log::Logger{}("handle_callback_coro_normal exception: {}", e.what());
         }
         #endif
-        catch (...) {
+        catch (...) { // NOLINT(bugprone-empty-catch)
             #ifdef DISCUSY_LOGGING
             log::Logger{}("handle_callback_coro_normal unknown exception");
             #endif

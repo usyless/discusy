@@ -60,7 +60,7 @@ int main() {
         // So this doesn't apply here but it is added for clarity anyway
         static std::once_flag flag;
 
-        std::call_once(flag, [&bot, &me](){
+        std::call_once(flag, [&bot, &me]{
             std::println("Logged in as {} (ID: {})", me.username, me.id);
             std::println("Registering voice slash commands...");
 

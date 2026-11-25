@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wignored-pragmas"
 #endif
@@ -35,6 +35,6 @@
 #undef DISCUSY_END_FROM
 #pragma pop_macro("DISCUSY_END_FROM")
 
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif

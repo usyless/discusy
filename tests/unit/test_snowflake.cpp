@@ -14,7 +14,7 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
     constexpr discusy::snowflake sf{raw_val};
     constexpr discusy::snowflake sf2{raw_val};
     constexpr discusy::snowflake sf_smaller{raw_val - 1};
-    constexpr std::uint64_t shifted = (raw_val >> 22);
+    constexpr std::uint64_t shifted = (raw_val >> 22U);
 
     SECTION("Bit field deconstruction") {
         CHECK(sf.value == raw_val);
@@ -22,9 +22,9 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(sf.get_timestamp() == 1462015105796ULL);
         CHECK(sf.get_timestamp() == (shifted + discusy::DISCORD_EPOCH));
 
-        auto expected_worker = static_cast<std::uint8_t>((raw_val & 0x3E0000) >> 17);
-        auto expected_process = static_cast<std::uint8_t>((raw_val & 0x1F000) >> 12);
-        auto expected_inc = static_cast<std::uint16_t>(raw_val & 0xFFF);
+        auto expected_worker = static_cast<std::uint8_t>((raw_val & 0x3E0000U) >> 17U);
+        auto expected_process = static_cast<std::uint8_t>((raw_val & 0x1F000U) >> 12U);
+        auto expected_inc = static_cast<std::uint16_t>(raw_val & 0xFFFU);
 
         CHECK(sf.get_internal_worker_id() == expected_worker);
         CHECK(sf.get_internal_process_id() == expected_process);
@@ -33,7 +33,7 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
 
     SECTION("from_unix_time roundtrip") {
         const std::uint64_t epoch_ms = 1609459200000ULL; // 2021-01-01 00:00:00 UTC
-        auto generated = discusy::snowflake::from_unix_time(epoch_ms);
+        const auto generated = discusy::snowflake::from_unix_time(epoch_ms);
 
         CHECK(generated.get_timestamp() == epoch_ms);
         CHECK(generated.get_increment() == 0);
@@ -52,10 +52,10 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
         CHECK(sf.mention_channel() == "<#175928847299117063>");
         CHECK(sf.mention_role() == "<@&175928847299117063>");
 
-        constexpr auto const_str = sf.str();
-        constexpr auto const_mu = sf.mention_user();
-        constexpr auto const_mc = sf.mention_channel();
-        constexpr auto const_mr = sf.mention_role();
+        constexpr const auto_str = sf.str();
+        constexpr const auto_mu = sf.mention_user();
+        constexpr const auto_mc = sf.mention_channel();
+        constexpr const auto_mr = sf.mention_role();
         static_assert(const_str.view() == "175928847299117063");
         static_assert(const_mu.view() == "<@175928847299117063>");
         static_assert(const_mc.view() == "<#175928847299117063>");
@@ -71,7 +71,7 @@ TEST_CASE("Snowflake: Discord epoch, bit unpacking, and shard routing", "[snowfl
     }
 
     SECTION("Boolean and comparison semantics") {
-        discusy::snowflake empty_sf{};
+        discusy::snowflake const empty_sf{};
         CHECK_FALSE(static_cast<bool>(empty_sf));
         CHECK(!empty_sf);
 
@@ -152,32 +152,32 @@ TEST_CASE("number_str stack formatting and semantics", "[types][number_str]") {
     }
 
     SECTION("runtime integer and boundary formatting") {
-        discusy::number_str min_i64{std::numeric_limits<std::int64_t>::min()};
+        discusy::number_str const min_i64{std::numeric_limits<std::int64_t>::min()};
         CHECK(min_i64.view() == "-9223372036854775808");
 
-        discusy::number_str max_i64{std::numeric_limits<std::int64_t>::max()};
+        discusy::number_str const max_i64{std::numeric_limits<std::int64_t>::max()};
         CHECK(max_i64.view() == "9223372036854775807");
 
-        discusy::number_str max_u64{std::numeric_limits<std::uint64_t>::max()};
+        discusy::number_str const max_u64{std::numeric_limits<std::uint64_t>::max()};
         CHECK(max_u64.view() == "18446744073709551615");
 
-        discusy::number_str port{static_cast<std::uint16_t>(54321)};
+        discusy::number_str const port{static_cast<std::uint16_t>(54321)};
         CHECK(port.view() == "54321");
         CHECK(std::string{port.c_str()} == "54321");
     }
 
     SECTION("floating point and enum formatting") {
-        discusy::number_str pi{3.14};
+        discusy::number_str const pi{3.14};
         CHECK(pi.view().starts_with("3.14"));
 
-        enum class test_code : int { ok = 200, not_found = 404 };
-        discusy::number_str code{test_code::ok};
+        enum class test_code : std::uint16_t { ok = 200, not_found = 404 };
+        discusy::number_str const code{test_code::ok};
         CHECK(code.view() == "200");
     }
 
     SECTION("snowflake constructor and string concatenation") {
-        discusy::snowflake sf{1564377313125072916ULL};
-        discusy::number_str ns{sf};
+        discusy::snowflake const sf{1564377313125072916ULL};
+        discusy::number_str const ns{sf};
         CHECK(ns.view() == "1564377313125072916");
 
         auto combined = ulp::str::concat_strings("[shard ", discusy::number_str{0}, "] status: ", discusy::number_str{200});

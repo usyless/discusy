@@ -35,7 +35,7 @@ int main() {
         // so std::call_once ensures slash commands are registered only once per bot lifetime
         static std::once_flag flag;
 
-        std::call_once(flag, [&bot, &me]() {
+        std::call_once(flag, [&bot, &me] {
             std::println("Logged in as {} (ID: {})", me.username, me.id);
             std::println("Registering slash commands...");
 

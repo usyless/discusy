@@ -298,7 +298,7 @@ public:
                         if (std::shared_ptr<chunk_state> st = weak_state.lock()) {
                             if (type == boost::asio::cancellation_type::none) return;
 
-                            boost::asio::post(exec_strand, [state_ptr = std::move(st), type]() {
+                            boost::asio::post(exec_strand, [state_ptr = std::move(st), type] {
                                 state_ptr->child_signal.emit(type);
                             });
                         }
@@ -338,7 +338,7 @@ public:
                                                 : boost::asio::error::timed_out)
                                             : members_chunk_ec;
                                         boost::asio::dispatch(target_exec,
-                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
+                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec] mutable {
                                                 chunk_state::complete(std::move(self_ptr), ec);
                                             })
                                         );
@@ -349,7 +349,7 @@ public:
                                         data = std::move(state->accumulated);
                                         }
                                         boost::asio::dispatch(target_exec,
-                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
+                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)] mutable {
                                                 chunk_state::complete(std::move(self_ptr), boost::system::error_code{}, std::move(data));
                                             })
                                         );
@@ -448,7 +448,7 @@ public:
                         if (std::shared_ptr<request_state> st = weak_state.lock()) {
                             if (type == boost::asio::cancellation_type::none) return;
 
-                            boost::asio::post(exec_strand, [state_ptr = std::move(st), type]() {
+                            boost::asio::post(exec_strand, [state_ptr = std::move(st), type] {
                                 state_ptr->child_signal.emit(type);
                             });
                         }
@@ -483,13 +483,13 @@ public:
                                                 : boost::asio::error::timed_out)
                                             : channel_info_ec;
                                         boost::asio::dispatch(target_exec,
-                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec]() mutable {
+                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), ec] mutable {
                                                 request_state::complete(std::move(self_ptr), ec);
                                             })
                                         );
                                     } else {
                                         boost::asio::dispatch(target_exec,
-                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)]() mutable {
+                                            boost::asio::bind_allocator(alloc, [self_ptr = std::move(state), data = std::move(data)] mutable {
                                                 request_state::complete(std::move(self_ptr), boost::system::error_code{}, std::move(data));
                                             })
                                         );
@@ -535,13 +535,13 @@ public:
             [](discusy::asio::chf<std::string> auto&& handler, bot* self, auto&& path) mutable {
                 using handler_t = std::decay_t<decltype(handler)>;
 
-                auto alloc = boost::asio::get_associated_allocator(
+                const auto alloc = boost::asio::get_associated_allocator(
                     handler,
                     boost::asio::recycling_allocator<void>{}
                 );
 
-                auto ex = boost::asio::get_associated_executor(handler, self->io_ctx.executor_);
-                using executor_type = decltype(ex);
+                const auto ex = boost::asio::get_associated_executor(handler, self->io_ctx.executor_);
+                using executor_type = std::decay_t<decltype(ex)>;
 
                 struct state_t {
                     handler_t handler;
@@ -566,9 +566,9 @@ public:
 
                 auto ex_imm = boost::asio::get_associated_immediate_executor(state->handler, self->io_ctx.executor_);
 
-                auto early_complete = [&state, &ex_imm](boost::system::error_code ec, std::string result = {}) {
+                const auto early_complete = [&state, &ex_imm](boost::system::error_code ec, std::string result = {}) {
                     auto h = std::move(state->handler);
-                    auto work = std::move(state->work); // keep work alive until dispatch submits
+                    const auto work = std::move(state->work); // keep work alive until dispatch submits
                     state.reset();                      // closes file & frees state_t before handler runs
 
                     boost::asio::dispatch(
@@ -602,8 +602,8 @@ public:
                         if (type == boost::asio::cancellation_type::none) return;
 
                         if (std::shared_ptr<state_t> state = weak_state.lock()) {
-                            auto exec = state->file.get_executor();
-                            boost::asio::post(exec, [state = std::move(state), type]() {
+                            const auto exec = state->file.get_executor();
+                            boost::asio::post(exec, [state = std::move(state), type] {
                                 state->child_signal.emit(type);
                             });
                         }
@@ -620,7 +620,7 @@ public:
                             state->file.close(ignored); // close on file's strand before handing off
 
                             boost::asio::dispatch(ex,
-                                boost::asio::bind_allocator(alloc, [state = std::move(state), read_ec, bytes_transferred]() mutable {
+                                boost::asio::bind_allocator(alloc, [state = std::move(state), read_ec, bytes_transferred] mutable {
                                     auto h = std::move(state->handler);
                                     auto slot = boost::asio::get_associated_cancellation_slot(h);
                                     if (slot.is_connected()) slot.clear();

@@ -80,7 +80,7 @@ int main() {
         // Use std::call_once so timer startup and command registration don't duplicate on reconnect
         static std::once_flag flag;
 
-        std::call_once(flag, [&bot, &me, &rotation]() {
+        std::call_once(flag, [&bot, &me, &rotation] {
             std::println("Logged in as {} (ID: {})", me.username, me.id);
 
             // Register an interactive slash command to manually test presences

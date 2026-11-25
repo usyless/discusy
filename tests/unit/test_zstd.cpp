@@ -12,7 +12,7 @@ TEST_CASE("Zstd: Stream decompressor handles compressed chunks and reset", "[zst
 
     // Compress using standard zstd API
     std::vector<char> compressed_buf(ZSTD_compressBound(original.size()));
-    size_t compressed_size = ZSTD_compress(
+    size_t const compressed_size = ZSTD_compress(
         compressed_buf.data(), compressed_buf.size(),
         original.data(), original.size(),
         1 // compression level
@@ -20,7 +20,7 @@ TEST_CASE("Zstd: Stream decompressor handles compressed chunks and reset", "[zst
     REQUIRE_FALSE(ZSTD_isError(compressed_size));
     compressed_buf.resize(compressed_size);
 
-    std::string_view chunk{compressed_buf.data(), compressed_size};
+    std::string_view const chunk{compressed_buf.data(), compressed_size};
 
     SECTION("Decompress whole payload in single push") {
         std::string decompressed = decompressor.push(chunk);

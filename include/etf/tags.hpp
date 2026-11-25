@@ -235,7 +235,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE bool read_key(Ctx& ctx, It0& it, It1 end, std::string_view& key) noexcept
       {
          if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
-            const uint32_t len = read_be<uint32_t>(it + 1);
+            const auto len = read_be<uint32_t>(it + 1);
             if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
                return false;
@@ -259,7 +259,7 @@ namespace glz::etf
                ctx.error = error_code::unexpected_end;
                return false;
             }
-            const uint16_t len = read_be<uint16_t>(it);
+            const auto len = read_be<uint16_t>(it);
             it += 2;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -275,7 +275,7 @@ namespace glz::etf
                ctx.error = error_code::unexpected_end;
                return false;
             }
-            const uint16_t len = read_be<uint16_t>(it);
+            const auto len = read_be<uint16_t>(it);
             it += 2;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -347,7 +347,7 @@ namespace glz::etf
          }
          if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
             if (end - it >= 3) {
-               const uint16_t len = read_be<uint16_t>(it + 1);
+               const auto len = read_be<uint16_t>(it + 1);
                if (len == 3 && end - it >= 6 && glz::compare<3>(reinterpret_cast<const char*>(it + 3), "nil")) {
                   it += 6;
                   return true;
@@ -391,7 +391,7 @@ namespace glz::etf
          case tag::ATOM_EXT:
          case tag::STRING_EXT: {
             if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint16_t len = read_be<uint16_t>(it);
+            const auto len = read_be<uint16_t>(it);
             it += 2;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             sv = std::string_view{reinterpret_cast<const char*>(it), len};
@@ -409,7 +409,7 @@ namespace glz::etf
          }
          case tag::BINARY_EXT: {
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint32_t len = read_be<uint32_t>(it);
+            const auto len = read_be<uint32_t>(it);
             it += 4;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             sv = std::string_view{reinterpret_cast<const char*>(it), len};
@@ -430,7 +430,7 @@ namespace glz::etf
       GLZ_ALWAYS_INLINE bool read_str(Ctx& ctx, It0& it, It1 end, std::string_view& sv) noexcept
       {
          if (end - it >= 5 && static_cast<uint8_t>(*it) == tag::BINARY_EXT) [[likely]] {
-            const uint32_t len = read_be<uint32_t>(it + 1);
+            const auto len = read_be<uint32_t>(it + 1);
             if (static_cast<size_t>(end - it - 5) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             sv = std::string_view{reinterpret_cast<const char*>(it + 5), len};
             it += size_t{5} + len;
@@ -512,7 +512,7 @@ namespace glz::etf
                   val = (val * 10) + c;
                }
                if constexpr (sizeof(T) < 8) {
-                  if (val > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                  if (val > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                      return false;
                   }
                }
@@ -573,7 +573,7 @@ namespace glz::etf
          }
          else if (tag == tag::ATOM_UTF8_EXT || tag == tag::ATOM_EXT) {
             if (end - it >= 3) {
-               const uint16_t len = read_be<uint16_t>(it + 1);
+               const auto len = read_be<uint16_t>(it + 1);
                if (len == 4 && end - it >= 7 && glz::compare<4>(reinterpret_cast<const char*>(it + 3), "true")) {
                   it += 7;
                   b = true;
@@ -631,7 +631,7 @@ namespace glz::etf
             const auto val = static_cast<uint8_t>(*it++);
             if constexpr (std::integral<T>) {
                if constexpr (std::is_signed_v<T> && sizeof(T) == 1) {
-                  if (val > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                  if (val > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -642,7 +642,7 @@ namespace glz::etf
          }
          case tag::INTEGER_EXT: {
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const int32_t val = read_be<int32_t>(it);
+            const auto val = read_be<int32_t>(it);
             it += 4;
             if constexpr (std::integral<T>) {
                if constexpr (std::is_unsigned_v<T>) {
@@ -651,7 +651,7 @@ namespace glz::etf
                      return false;
                   }
                   if constexpr (sizeof(T) < 4) {
-                     if (static_cast<uint64_t>(val) > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     if (static_cast<uint64_t>(val) > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
@@ -659,8 +659,8 @@ namespace glz::etf
                }
                else {
                   if constexpr (sizeof(T) < 4) {
-                     if (val < static_cast<int64_t>((std::numeric_limits<T>::min)()) ||
-                         val > static_cast<int64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     if (val < static_cast<int64_t>(std::numeric_limits<T>::min()) ||
+                         val > static_cast<int64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
@@ -725,7 +725,7 @@ namespace glz::etf
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
-                  if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                  if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -733,19 +733,19 @@ namespace glz::etf
                }
                else {
                   if (sign == 0) {
-                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
                      num = static_cast<T>(raw);
                   }
                   else {
-                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) [[unlikely]] {
+                     if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1ULL) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
-                     if (raw == static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) {
-                        num = (std::numeric_limits<T>::min)();
+                     if (raw == static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1ULL) {
+                        num = std::numeric_limits<T>::min();
                      }
                      else {
                         num = static_cast<T>(-static_cast<int64_t>(raw));
@@ -774,7 +774,7 @@ namespace glz::etf
                }
                if constexpr (sizeof(T) < sizeof(double)) {
                   if (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
-                      d > static_cast<double>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                      d > static_cast<double>(std::numeric_limits<T>::max())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -785,7 +785,7 @@ namespace glz::etf
          }
          case tag::LARGE_BIG_EXT: {
             if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-            const uint32_t n = read_be<uint32_t>(it);
+            const auto n = read_be<uint32_t>(it);
             it += 4;
             if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
             const auto sign = static_cast<uint8_t>(*it++);
@@ -839,7 +839,7 @@ namespace glz::etf
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
-                  if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                  if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -847,19 +847,19 @@ namespace glz::etf
                }
                else {
                   if (sign == 0) {
-                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                     if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
                      num = static_cast<T>(raw);
                   }
                   else {
-                     if (raw > static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) [[unlikely]] {
+                     if (raw > static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1ULL) [[unlikely]] {
                         ctx.error = error_code::parse_number_failure;
                         return false;
                      }
-                     if (raw == static_cast<uint64_t>((std::numeric_limits<T>::max)()) + 1ULL) {
-                        num = (std::numeric_limits<T>::min)();
+                     if (raw == static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1ULL) {
+                        num = std::numeric_limits<T>::min();
                      }
                      else {
                         num = static_cast<T>(-static_cast<int64_t>(raw));
@@ -888,7 +888,7 @@ namespace glz::etf
                }
                if constexpr (sizeof(T) < sizeof(double)) {
                   if (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
-                      d > static_cast<double>((std::numeric_limits<T>::max)())) [[unlikely]] {
+                      d > static_cast<double>(std::numeric_limits<T>::max())) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -904,13 +904,13 @@ namespace glz::etf
             }
             else {
                if (end - it < 8) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-               const uint64_t bits = read_be<uint64_t>(it);
+               const auto bits = read_be<uint64_t>(it);
                it += 8;
                double d = NAN;
                std::memcpy(&d, &bits, sizeof(double));
                if constexpr (sizeof(T) < sizeof(double)) {
                   if (std::isfinite(d) && (d < static_cast<double>(std::numeric_limits<T>::lowest()) ||
-                                           d > static_cast<double>((std::numeric_limits<T>::max)()))) [[unlikely]] {
+                                           d > static_cast<double>(std::numeric_limits<T>::max()))) [[unlikely]] {
                      ctx.error = error_code::parse_number_failure;
                      return false;
                   }
@@ -972,7 +972,7 @@ namespace glz::etf
             std::string_view sv{};
             if (tag == tag::BINARY_EXT) [[likely]] {
                if (end - it < 4) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-               const uint32_t len = read_be<uint32_t>(it);
+               const auto len = read_be<uint32_t>(it);
                it += 4;
                if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
                sv = std::string_view{reinterpret_cast<const char*>(it), len};
@@ -987,7 +987,7 @@ namespace glz::etf
             }
             else {
                if (end - it < 2) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
-               const uint16_t len = read_be<uint16_t>(it);
+               const auto len = read_be<uint16_t>(it);
                it += 2;
                if (static_cast<size_t>(end - it) < len) [[unlikely]] { ctx.error = error_code::unexpected_end; return false; }
                sv = std::string_view{reinterpret_cast<const char*>(it), len};

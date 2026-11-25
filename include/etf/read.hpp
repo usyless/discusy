@@ -413,7 +413,7 @@ namespace glz
                      sv.data(), sv.data() + sv.size(), sv.size());
                   if (index < N) {
                      bool matched = false;
-                     etf::detail::direct_visit<N>([&]<size_t I>() {
+                     etf::detail::direct_visit<N>([&]<size_t I> {
                         static constexpr auto TargetKey = get<I>(reflect<T>::keys);
                         if (TargetKey.size() == sv.size() && compare<TargetKey.size()>(TargetKey.data(), sv.data())) {
                            value = static_cast<std::decay_t<T>>(get<I>(reflect<T>::values));
@@ -503,7 +503,7 @@ namespace glz
                return;
             }
          }
-         decltype(auto) val = [&]() -> decltype(auto) {
+         decltype(auto) val = [&] -> decltype(auto) {
             if constexpr (nullable_like<std::decay_t<T>>) {
                return *value;
             }
@@ -609,10 +609,10 @@ namespace glz
                       static_cast<uint8_t>(it[10]) == etf::tag::INTEGER_EXT &&
                       static_cast<uint8_t>(it[15]) == etf::tag::INTEGER_EXT) [[likely]]
                   {
-                     const int32_t v0 = etf::detail::read_be<int32_t>(it + 1);
-                     const int32_t v1 = etf::detail::read_be<int32_t>(it + 6);
-                     const int32_t v2 = etf::detail::read_be<int32_t>(it + 11);
-                     const int32_t v3 = etf::detail::read_be<int32_t>(it + 16);
+                     const auto v0 = etf::detail::read_be<int32_t>(it + 1);
+                     const auto v1 = etf::detail::read_be<int32_t>(it + 6);
+                     const auto v2 = etf::detail::read_be<int32_t>(it + 11);
+                     const auto v3 = etf::detail::read_be<int32_t>(it + 16);
                      if constexpr (std::is_unsigned_v<RawNum>) {
                         if (v0 >= 0 && v1 >= 0 && v2 >= 0 && v3 >= 0) [[likely]] {
                            get_numeric_ref(data[i]) = static_cast<RawNum>(v0);
@@ -675,10 +675,10 @@ namespace glz
                       static_cast<uint8_t>(it[18]) == etf::tag::NEW_FLOAT_EXT &&
                       static_cast<uint8_t>(it[27]) == etf::tag::NEW_FLOAT_EXT) [[likely]]
                   {
-                     const uint64_t b0 = read_be<uint64_t>(it + 1);
-                     const uint64_t b1 = read_be<uint64_t>(it + 10);
-                     const uint64_t b2 = read_be<uint64_t>(it + 19);
-                     const uint64_t b3 = read_be<uint64_t>(it + 28);
+                     const auto b0 = read_be<uint64_t>(it + 1);
+                     const auto b1 = read_be<uint64_t>(it + 10);
+                     const auto b2 = read_be<uint64_t>(it + 19);
+                     const auto b3 = read_be<uint64_t>(it + 28);
                      double d0; // NOLINT(cppcoreguidelines-init-variables)
                      double d1; // NOLINT(cppcoreguidelines-init-variables)
                      double d2; // NOLINT(cppcoreguidelines-init-variables)
@@ -729,7 +729,7 @@ namespace glz
                   if (static_cast<size_t>(end - it) >= 5 &&
                       static_cast<uint8_t>(it[0]) == etf::tag::INTEGER_EXT) [[likely]]
                   {
-                     const int32_t v = etf::detail::read_be<int32_t>(it + 1);
+                     const auto v = etf::detail::read_be<int32_t>(it + 1);
                      if constexpr (std::is_unsigned_v<RawNum>) {
                         if (v >= 0) [[likely]] {
                            get_numeric_ref(data[i]) = static_cast<RawNum>(v);
@@ -767,7 +767,7 @@ namespace glz
                   if (static_cast<size_t>(end - it) >= 9 &&
                       static_cast<uint8_t>(it[0]) == etf::tag::NEW_FLOAT_EXT) [[likely]]
                   {
-                     const uint64_t b = read_be<uint64_t>(it + 1);
+                     const auto b = read_be<uint64_t>(it + 1);
                      double d; // NOLINT(cppcoreguidelines-init-variables)
                      std::memcpy(&d, &b, 8);
                      get_numeric_ref(data[i]) = static_cast<RawNum>(d);
@@ -1371,13 +1371,13 @@ namespace glz
          }
 
          if constexpr (is_std_tuple<V>) {
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if (bool(ctx.error)) [[unlikely]] return;
                parse<EETF>::op<Opts>(std::get<I>(value), ctx, it, end);
             });
          }
          else {
-            for_each<N>([&]<size_t I>() {
+            for_each<N>([&]<size_t I> {
                if (bool(ctx.error)) [[unlikely]] return;
                parse<EETF>::op<Opts>(glz::get<I>(value), ctx, it, end);
             });
@@ -1592,7 +1592,7 @@ namespace glz
                bool matched = false;
                if (index < N) [[likely]] {
                   etf::detail::direct_visit<N>(
-                     [&]<size_t I>() {
+                     [&]<size_t I> {
                         static constexpr auto TargetKey = get<I>(reflect<T>::keys);
                         static constexpr auto Length = TargetKey.size();
                         if ((Length == key.size()) && compare<Length>(TargetKey.data(), key.data())) [[likely]] {
@@ -1962,7 +1962,7 @@ namespace glz
       static constexpr size_t unique_int_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_integer_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -1978,7 +1978,7 @@ namespace glz
       static constexpr size_t unique_float_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_float_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -1994,7 +1994,7 @@ namespace glz
       static constexpr size_t unique_bool_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_bool_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2010,7 +2010,7 @@ namespace glz
       static constexpr size_t unique_str_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_str_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2026,7 +2026,7 @@ namespace glz
       static constexpr size_t unique_null_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_null_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2042,7 +2042,7 @@ namespace glz
       static constexpr size_t unique_array_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_array_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2058,7 +2058,7 @@ namespace glz
       static constexpr size_t unique_tuple_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_tuple_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2074,7 +2074,7 @@ namespace glz
       static constexpr size_t unique_enum_idx = [] {
          size_t r = 0;
          size_t cnt = 0;
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if constexpr (etf::detail::variant_is_enum_alt<std::variant_alternative_t<I, T>>) {
                r = I;
                ++cnt;
@@ -2110,7 +2110,7 @@ namespace glz
             }
          };
 
-         auto rewind = [&]() noexcept {
+         auto rewind = [&] noexcept {
             it = start;
             ctx.depth = depth;
             ctx.error = error_code::none;
@@ -2127,7 +2127,7 @@ namespace glz
                if constexpr (n_obj == 1 && tag_v<T>.empty()) {
                   constexpr size_t target_idx = [] {
                      size_t r = 0;
-                     for_each<variant_size>([&]<size_t J>() {
+                     for_each<variant_size>([&]<size_t J> {
                         if constexpr (etf::detail::variant_is_object_alt<std::variant_alternative_t<J, T>>) {
                            r = J;
                         }
@@ -2168,7 +2168,7 @@ namespace glz
                   constexpr bool tagged = not tag_v<T>.empty();
 
                   auto possible = bit_array<variant_size>{};
-                  for_each<variant_size>([&]<size_t I>() {
+                  for_each<variant_size>([&]<size_t I> {
                      if constexpr (etf::detail::variant_is_object_alt<std::variant_alternative_t<I, T>>) {
                         possible[I] = true;
                      }
@@ -2288,7 +2288,7 @@ namespace glz
                         // Ambiguous: prefer the alternative with the fewest declared fields (JSON parity)
                         size_t best = variant_size;
                         size_t best_fields = std::numeric_limits<size_t>::max();
-                        for_each<variant_size>([&]<size_t I>() {
+                        for_each<variant_size>([&]<size_t I> {
                            if (possible[I]) {
                               using V = std::variant_alternative_t<I, T>;
                               using X = std::conditional_t<is_memory_object<V>, memory_type<V>, V>;
@@ -2312,7 +2312,7 @@ namespace glz
                      ctx.custom_error_message = {};
                      bool deduced_matched = false;
                      etf::detail::direct_visit<variant_size>(
-                        [&]<size_t I>() {
+                        [&]<size_t I> {
                            if (value.index() != I) {
                               value.template emplace<I>();
                            }
@@ -2341,7 +2341,7 @@ namespace glz
 
                      // If the resolved candidate failed, try other candidates that were also possible
                      bool matched = false;
-                     for_each<variant_size>([&]<size_t I>() {
+                     for_each<variant_size>([&]<size_t I> {
                         if (matched || exhausted || I == resolved || !possible[I]) return;
                         rewind();
                         using V = std::variant_alternative_t<I, T>;
@@ -2373,7 +2373,7 @@ namespace glz
          bool matched = false;
          const auto tag = static_cast<uint8_t>(*it);
 
-         auto try_unique = [&]<size_t Idx>() -> bool {
+         auto try_unique = [&]<size_t Idx> -> bool {
             if (value.index() != Idx) {
                value.template emplace<Idx>();
             }
@@ -2389,7 +2389,7 @@ namespace glz
          };
 
          auto try_group = [&](auto pred) -> bool {
-            for_each<variant_size>([&]<size_t I>() {
+            for_each<variant_size>([&]<size_t I> {
                if (matched || exhausted || tried[I]) return;
                using V = std::variant_alternative_t<I, T>;
                if constexpr (decltype(pred){}(std::type_identity<V>{})) {
@@ -2580,7 +2580,7 @@ namespace glz
          }
 
          // Pass 1: Try all remaining tag-compatible non-skip alternatives first
-         for_each<variant_size>([&]<size_t I>() {
+         for_each<variant_size>([&]<size_t I> {
             if (matched || exhausted || tried[I]) return;
             using V = std::variant_alternative_t<I, T>;
             if constexpr (!std::same_as<V, skip>) {
@@ -2602,7 +2602,7 @@ namespace glz
 
          // Pass 2: Fall back to skip if present and no concrete alternative matched
          if (!matched && !exhausted) {
-            for_each<variant_size>([&]<size_t I>() {
+            for_each<variant_size>([&]<size_t I> {
                if (matched || exhausted || tried[I]) return;
                using V = std::variant_alternative_t<I, T>;
                if constexpr (std::same_as<V, skip>) {

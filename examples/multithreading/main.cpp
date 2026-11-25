@@ -67,7 +67,7 @@ int main() {
         }
 
         static std::once_flag flag;
-        std::call_once(flag, [&bot, &me]() {
+        std::call_once(flag, [&bot, &me] {
             std::ostringstream ss;
             ss << std::this_thread::get_id();
             std::println("Logged in as {} (ID: {}) on thread {}", me.username, me.id, ss.str());
@@ -99,7 +99,7 @@ int main() {
     //
     // Consequently, any state accessed inside this callback does NOT need a mutex or atomic synchronization.
     // =========================================================================
-    auto message_strand = bot.io_ctx.make_strand();
+    const auto message_strand = bot.io_ctx.make_strand();
 
     struct MessageCounter {
         std::size_t count{0};
@@ -163,7 +163,7 @@ int main() {
             // If you hold a mutex across co_await e.reply(...), all other threads attempting to access
             // the map will be blocked waiting for the Discord network round-trip to complete.
             {
-                std::scoped_lock lock{g_guild_mutex};
+                const std::scoped_lock lock{g_guild_mutex};
                 auto& stats = g_guild_data[guild_id];
                 stats.command_count++;
                 guild_count = stats.command_count;
@@ -231,7 +231,7 @@ int main() {
             // =========================================================================
 
             // Create a strand from the bot's IO context
-            auto strand = bot.io_ctx.make_strand();
+            const auto strand = bot.io_ctx.make_strand();
 
             // The timer MUST be a strand_timer_t associated with this strand
             ctx::io_context::strand_timer_t timer{strand};

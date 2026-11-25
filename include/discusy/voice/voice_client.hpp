@@ -58,7 +58,7 @@ private:
         std::shared_ptr<std::weak_ptr<connection>> target;
         
         void operator()(escalation_action ec) const {
-            boost::asio::post(c->bot_.io_ctx.executor_, [c = c, ec, guild_id = guild_id, target = target]() {
+            boost::asio::post(c->bot_.io_ctx.executor_, [c = c, ec, guild_id = guild_id, target = target] {
                 const auto expected = target ? target->lock() : connection_ref{};
                 if (ec == escalation_action::fatal) {
                     #ifdef DISCUSY_LOGGING
@@ -144,8 +144,8 @@ private:
     static void destroy_connection(connection_ref conn) {
         if (!conn) return;
 
-        auto strand = conn->strand_;
-        boost::asio::post(strand, [conn = std::move(conn)]() mutable {
+        const auto strand = conn->strand_;
+        boost::asio::post(strand, [conn = std::move(conn)] mutable {
             conn->destruct();
             conn.reset();
         });
@@ -207,7 +207,7 @@ private:
     }
 
     void register_persistent_listeners() {
-        std::call_once(listeners_flag_, [this]() {
+        std::call_once(listeners_flag_, [this] {
             on_voice_state_update_ = bot_.gateway_callbacks.on_voice_state_update.listen_system([this](const recieve_event::voice_state_update& e) {
                 const auto me = get_bot_id();
                 if (!me || (e.user_id != me) || !e.guild_id) return;
@@ -370,7 +370,7 @@ private:
         void handle_cancel(std::shared_ptr<join_state> self_ptr, boost::asio::cancellation_type type) {
             if (type == boost::asio::cancellation_type::none) return;
 
-            boost::asio::post(strand_, [self_ptr = std::move(self_ptr), type]() {
+            boost::asio::post(strand_, [self_ptr = std::move(self_ptr), type] {
                 self_ptr->cancelled_type = type;
                 self_ptr->child_signal.emit(type);
             });
@@ -396,10 +396,10 @@ private:
         void finish(std::shared_ptr<join_state> self_ptr, boost::system::error_code ec, connection_ref conn = nullptr) {
             if (completed.exchange(true, std::memory_order_acq_rel)) return;
 
-            auto ex = get_executor();
+            const auto ex = get_executor();
 
             boost::asio::dispatch(ex,
-                boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, conn = std::move(conn)]() mutable {
+                boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr), ec, conn = std::move(conn)] mutable {
                     join_state::complete(std::move(self_ptr), ec, std::move(conn));
                 })
             );
@@ -431,7 +431,7 @@ private:
         void init(std::shared_ptr<join_state> self_ptr) {
             self->register_persistent_listeners();
 
-            boost::asio::post(strand_, boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr)]() mutable {
+            boost::asio::post(strand_, boost::asio::bind_allocator(allocator, [self_ptr = std::move(self_ptr)] mutable {
                 auto ptr = self_ptr.get();
                 ptr->start(std::move(self_ptr));
             }));
@@ -707,7 +707,7 @@ public:
                 using handler_t = std::decay_t<decltype(handler)>;
                 using state_type = join_state<handler_t>;
 
-                auto alloc = boost::asio::get_associated_allocator(
+                const auto alloc = boost::asio::get_associated_allocator(
                     handler,
                     boost::asio::recycling_allocator<void>{}
                 );

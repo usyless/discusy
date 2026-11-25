@@ -373,7 +373,7 @@ class Callback : private detail::callback_base {
     };
 
     template <typename W>
-    #if defined(_MSC_VER)
+    #ifdef _MSC_VER
     __declspec(noinline)
     #elif defined(__GNUC__) || defined(__clang__)
     __attribute__((noinline))
@@ -404,7 +404,7 @@ class Callback : private detail::callback_base {
         return detail::erased_event_data{
             raw,
             std::addressof(raw->d),
-            [](void* ptr) noexcept { delete static_cast<W*>(ptr); }
+            [](void* ptr) noexcept { delete static_cast<W*>(ptr); },
         };
     }
 
@@ -434,7 +434,7 @@ class Callback : private detail::callback_base {
         static void complete(std::shared_ptr<detail::when_interface> self_ptr, boost::system::error_code ec, T data = T{}) {
             auto* self = static_cast<when_node*>(self_ptr.get());
             self->complete_entered.store(true, std::memory_order_release);
-            auto h = std::move(self->handler);
+            auto h = std::move(self->handler); // NOLINT(misc-const-correctness)
             auto slot = boost::asio::get_associated_cancellation_slot(h);
             if (slot.is_connected()) slot.clear();
             self->work.reset();
@@ -448,7 +448,7 @@ class Callback : private detail::callback_base {
             const auto& data = *static_cast<const T*>(data_ptr);
             bool matched = false;
             {
-                std::scoped_lock lock{this->match_mtx};
+                const std::scoped_lock lock{this->match_mtx};
                 if (this->completed.load(std::memory_order_acquire)) return true;
 
                 try {
@@ -459,7 +459,7 @@ class Callback : private detail::callback_base {
                     detail::callback_log_noexcept("When predicate exception: {}", e.what());
                 }
                 #endif
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     detail::callback_log_noexcept("When predicate unknown exception");
                     #endif
@@ -470,7 +470,7 @@ class Callback : private detail::callback_base {
                 if (this->completed.exchange(true, std::memory_order_acq_rel)) return true;
             }
 
-            auto alloc = boost::asio::get_associated_allocator(
+            const auto alloc = boost::asio::get_associated_allocator(
                 handler,
                 boost::asio::recycling_allocator<void>{}
             );
@@ -484,11 +484,11 @@ class Callback : private detail::callback_base {
                 #endif
                 try {
                     boost::asio::dispatch(ex,
-                        boost::asio::bind_allocator(alloc, [self = this->shared_from_this()]() mutable {
+                        boost::asio::bind_allocator(alloc, [self = this->shared_from_this()] mutable {
                             when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::no_memory));
                         })
                     );
-                } catch (...) {
+                } catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     detail::callback_log_noexcept("When handler no_memory dispatch exception");
                     #endif
@@ -498,7 +498,7 @@ class Callback : private detail::callback_base {
 
             try {
                 boost::asio::dispatch(ex,
-                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = std::move(*copied_data)]() mutable {
+                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), d = std::move(*copied_data)] mutable {
                         when_node::complete(std::move(self), boost::system::error_code{}, std::move(d));
                     })
                 );
@@ -509,7 +509,7 @@ class Callback : private detail::callback_base {
                     #endif
                     try {
                         boost::asio::dispatch(ex,
-                            boost::asio::bind_allocator(alloc, [self = this->shared_from_this()]() mutable {
+                            boost::asio::bind_allocator(alloc, [self = this->shared_from_this()] mutable {
                                 when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::no_memory));
                             })
                         );
@@ -527,25 +527,25 @@ class Callback : private detail::callback_base {
         void on_callback_destroyed(const ctx::io_context::executor_t& io_exec) noexcept override final {
             if (this->completed.exchange(true, std::memory_order_acq_rel)) return;
 
-            auto alloc = boost::asio::get_associated_allocator(
+            const auto alloc = boost::asio::get_associated_allocator(
                 handler,
                 boost::asio::recycling_allocator<void>{}
             );
 
             try {
                 boost::asio::post(io_exec,
-                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc]() mutable {
+                    boost::asio::bind_allocator(alloc, [self = this->shared_from_this(), ex = this->ex, alloc] mutable {
                         boost::asio::dispatch(ex,
-                            boost::asio::bind_allocator(alloc, [self = std::move(self)]() mutable {
+                            boost::asio::bind_allocator(alloc, [self = std::move(self)] mutable {
                                 {
-                                    std::scoped_lock lock{self->match_mtx};
+                                    const std::scoped_lock lock{self->match_mtx};
                                 }
                                 when_node::complete(std::move(self), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                             })
                         );
                     })
                 );
-            } catch (...) {
+            } catch (...) { // NOLINT(bugprone-empty-catch)
                 #ifdef DISCUSY_LOGGING
                 detail::callback_log_noexcept("When on_callback_destroyed post exception");
                 #endif
@@ -564,21 +564,21 @@ class Callback : private detail::callback_base {
         // }
 
         template <discusy::asio::chf<T> Handler, typename Pred>
-        void operator()(Handler&& handler, std::weak_ptr<detail::callback_core> weak_core, Pred&& p) const {
+        void operator()(Handler&& handler, const std::weak_ptr<detail::callback_core>& weak_core, Pred&& p) const {
             using handler_t = std::decay_t<Handler>;
 
-            auto alloc = boost::asio::get_associated_allocator(
+            const auto alloc = boost::asio::get_associated_allocator(
                 handler,
                 boost::asio::recycling_allocator<void>{}
             );
 
-            auto ex = boost::asio::get_associated_executor(handler, executor);
-            using executor_type_h = decltype(ex);
+            const auto ex = boost::asio::get_associated_executor(handler, executor);
+            using executor_type_h = std::decay_t<decltype(ex)>;
             using pred_t = std::decay_t<Pred>;
 
-            auto core = weak_core.lock();
+            const auto core = weak_core.lock();
             if (!core) {
-                auto ex_imm = boost::asio::get_associated_immediate_executor(handler, executor);
+                const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, executor);
                 boost::asio::dispatch(
                     ex_imm,
                     boost::asio::append(std::forward<decltype(handler)>(handler), boost::asio::error::make_error_code(boost::asio::error::operation_aborted), T{})
@@ -608,17 +608,17 @@ class Callback : private detail::callback_base {
 
                     try {
                         boost::asio::post(ex,
-                            boost::asio::bind_allocator(alloc, [n = std::move(n), weak_core]() mutable {
+                            boost::asio::bind_allocator(alloc, [n = std::move(n), weak_core] mutable {
                                 {
-                                    std::scoped_lock lock{n->match_mtx};
+                                    const std::scoped_lock lock{n->match_mtx};
                                 }
-                                if (auto c = weak_core.lock()) {
+                                if (const auto c = weak_core.lock()) {
                                     c->clear_completed_waiter(n);
                                 }
                                 node_t::complete(std::move(n), boost::asio::error::make_error_code(boost::asio::error::operation_aborted));
                             })
                         );
-                    } catch (...) {
+                    } catch (...) { // NOLINT(bugprone-empty-catch)
                         #ifdef DISCUSY_LOGGING
                         detail::callback_log_noexcept("When cancellation post exception");
                         #endif
@@ -633,7 +633,7 @@ class Callback : private detail::callback_base {
                 auto h = std::move(node->handler);
                 auto cancel_slot = boost::asio::get_associated_cancellation_slot(h);
                 if (cancel_slot.is_connected()) cancel_slot.clear();
-                auto ex_imm = boost::asio::get_associated_immediate_executor(h, executor);
+                const auto ex_imm = boost::asio::get_associated_immediate_executor(h, executor);
                 node->work.reset();
                 node.reset();
 
@@ -820,7 +820,7 @@ public:
 
         try {
             if (!snap || snap->async_count == 0) {
-                io_ctx_.submit([core = core_, snap = std::move(snap), data = std::move(data)]() mutable {
+                io_ctx_.submit([core = core_, snap = std::move(snap), data = std::move(data)] mutable {
                     detail::callback_base::fire_sync_internal(std::move(core), std::move(snap), std::addressof(data));
                 });
             } else {
@@ -832,7 +832,7 @@ public:
                     detail::erased_event_data{
                         raw,
                         raw,
-                        [](void* ptr) noexcept { delete static_cast<T*>(ptr); }
+                        [](void* ptr) noexcept { delete static_cast<T*>(ptr); },
                     }
                 );
             }
@@ -842,7 +842,7 @@ public:
             log::Logger{}("Callback fire exception: {}", e.what());
         }
         #endif
-        catch (...) {
+        catch (...) { // NOLINT(bugprone-empty-catch)
             #ifdef DISCUSY_LOGGING
             log::Logger{}("Callback fire unknown exception");
             #endif
@@ -886,6 +886,7 @@ public:
         callback) noexcept
         : counter_{target}, callback_{std::move(callback)} {}
 
+    ~CounterCallback() = default;
     CounterCallback(const CounterCallback&) = delete;
     CounterCallback& operator=(const CounterCallback&) = delete;
     CounterCallback(CounterCallback&&) = delete;

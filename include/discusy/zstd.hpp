@@ -42,7 +42,7 @@ public:
         do {
             output_.pos = 0;
 
-            size_t remaining_hint = ZSTD_decompressStream(ptr_, &output_, &input);
+            const size_t remaining_hint = ZSTD_decompressStream(ptr_, &output_, &input);
 
             if (ZSTD_isError(remaining_hint) != 0U) {
                 return false;

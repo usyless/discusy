@@ -13,8 +13,8 @@ int main() {
     using namespace discusy;
     bot bot{"config.json", send_event::update_presence{
         .activities{
-            recieve_event::presence::activity::create(recieve_event::presence::activity_type::custom, "discusy is alive?!?")
-        }
+            recieve_event::presence::activity::create(recieve_event::presence::activity_type::custom, "discusy is alive?!?"),
+        },
     }, true};
     
     bot.gateway_callbacks.on_ready([](const recieve_event::ready&) -> coro::awaitable<void> {
@@ -36,14 +36,14 @@ int main() {
         bot.timers.start_timer([&bot](timer) {
             bot.set_presence(send_event::update_presence{
                 .activities{
-                    recieve_event::presence::activity::create(recieve_event::presence::activity_type::custom, "discusy has now changed their status?!?")
+                    recieve_event::presence::activity::create(recieve_event::presence::activity_type::custom, "discusy has now changed their status?!?"),
                 },
                 .status = send_event::status_type::idle,
             });
         }, std::chrono::seconds{10});
     });
 
-    bot.spawn([&bot]() -> coro::awaitable<void> {
+    bot.spawn([&bot] -> coro::awaitable<void> {
         auto [file_ec, file_data] = co_await bot.read_file("config.json")(token::t_deferred);
         std::println(stderr, "Config.json data: {}", file_data);
         co_return;

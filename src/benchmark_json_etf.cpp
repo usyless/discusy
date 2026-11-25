@@ -235,12 +235,12 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     // Pre-flight deserialization validation
     {
         T test_target{};
-        auto err_rj = glz::read_json(test_target, json_buffer);
+        const auto err_rj = glz::read_json(test_target, json_buffer);
         if (static_cast<bool>(err_rj)) {
             std::cerr << "\n[ERROR] Pre-flight JSON deserialization failed for " << name << ": " << glz::format_error(err_rj, json_buffer) << "\n";
             return res;
         }
-        auto err_re = glz::read_etf(test_target, etf_buffer);
+        const auto err_re = glz::read_etf(test_target, etf_buffer);
         if (static_cast<bool>(err_re)) {
             std::cerr << "\n[ERROR] Pre-flight ETF deserialization failed for " << name << ": " << glz::format_error(err_re, etf_buffer) << "\n";
             return res;
@@ -248,15 +248,15 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     }
 
     // 1. JSON Serialization Benchmark (using zero-allocation write_scratch string_view)
-    res.json_ser_ns = measure_median_latency([&]() {
-        auto sv = discusy::json::write_scratch(value);
+    res.json_ser_ns = measure_median_latency([&] {
+        const auto sv = discusy::json::write_scratch(value);
         do_not_optimize(sv);
     }, iterations);
     res.json_ser_mb_s = (static_cast<double>(res.json_size) / res.json_ser_ns) * (1e9 / (1024.0 * 1024.0));
 
     // 2. ETF Serialization Benchmark (using zero-allocation write_scratch string_view)
-    res.etf_ser_ns = measure_median_latency([&]() {
-        auto sv = discusy::etf::write_scratch(value);
+    res.etf_ser_ns = measure_median_latency([&] {
+        const auto sv = discusy::etf::write_scratch(value);
         do_not_optimize(sv);
     }, iterations);
     res.etf_ser_mb_s = (static_cast<double>(res.etf_size) / res.etf_ser_ns) * (1e9 / (1024.0 * 1024.0));
@@ -264,7 +264,7 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     // 3. JSON Deserialization Benchmark
     {
         T target{};
-        res.json_deser_ns = measure_median_latency([&]() {
+        res.json_deser_ns = measure_median_latency([&] {
             (void)glz::read_json(target, json_buffer);
             do_not_optimize(target);
         }, iterations);
@@ -274,7 +274,7 @@ BenchResult benchmark_payload(const std::string& name, const T& value, size_t it
     // 4. ETF Deserialization Benchmark
     {
         T target{};
-        res.etf_deser_ns = measure_median_latency([&]() {
+        res.etf_deser_ns = measure_median_latency([&] {
             (void)glz::read_etf(target, etf_buffer);
             do_not_optimize(target);
         }, iterations);
@@ -356,7 +356,7 @@ int main() {
     std::cout << "\n[1/4] Benchmarking Small Payloads (Heartbeat & Presence)..." << std::flush;
     discusy::recieve_event::payload<discusy::recieve_event::hello> hb{};
     hb.d.heartbeat_interval = 41250;
-    auto res_hb = benchmark_payload("Small: Gateway Hello / Heartbeat", hb, 200000);
+    const auto res_hb = benchmark_payload("Small: Gateway Hello / Heartbeat", hb, 200000);
     print_table_row(res_hb);
 
     discusy::send_event::update_presence presence{};
@@ -366,25 +366,25 @@ int main() {
     act.name = "Playing discusy";
     act.type = discusy::recieve_event::presence::activity_type::playing;
     presence.activities.emplace_back(std::move(act));
-    auto res_pres = benchmark_payload("Small: Presence Update", presence, 100000);
+    const auto res_pres = benchmark_payload("Small: Presence Update", presence, 100000);
     print_table_row(res_pres);
 
     // 2. Medium Tier
     std::cout << "\n[2/4] Benchmarking Medium Payloads (Message Create with Mentions & Embeds)..." << std::flush;
-    auto msg = make_medium_payload();
-    auto res_msg = benchmark_payload("Medium: Message Create", msg, 20000);
+    const auto msg = make_medium_payload();
+    const auto res_msg = benchmark_payload("Medium: Message Create", msg, 20000);
     print_table_row(res_msg);
 
     // 3. Large Tier
     std::cout << "\n[3/4] Benchmarking Large Payloads (200 Guild Members Sync)..." << std::flush;
-    auto large = make_large_payload();
-    auto res_large = benchmark_payload("Large: 200 Members List", large, 2000);
+    const auto large = make_large_payload();
+    const auto res_large = benchmark_payload("Large: 200 Members List", large, 2000);
     print_table_row(res_large);
 
     // 4. Extra-Large Tier
     std::cout << "\n[4/4] Benchmarking Extra-Large Payloads (Guild Create: 800 Members, 60 Channels, 40 Roles)..." << std::flush;
-    auto xl = make_xl_payload();
-    auto res_xl = benchmark_payload("Extra-Large: Full Guild Create", xl, 1000);
+    const auto xl = make_xl_payload();
+    const auto res_xl = benchmark_payload("Extra-Large: Full Guild Create", xl, 1000);
     print_table_row(res_xl);
 
     std::cout << "\nBenchmark complete!\n";

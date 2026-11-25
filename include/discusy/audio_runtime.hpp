@@ -72,7 +72,7 @@ private:
         nodes_.reserve(count);
         for (unsigned i = 0; i < count; ++i) {
             auto& n = *nodes_.emplace_back(std::make_unique<node>());
-            n.thread = std::thread{[&n]() {
+            n.thread = std::thread{[&n] {
                 #ifdef __linux__
                 ::prctl(PR_SET_TIMERSLACK, 1UL, 0, 0, 0);
                 #endif

@@ -10,7 +10,7 @@ int main() {
     bot bot{1};
 
     // This posts a task onto the bots event queue, use it to start a coroutine
-    bot.spawn([&bot]() -> coro::awaitable<void> {
+    bot.spawn([&bot] -> coro::awaitable<void> {
         // Here we go through all the completion token types: (these are just aliases for asio's types)
         // using the t_ variants as we do not want exceptions
 
@@ -55,7 +55,7 @@ int main() {
         co_await bot.sleep(std::chrono::seconds{1})(token::t_explicit_awaitable);
 
         // Awaitable operators:
-        auto result = co_await (bot.sleep(std::chrono::seconds{1})(token::t_explicit_awaitable) 
+        const auto result = co_await (bot.sleep(std::chrono::seconds{1})(token::t_explicit_awaitable) 
                     || bot.sleep(std::chrono::seconds{2})(token::t_explicit_awaitable));
         if (result.index() == 0) {
             // The first timer won
@@ -70,7 +70,7 @@ int main() {
             // and it will be prevented by using a strand: via bot.io_ctx.make_strand()
         
         // If our coroutine is not running on a strand of ours...
-        auto strand = bot.io_ctx.make_strand();
+        const auto strand = bot.io_ctx.make_strand();
         co_await (bot.sleep(std::chrono::seconds{1})(token::bind_executor(strand, token::t_explicit_awaitable)) 
                     || bot.sleep(std::chrono::seconds{2})(token::bind_executor(strand, token::t_explicit_awaitable)));
 
@@ -78,7 +78,7 @@ int main() {
     });
 
     // If we do have multiple threads...
-    ctx::io_context::co_launch_detached([]() -> coro::awaitable<void> {
+    ctx::io_context::co_launch_detached([] -> coro::awaitable<void> {
         // Due to bot.io_ctx.make_strand() this coroutine is serialised when using
         // completion tokens we await with
 

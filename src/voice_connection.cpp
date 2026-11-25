@@ -56,7 +56,7 @@ void connection::start() {
     udp_client_shared_ = std::move(client);
     udp_client_.store(udp_client_shared_.get(), std::memory_order_release);
 
-    boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this()] {
         if (self->destructed_) return;
         self->reconnect(); // gives us the logic in case of failure to open
     });
@@ -74,7 +74,7 @@ connection::~connection() noexcept {
 void connection::move_channel(snowflake new_channel_id) {
     if (closed_.load(std::memory_order_acquire)) return;
 
-    boost::asio::dispatch(strand_, [self = this->shared_from_this(), new_channel_id]() {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this(), new_channel_id] {
         auto& c = *self;
         if (c.destructed_) return;
 
@@ -102,7 +102,7 @@ void connection::move_channel(snowflake new_channel_id) {
 void connection::refresh(std::string session_id, std::string token, std::string endpoint, snowflake channel_id) {
     if (closed_.load(std::memory_order_acquire)) return;
 
-    boost::asio::dispatch(strand_, [self = this->shared_from_this(), session_id = std::move(session_id), token = std::move(token), endpoint = std::move(endpoint), channel_id]() mutable {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this(), session_id = std::move(session_id), token = std::move(token), endpoint = std::move(endpoint), channel_id] mutable {
         auto& c = *self;
         if (c.destructed_) return;
 
@@ -159,7 +159,7 @@ void connection::refresh(std::string session_id, std::string token, std::string 
 void connection::set_speaking_mode(speaking_mode mode) {
     if (closed_.load(std::memory_order_acquire)) return;
 
-    boost::asio::dispatch(strand_, [self = this->shared_from_this(), mode]() {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this(), mode] {
         if (self->destructed_) return;
         self->speaking_mode_ = mode;
         self->send_speaking();
@@ -181,7 +181,7 @@ void connection::pause_audio() {
 void connection::rebuild_in_place() {
     if (closed_.load(std::memory_order_acquire)) return;
 
-    boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this()] {
         if (self->destructed_) return;
 
         #ifdef DISCUSY_LOGGING
@@ -477,7 +477,7 @@ void connection::send_pcm(
         log("send_pcm exception: {}", e.what());
     }
     #endif
-    catch (...) {
+    catch (...) { // NOLINT(bugprone-empty-catch)
         #ifdef DISCUSY_LOGGING
         log("send_pcm unknown exception");
         #endif
@@ -559,7 +559,7 @@ void connection::send_pcm_bytes(
         log("send_pcm exception: {}", e.what());
     }
     #endif
-    catch (...) {
+    catch (...) { // NOLINT(bugprone-empty-catch)
         #ifdef DISCUSY_LOGGING
         log("send_pcm unknown exception");
         #endif
@@ -854,7 +854,7 @@ void connection::handle_ws_message(const std::string_view msg, bool binary) {
         log("on_message exception: {}", e.what());
     }
     #endif
-    catch (...) {
+    catch (...) { // NOLINT(bugprone-empty-catch)
         #ifdef DISCUSY_LOGGING
         log("on_message unknown exception");
         #endif
@@ -1103,7 +1103,7 @@ void connection::handle_gateway_payload(std::string_view json_payload) {
                             .mode{mode},
                         },
                     };
-                    select_protocol_payload payload{select};
+                    const select_protocol_payload payload{select};
 
                     std::string out;
                     if (json::write_json(payload, out, self.json_logger)) {
@@ -1492,7 +1492,7 @@ void connection::send_identify() {
             .token{token_},
             .max_dave_protocol_version = discord::dave::MaxSupportedProtocolVersion(),
         };
-        identify_payload payload{id};
+        const identify_payload payload{id};
 
         std::string out;
         if (json::write_json(payload, out, json_logger)) {
@@ -1511,7 +1511,7 @@ void connection::send_identify() {
             .token{token_},
             .seq_ack = seq_,
         };
-        resume_payload payload{r};
+        const resume_payload payload{r};
 
         std::string out;
         if (json::write_json(payload, out, json_logger)) {
@@ -1747,7 +1747,7 @@ void connection::sync_sink_wants_on_ready() {
 }
 
 void connection::dispatch_media_sink_wants() {
-    boost::asio::dispatch(strand_, [self = this->shared_from_this()]() {
+    boost::asio::dispatch(strand_, [self = this->shared_from_this()] {
         if (self->destructed_ || !self->ready_received_) return;
         self->send_media_sink_wants_current();
     });
@@ -1798,7 +1798,7 @@ void connection::send_speaking(std::optional<speaking_mode> mode_override) {
         .speaking = mode_override ? *mode_override : speaking_mode_,
         .ssrc = ssrc_,
     };
-    speaking_payload payload{s};
+    const speaking_payload payload{s};
 
     std::string out;
     if (json::write_json(payload, out, json_logger)) {
@@ -1869,16 +1869,16 @@ void connection::stop_heartbeat() {
 }
 
 void connection::udp_on_error_cb::operator()(const boost::system::error_code& ec) const {
-    auto self = s.lock();
+    const auto self = s.lock();
     if (!self) return;
 
-    boost::asio::post(self->strand_, [s = s, ec]() {
-        if (auto self = s.lock()) self->handle_udp_failure(ec);
+    boost::asio::post(self->strand_, [s = s, ec] {
+        if (const auto self = s.lock()) self->handle_udp_failure(ec);
     });
 }
 
 void connection::udp_on_idle_cb::operator()(const audio_stop_reason reason) const {
-    auto self = s.lock();
+    const auto self = s.lock();
     if (!self || self->closed_.load(std::memory_order_acquire) || self->io_ctx_->stopped()) return;
 
     self->on_audio_stopped.fire(audio_stopped{
@@ -1949,7 +1949,7 @@ void connection::handle_udp_packet(
         log("handle_udp_packet exception: {}", e.what());
     }
     #endif
-    catch (...) {
+    catch (...) { // NOLINT(bugprone-empty-catch)
         #ifdef DISCUSY_LOGGING
         log("handle_udp_packet unknown exception");
         #endif
@@ -2093,7 +2093,7 @@ void connection::check_and_apply_bitrate() noexcept {
 }
 
 bool connection::is_aes256_gcm_supported() noexcept {
-    static const bool supported = []() noexcept -> bool {
+    static const bool supported = [] noexcept -> bool {
         if (sodium_init() < 0) {
             return false;
         }

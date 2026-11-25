@@ -212,7 +212,7 @@ private:
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code, discusy::api::result<RetType>)>(
             [](discusy::asio::chf<discusy::api::result<RetType>> auto&& handler, http_api* self, discusy::http::method m, auto&& url, auto&& body_res, auto&& req_headers) {
                 if (!body_res) {
-                    auto exec = boost::asio::get_associated_immediate_executor(handler, self->state_.client.io_ctx_.executor_);
+                    const auto exec = boost::asio::get_associated_immediate_executor(handler, self->state_.client.io_ctx_.executor_);
 
                     boost::asio::dispatch(
                         exec,
@@ -262,7 +262,7 @@ private:
         
         std::visit([&body](const auto& span_files) {
             for (const auto& file : span_files) {
-                auto name = ulp::str::concat_strings("files[", file.id, "]");
+                const auto name = ulp::str::concat_strings("files[", file.id, "]");
                 discusy::multipart::add_multipart_part(body, name, file.data, file.filename, file.content_type);
             }
         }, files.files);

@@ -125,13 +125,13 @@ bool bot::send_request_guild_members(send_event::request_guild_members members) 
     if (!members.guild_id) return false;
 
     {
-    std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
+    const std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
     if (!lock.owns_lock()) return false;
 
     const auto total_shards = total_shards_.load();
     if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, m = std::move(members)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, m = std::move(members)] mutable {
             this->send_request_guild_members(std::move(m));
         });
         return true;
@@ -141,7 +141,7 @@ bool bot::send_request_guild_members(send_event::request_guild_members members) 
 
     if (shard_id >= total_shards) return false;
 
-    return shards_[shard_id]->send_request_guild_members(std::move(members));
+    return shards_[shard_id]->send_request_guild_members(members);
     }
 }
 
@@ -149,13 +149,13 @@ bool bot::send_request_channel_info(send_event::request_channel_info info) {
     if (!info.guild_id) return false;
 
     {
-    std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
+    const std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
     if (!lock.owns_lock()) return false;
 
     const auto total_shards = total_shards_.load();
     if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, i = std::move(info)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, i = std::move(info)] mutable {
             this->send_request_channel_info(std::move(i));
         });
         return true;
@@ -165,7 +165,7 @@ bool bot::send_request_channel_info(send_event::request_channel_info info) {
 
     if (shard_id >= total_shards) return false;
 
-    return shards_[shard_id]->send_request_channel_info(std::move(info));
+    return shards_[shard_id]->send_request_channel_info(info);
     }
 }
 
@@ -175,13 +175,13 @@ bool bot::request_soundboard_sounds(send_event::request_soundboard_sounds sounds
     bool success = true;
 
     {
-    std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
+    const std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
     if (!lock.owns_lock()) return false;
 
     const auto total_shards = total_shards_.load();
     if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, s = std::move(sounds)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, s = std::move(sounds)] mutable {
             this->request_soundboard_sounds(std::move(s));
         });
         return true;
@@ -196,10 +196,10 @@ bool bot::request_soundboard_sounds(send_event::request_soundboard_sounds sounds
     }
 
     for (std::decay_t<decltype(total_shards)> i = 0; i < total_shards; ++i) {
-        auto& request = shard_requests[i];
+        const auto& request = shard_requests[i];
         if (request.guild_ids.empty()) continue;
 
-        success &= shards_[i]->send_request_soundboard_sounds(std::move(request));
+        success &= shards_[i]->send_request_soundboard_sounds(request);
     }
     }
 
@@ -207,26 +207,26 @@ bool bot::request_soundboard_sounds(send_event::request_soundboard_sounds sounds
 }
 
 bool bot::set_presence(send_event::update_presence presence) {
-    send_event::update_presence_payload payload{presence};
+    send_event::update_presence_payload const payload{presence};
     std::string encoded;
     if (gateway_protocol::write(payload, encoded, json_logger)) return false;
 
     {
-    std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
+    const std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
     if (!lock.owns_lock()) return false;
 
     state_.presence.store(std::make_shared<const send_event::update_presence>(presence), std::memory_order_release);
 
     const auto total_shards = total_shards_.load();
     if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, p = std::move(presence)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, p = std::move(presence)] mutable {
             this->set_presence(std::move(p));
         });
         return true;
     }
 
-    for (auto& shard : shards_) {
+    for (const auto& shard : shards_) {
         shard->send_text_ratelimited(encoded);
     }
     }
@@ -252,17 +252,17 @@ bot::~bot() {
 }
 
 std::string bot::get_application_id() {
-    std::shared_lock lock{this->state_.details_mtx};
+    const std::shared_lock lock{this->state_.details_mtx};
     return this->state_.application_id;
 }
 
 snowflake bot::get_user_id() {
-    std::shared_lock lock{this->state_.details_mtx};
+    const std::shared_lock lock{this->state_.details_mtx};
     return this->state_.me.id;
 }
 
 discusy::user::user bot::get_me() {
-    std::shared_lock lock{state_.details_mtx};
+    const std::shared_lock lock{state_.details_mtx};
     return this->state_.me;
 }
 
@@ -270,14 +270,14 @@ bool bot::update_voice_state(send_event::update_voice_state state) {
     if (!state.guild_id) return false;
 
     {
-    std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
+    const std::unique_lock lock{shards_mutex, std::chrono::milliseconds{500}};
     if (!lock.owns_lock()) return false;
 
     const auto total_shards = total_shards_.load();
     if (total_shards == 0 || shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, s = std::move(state)]() mutable {
-            this->update_voice_state(std::move(s));
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, s = state] mutable {
+            this->update_voice_state(s);
         });
         return true;
     }
@@ -286,7 +286,7 @@ bool bot::update_voice_state(send_event::update_voice_state state) {
 
     if (shard_id >= total_shards) return false;
 
-    return shards_[shard_id]->send_update_voice_state(std::move(state));
+    return shards_[shard_id]->send_update_voice_state(state);
     }
 }
 
@@ -318,7 +318,7 @@ config bot::setup_cfg(const std::filesystem::path& cfg_path, opt<send_event::upd
     }
 
     if (initial_presence) {
-        conf.initial_presence = std::move(*initial_presence);
+        conf.initial_presence = std::move(initial_presence);
     }
     return setup_cfg(conf, add_voice_intent);
 }
@@ -357,7 +357,7 @@ void bot::construct() {
 
     if (!http_only_ && on_user_update_id_ == 0) {
         on_user_update_id_ = state_.gateway_callbacks.on_user_update.listen_system([this](const recieve_event::user_update& u) -> bool {
-            std::scoped_lock lock{state_.details_mtx};
+            const std::scoped_lock lock{state_.details_mtx};
             state_.me = u;
             return true;
         });
@@ -409,7 +409,7 @@ void bot::start_shards() {
 
     shards_stop_requested.store(false);
 
-    io_ctx.co_launch_detached([this]() -> coro::awaitable<void> {
+    io_ctx.co_launch_detached([this] -> coro::awaitable<void> {
         auto [ec, resp] = co_await api.get_gateway_bot(token::as_tuple(token::deferred));
 
         if (ec || !resp) {
@@ -420,7 +420,7 @@ void bot::start_shards() {
             co_return;
         }
 
-        auto& bot_info = resp.value();
+        const auto& bot_info = resp.value();
 
         state_.gateway_url = ulp::str::concat_strings(bot_info.url, "/", urls::GATEWAY_QUERY_PARAMS);
 
@@ -451,32 +451,32 @@ void bot::start_shards() {
         log("Shard start concurrency: {}", max_concurrency);
         #endif
 
-        state_.sharding_required_cb.emplace(state_.sharding_required->get_token(), [this]() {
+        state_.sharding_required_cb.emplace(state_.sharding_required->get_token(), [this] {
             #ifdef DISCUSY_LOGGING
             log("Sharding required callback");
             #endif
-            io_ctx.post([this]() {
+            io_ctx.post([this] {
                 sharding_required();
             });
         });
 
-        state_.fatal_error_cb.emplace(state_.fatal_error->get_token(), [this]() {
+        state_.fatal_error_cb.emplace(state_.fatal_error->get_token(), [this] {
             #ifdef DISCUSY_LOGGING
             log("Fatal error callback");
             #endif
-            io_ctx.post([this]() {
+            io_ctx.post([this] {
                 stop();
             });
         });
         const auto total_shards = bot_info.shards;
         {
-        std::scoped_lock lock{shards_mutex};
+        const std::scoped_lock lock{shards_mutex};
         total_shards_.store(total_shards);
         shards_.reserve(total_shards);
         }
 
-        state_.shards_ready_counter.emplace(total_shards, [this]() {
-            io_ctx.post([this]() {
+        state_.shards_ready_counter.emplace(total_shards, [this] {
+            io_ctx.post([this] {
                 std::vector<
                 #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
                     std::move_only_function<void()>
@@ -485,7 +485,7 @@ void bot::start_shards() {
                 #endif
                 > to_execute;
                 {
-                std::scoped_lock q_lock{pending_shard_operations_mtx_};
+                const std::scoped_lock q_lock{pending_shard_operations_mtx_};
                 to_execute = std::move(pending_shard_operations_queue_);
                 pending_shard_operations_queue_.clear();
                 }
@@ -506,7 +506,7 @@ void bot::start_shards() {
             const bool is_last_iteration = (i + max_concurrency >= total_shards);
 
             {
-            std::scoped_lock lock{shards_mutex};
+            const std::scoped_lock lock{shards_mutex};
             const auto upto = i + max_concurrency;
             for (decltype(bot_info.shards) j = i; (j < upto) && (j < total_shards); ++j) {
                 if (shards_stop_requested.load()) break;
@@ -608,8 +608,8 @@ void bot::stop_workers() {
 void bot::route_evacuated_payload(std::string&& payload) {
     const auto total_shards = total_shards_.load();
     if (total_shards == 0) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, p = std::move(payload)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, p = std::move(payload)] mutable {
             this->route_evacuated_payload(std::move(p));
         });
         return;
@@ -680,10 +680,10 @@ void bot::route_evacuated_payload(std::string&& payload) {
         return;
     }
 
-    std::scoped_lock lock{shards_mutex};
+    const std::scoped_lock lock{shards_mutex};
     if (shards_stop_requested.load() || shards_.empty() || (shards_.size() != total_shards)) {
-        std::scoped_lock q_lock{pending_shard_operations_mtx_};
-        pending_shard_operations_queue_.emplace_back([this, p = std::move(payload)]() mutable {
+        const std::scoped_lock q_lock{pending_shard_operations_mtx_};
+        pending_shard_operations_queue_.emplace_back([this, p = std::move(payload)] mutable {
             this->route_evacuated_payload(std::move(p));
         });
         return;

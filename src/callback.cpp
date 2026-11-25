@@ -19,8 +19,8 @@ auto invoke_sync_on_executor(
 ) {
     auto token = boost::asio::deferred;
     return boost::asio::async_initiate<boost::asio::deferred_t, void(std::exception_ptr, bool)>(
-        [](auto&& handler, callback_interface* ep, const void* dp, boost::asio::any_io_executor target) mutable {
-            auto alloc = boost::asio::get_associated_allocator(
+        [](auto&& handler, callback_interface* ep, const void* dp, const boost::asio::any_io_executor& target) mutable {
+            const auto alloc = boost::asio::get_associated_allocator(
                 handler,
                 boost::asio::recycling_allocator<void>{}
             );
@@ -36,7 +36,7 @@ auto invoke_sync_on_executor(
                      work = std::move(work),
                      alloc,
                      ep,
-                     dp]() mutable {
+                     dp] mutable {
                         std::exception_ptr eptr;
                         bool res = true;
                         try {
@@ -48,7 +48,7 @@ auto invoke_sync_on_executor(
                             handler_ex,
                             boost::asio::bind_allocator(
                                 alloc,
-                                [h = std::move(h), work = std::move(work), eptr, res]() mutable {
+                                [h = std::move(h), work = std::move(work), eptr, res] mutable {
                                     work.reset();
                                     std::move(h)(eptr, res);
                                 }
@@ -73,7 +73,7 @@ push_waiter_result callback_core::push_when_waiter(std::shared_ptr<when_interfac
     }
 
     {
-        std::scoped_lock lock{incoming_mtx};
+        const std::scoped_lock lock{incoming_mtx};
         if (waiters_destroyed) {
             return push_waiter_result::destroyed;
         }
@@ -93,7 +93,7 @@ push_waiter_result callback_core::push_when_waiter(std::shared_ptr<when_interfac
 boost::container::small_vector<std::shared_ptr<when_interface>, 8> callback_core::drain_incoming_when_waiters() noexcept {
     boost::container::small_vector<std::shared_ptr<when_interface>, 8> incoming;
     {
-        std::scoped_lock lock{incoming_mtx};
+        const std::scoped_lock lock{incoming_mtx};
         if (incoming_waiters.empty()) return {};
         incoming = std::move(incoming_waiters);
         incoming_waiters.clear();
@@ -107,7 +107,7 @@ boost::container::small_vector<std::shared_ptr<when_interface>, 8> callback_core
     }
 
     for (auto& node : incoming) {
-        auto& waiter = active_waiters.emplace_back(std::move(node));
+        const auto& waiter = active_waiters.emplace_back(std::move(node));
         waiter->vector_idx = active_waiters.size() - 1;
     }
     return {};
@@ -121,14 +121,14 @@ void callback_core::dispatch_when_waiters(const void* data) {
     boost::container::small_vector<std::shared_ptr<when_interface>, 8> active;
     boost::container::small_vector<std::shared_ptr<when_interface>, 8> failed_drain;
     {
-        std::scoped_lock lock{when_mtx};
+        const std::scoped_lock lock{when_mtx};
         failed_drain = drain_incoming_when_waiters();
         if (!active_waiters.empty()) {
             active = active_waiters;
         }
     }
 
-    for (auto& node : failed_drain) {
+    for (const auto& node : failed_drain) {
         node->on_callback_destroyed(exec);
     }
     failed_drain.clear();
@@ -136,7 +136,7 @@ void callback_core::dispatch_when_waiters(const void* data) {
     if (active.empty()) return;
 
     bool any_completed = false;
-    for (auto& node : active) {
+    for (const auto& node : active) {
         if (node->completed.load(std::memory_order_acquire)) {
             any_completed = true;
             continue;
@@ -150,7 +150,7 @@ void callback_core::dispatch_when_waiters(const void* data) {
 
     boost::container::small_vector<std::shared_ptr<when_interface>, 8> removed_nodes;
     {
-        std::scoped_lock lock{when_mtx};
+        const std::scoped_lock lock{when_mtx};
         if (active_waiters.empty()) return;
         std::size_t removed = 0;
         for (std::size_t i = 0; i < active_waiters.size(); ) {
@@ -159,7 +159,7 @@ void callback_core::dispatch_when_waiters(const void* data) {
                 node->set_invalid_idx();
                 try {
                     removed_nodes.emplace_back(std::move(node));
-                } catch (...) {
+                } catch (...) { // NOLINT(bugprone-empty-catch)
                     // Keep alive via `active` if present; otherwise falls back to immediate release.
                 }
                 const auto last_idx = active_waiters.size() - 1;
@@ -184,7 +184,7 @@ void callback_core::clear_completed_waiter(const std::shared_ptr<when_interface>
         return;
     }
 
-    std::scoped_lock lock{when_mtx};
+    const std::scoped_lock lock{when_mtx};
     if (!node->is_invalid_idx()) {
         const auto idx = node->vector_idx;
         node->set_invalid_idx();
@@ -202,7 +202,7 @@ void callback_core::clear_completed_waiter(const std::shared_ptr<when_interface>
     }
 
     // Not in active_waiters; it may still be queued in incoming_waiters.
-    std::scoped_lock in_lock{incoming_mtx};
+    const std::scoped_lock in_lock{incoming_mtx};
     for (std::size_t i = 0; i < incoming_waiters.size(); ++i) {
         if (incoming_waiters[i] == node) {
             const auto last_idx = incoming_waiters.size() - 1;
@@ -222,23 +222,23 @@ void callback_core::abort_all_when_waiters() noexcept {
 
     waiters_destroyed = true;
 
-    for (auto& node : active_waiters) {
+    for (const auto& node : active_waiters) {
         node->set_invalid_idx();
     }
 
-    auto pending_active = std::move(active_waiters);
+    const auto pending_active = std::move(active_waiters);
     active_waiters.clear();
-    auto pending_incoming = std::move(incoming_waiters);
+    const auto pending_incoming = std::move(incoming_waiters);
     incoming_waiters.clear();
     when_waiters_count.store(0, std::memory_order_release);
 
     in_lock.unlock();
     when_lock.unlock();
 
-    for (auto& node : pending_active) {
+    for (const auto& node : pending_active) {
         node->on_callback_destroyed(exec);
     }
-    for (auto& node : pending_incoming) {
+    for (const auto& node : pending_incoming) {
         node->on_callback_destroyed(exec);
     }
 }
@@ -248,7 +248,7 @@ std::shared_ptr<const callback_snapshot> callback_core::rebuild_snapshot() {
     std::size_t active = 0;
     std::size_t async_c = 0;
 
-    auto copy_entries = [&](const auto& src, auto& dst) {
+    const auto copy_entries = [&](const auto& src, auto& dst) {
         dst.reserve(src.size());
         for (const auto& e : src) {
             if (e.func && !e.func->unregistered.load(std::memory_order_relaxed)) {
@@ -278,8 +278,8 @@ bool callback_core::unregister(const callback_id id) {
     std::shared_ptr<callback_interface> to_destroy;
     std::shared_ptr<const callback_snapshot> old_snap;
     {
-        std::scoped_lock lock{mtx};
-        auto it_user = std::ranges::find_if(user_callbacks, [id](const auto& e) {
+        const std::scoped_lock lock{mtx};
+        const auto it_user = std::ranges::find_if(user_callbacks, [id](const auto& e) {
             return e.id == id;
         });
         if (it_user != user_callbacks.end() && it_user->func) {
@@ -287,7 +287,7 @@ bool callback_core::unregister(const callback_id id) {
             to_destroy = std::move(it_user->func);
             user_callbacks.erase(it_user);
         } else {
-            auto it_sys = std::ranges::find_if(system_callbacks, [id](const auto& e) {
+            const auto it_sys = std::ranges::find_if(system_callbacks, [id](const auto& e) {
                 return e.id == id;
             });
             if (it_sys == system_callbacks.end() || !it_sys->func) {
@@ -317,13 +317,13 @@ callback_base::~callback_base() noexcept {
 
     std::shared_ptr<const callback_snapshot> old_snap;
     std::unique_lock lock{core_->mtx};
-    for (auto& e : core_->system_callbacks) {
+    for (const auto& e : core_->system_callbacks) {
         if (e.func) e.func->unregistered.store(true, std::memory_order_release);
     }
     auto system_old = std::move(core_->system_callbacks);
     core_->system_callbacks.clear();
 
-    for (auto& e : core_->user_callbacks) {
+    for (const auto& e : core_->user_callbacks) {
         if (e.func) e.func->unregistered.store(true, std::memory_order_release);
     }
     auto user_old = std::move(core_->user_callbacks);
@@ -341,8 +341,8 @@ callback_base::~callback_base() noexcept {
 }
 
 void callback_base::fire_sync_internal(
-    std::shared_ptr<callback_core> core,
-    std::shared_ptr<const callback_snapshot> snap,
+    std::shared_ptr<callback_core> core, // NOLINT(performance-unnecessary-value-param)
+    std::shared_ptr<const callback_snapshot> snap, // NOLINT(performance-unnecessary-value-param)
     const void* data
 ) {
     if (!snap && (!core || core->when_waiters_count.load(std::memory_order_acquire) == 0)) return;
@@ -358,7 +358,7 @@ void callback_base::fire_sync_internal(
                     log::Logger{}("System callback handler exception: {}", e.what());
                 }
                 #endif
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     log::Logger{}("System callback handler unknown exception");
                     #endif
@@ -384,7 +384,7 @@ void callback_base::fire_sync_internal(
                     log::Logger{}("User callback handler exception: {}", e.what());
                 }
                 #endif
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     log::Logger{}("User callback handler unknown exception");
                     #endif
@@ -417,7 +417,7 @@ coro::awaitable<void> callback_base::fire_async_internal(
                             entry_ptr->invoke_sync(data);
                         }
                     } else if (entry_ptr->is_async()) {
-                        co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, data]() -> coro::awaitable<bool> {
+                        co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, data] -> coro::awaitable<bool> {
                             return entry_ptr->invoke_async(data);
                         }, target_ex, boost::asio::deferred);
                     } else {
@@ -429,7 +429,7 @@ coro::awaitable<void> callback_base::fire_async_internal(
                     log::Logger{}("System callback handler exception: {}", e.what());
                 }
                 #endif
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     log::Logger{}("System callback handler unknown exception");
                     #endif
@@ -455,7 +455,7 @@ coro::awaitable<void> callback_base::fire_async_internal(
                             cont = entry_ptr->invoke_sync(data);
                         }
                     } else if (entry_ptr->is_async()) {
-                        cont = co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, data]() -> coro::awaitable<bool> {
+                        cont = co_await ctx::io_context::co_launch<ctx::launch::fresh>([entry_ptr, data] -> coro::awaitable<bool> {
                             return entry_ptr->invoke_async(data);
                         }, target_ex, boost::asio::deferred);
                     } else {
@@ -470,7 +470,7 @@ coro::awaitable<void> callback_base::fire_async_internal(
                     log::Logger{}("User callback handler exception: {}", e.what());
                 }
                 #endif
-                catch (...) {
+                catch (...) { // NOLINT(bugprone-empty-catch)
                     #ifdef DISCUSY_LOGGING
                     log::Logger{}("User callback handler unknown exception");
                     #endif
@@ -487,7 +487,7 @@ void callback_base::launch_async_erased(
     std::shared_ptr<const callback_snapshot> snap,
     erased_event_data data
 ) {
-    io_ctx_.co_launch_detached([core = std::move(core), snap = std::move(snap), data = std::move(data)]() mutable {
+    io_ctx_.co_launch_detached([core = std::move(core), snap = std::move(snap), data = std::move(data)] mutable {
         return fire_async_internal(std::move(core), std::move(snap), std::move(data));
     });
 }
@@ -509,11 +509,11 @@ void callback_base::fire_payload_erased(
 
     try {
         if (!snap || snap->async_count == 0) {
-            io_ctx_.submit([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload), sync_fn]() mutable {
+            io_ctx_.submit([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload), sync_fn] mutable {
                 sync_fn(std::move(core), std::move(snap), bot_ptr, payload);
             });
         } else {
-            io_ctx_.co_launch_detached([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload), parse_fn]() mutable -> coro::awaitable<void> {
+            io_ctx_.co_launch_detached([core = core_, bot_ptr, snap = std::move(snap), payload = std::string(payload), parse_fn] mutable -> coro::awaitable<void> {
                 auto data = parse_fn(bot_ptr, payload);
                 if (!data) co_return;
                 co_await fire_async_internal(std::move(core), std::move(snap), std::move(data));
@@ -526,7 +526,7 @@ void callback_base::fire_payload_erased(
         log::Logger{}("Callback fire_payload exception: {}", e.what());
     }
     #endif
-    catch (...) {
+    catch (...) { // NOLINT(bugprone-empty-catch)
         #ifdef DISCUSY_LOGGING
         log::Logger{}("Callback fire_payload unknown exception");
         #endif
@@ -553,7 +553,7 @@ callback_id callback_base::register_callback(
 ) {
     std::shared_ptr<const callback_snapshot> old_snap;
     {
-        std::scoped_lock lock{core_->mtx};
+        const std::scoped_lock lock{core_->mtx};
         if (prio == callback_priority::system) {
             core_->system_callbacks.emplace_back(id, std::move(ptr));
             try {

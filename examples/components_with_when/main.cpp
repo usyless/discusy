@@ -53,7 +53,7 @@ int main() {
         // Use std::call_once to protect against potential duplicate invocation during reconnects
         static std::once_flag flag;
 
-        std::call_once(flag, [&bot, &me]() {
+        std::call_once(flag, [&bot, &me] {
             std::println("Logged in as {} (ID: {})", me.username, me.id);
             std::println("Registering slash commands...");
 

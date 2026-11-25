@@ -446,7 +446,7 @@ public:
         send_pcm_bytes(
             std::span<const std::uint8_t>{
                 reinterpret_cast<const std::uint8_t*>(std::ranges::data(raw_bytes)),
-                std::ranges::size(raw_bytes)
+                std::ranges::size(raw_bytes),
             },
             batch_duration
         );
@@ -474,7 +474,7 @@ public:
         return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code)>(
             [](discusy::asio::chf<> auto&& handler, connection* self, const std::chrono::milliseconds batch_duration, auto&& owned_buffer) mutable {
                 if (self->closed_.load(std::memory_order_acquire) || (self->udp_client() == nullptr)) {
-                    auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
+                    const auto ex_imm = boost::asio::get_associated_immediate_executor(handler, self->io_ctx_.executor_);
                     boost::asio::dispatch(
                         ex_imm,
                         boost::asio::append(
@@ -542,13 +542,13 @@ public:
                                     }
 
                                     if (offset < total_elements && !self->closed_.load(std::memory_order_acquire) && (cancelled_type == boost::asio::cancellation_type::none)) {
-                                        auto ex = executor;
-                                        auto alloc = boost::asio::get_associated_allocator(
+                                        const auto ex = executor;
+                                        const auto alloc = boost::asio::get_associated_allocator(
                                             handler,
                                             boost::asio::recycling_allocator<void>{}
                                         );
                                         // ptr is not moved in case post fails
-                                        boost::asio::post(std::move(ex), boost::asio::bind_allocator(std::move(alloc), [ptr]() mutable {
+                                        boost::asio::post(std::move(ex), boost::asio::bind_allocator(std::move(alloc), [ptr] mutable {
                                             auto* c = ptr.get();
                                             c->operator()(std::move(ptr));
                                         }));
@@ -573,8 +573,8 @@ public:
                                 }
                             }
 
-                            auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
-                            auto alloc = boost::asio::get_associated_allocator(
+                            const auto ex = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
+                            const auto alloc = boost::asio::get_associated_allocator(
                                 handler,
                                 boost::asio::recycling_allocator<void>{}
                             );
@@ -582,7 +582,7 @@ public:
                             auto work_guard = std::move(this->work_guard_);
                             ptr.reset();
 
-                            boost::asio::dispatch(ex, boost::asio::bind_allocator(alloc, [handler = std::move(h), work_guard = std::move(work_guard), ec]() mutable {
+                            boost::asio::dispatch(ex, boost::asio::bind_allocator(alloc, [handler = std::move(h), work_guard = std::move(work_guard), ec] mutable {
                                 auto slot = boost::asio::get_associated_cancellation_slot(handler);
                                 if (slot.is_connected()) slot.clear();
                                 work_guard.reset();
@@ -591,13 +591,13 @@ public:
                         }
                     };
 
-                    auto alloc = boost::asio::get_associated_allocator(
+                    const auto alloc = boost::asio::get_associated_allocator(
                         handler,
                         boost::asio::recycling_allocator<void>{}
                     );
 
-                    auto ex = self->io_ctx_.make_strand();
-                    auto ex_user = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
+                    const auto ex = self->io_ctx_.make_strand();
+                    const auto ex_user = boost::asio::get_associated_executor(handler, self->io_ctx_.executor_);
 
                     auto state = std::allocate_shared<task_state>(alloc, 
                         std::move(handler), 
@@ -615,14 +615,14 @@ public:
                             if (type == boost::asio::cancellation_type::none) return;
 
                             if (std::shared_ptr<task_state> st = weak_state.lock()) {
-                                boost::asio::post(raw->executor, boost::asio::bind_allocator(alloc, [state = std::move(st), type]() {
+                                boost::asio::post(raw->executor, boost::asio::bind_allocator(alloc, [state = std::move(st), type] {
                                     state->cancelled_type = type;
                                 }));
                             }
                         });
                     }
 
-                    boost::asio::post(ex, boost::asio::bind_allocator(alloc, [state = std::move(state)]() mutable {
+                    boost::asio::post(ex, boost::asio::bind_allocator(alloc, [state = std::move(state)] mutable {
                         auto* c = state.get();
                         c->operator()(std::move(state));
                     }));

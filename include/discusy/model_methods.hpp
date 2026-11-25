@@ -36,7 +36,7 @@ inline void check_bot(const bot* b) {
     if (content_type.starts_with("image/") || content_type.starts_with("video/")) {
         return true;
     }
-    auto ends_with_ci = [](const std::string_view str, const std::string_view suffix) noexcept -> bool {
+    const auto ends_with_ci = [](const std::string_view str, const std::string_view suffix) noexcept -> bool {
         if (str.size() < suffix.size()) return false;
         const auto str_end = str.substr(str.size() - suffix.size());
         for (std::size_t i = 0; i < suffix.size(); ++i) {
@@ -314,7 +314,7 @@ auto discusy::message::message::delete_message(this auto&& self, CompletionToken
 }
 
 template <bool ReturnResult, typename CompletionToken>
-auto discusy::message::message::add_reaction(this auto&& self, std::string emoji, CompletionToken&& token) {
+auto discusy::message::message::add_reaction(this auto&& self, std::string emoji, CompletionToken&& token) { // NOLINT(performance-unnecessary-value-param)
     detail::check_bot(self.bot_ptr_);
     return self.bot_ptr_->api.template create_reaction<ReturnResult>(self.channel_id, self.id, std::move(emoji))(std::forward<CompletionToken>(token));
 }
@@ -448,7 +448,7 @@ auto interaction::interaction::edit_reply_embed(this auto&& self, discusy::messa
 }
 
 template <bool ReturnResult, typename CompletionToken>
-auto interaction::interaction::edit_reply_with(this auto&& self, api::webhook::edit_webhook_message msg, CompletionToken&& token) {
+auto interaction::interaction::edit_reply_with(this auto&& self, api::webhook::edit_webhook_message msg, CompletionToken&& token) { // NOLINT(performance-unnecessary-value-param)
     detail::check_bot(self.bot_ptr_);
     return self.bot_ptr_->api.template edit_original_interaction_response<ReturnResult>(self.token, std::move(msg))(std::forward<CompletionToken>(token));
 }
@@ -709,7 +709,7 @@ inline const std::vector<interaction::application_command_interaction_data_optio
     // at most two levels: group -> sub -> args
     for (int depth = 0; depth < 2; ++depth) {
         if (!scope) break;
-        const auto* nested = [&]() -> const application_command_interaction_data_option* {
+        const auto* nested = [&] -> const application_command_interaction_data_option* {
             for (const auto& o : *scope) {
                 if (o.type == discusy::application_commands::application_command_option_type::SUB_COMMAND ||
                     o.type == discusy::application_commands::application_command_option_type::SUB_COMMAND_GROUP) {

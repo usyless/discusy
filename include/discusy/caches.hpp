@@ -34,26 +34,26 @@ namespace discusy {
 
 enum class cache_flags : std::uint8_t {
     none              = 0,
-    guilds            = 1ULL << 0,
-    channels          = 1ULL << 1, // includes threads
-    members           = 1ULL << 2,
-    users             = 1ULL << 3,
-    roles             = 1ULL << 4,
-    emojis            = 1ULL << 5,
-    voice_states      = 1ULL << 6, // who is in which voice channel
+    guilds            = 1ULL << 0U,
+    channels          = 1ULL << 1U, // includes threads
+    members           = 1ULL << 2U,
+    users             = 1ULL << 3U,
+    roles             = 1ULL << 4U,
+    emojis            = 1ULL << 5U,
+    voice_states      = 1ULL << 6U, // who is in which voice channel
 
-    members_and_users = (1ULL << 2) | (1ULL << 3),
-    all               = (1ULL << 7) - 1,
+    members_and_users = (1ULL << 2U) | (1ULL << 3U),
+    all               = (1ULL << 7U) - 1,
 };
 
 namespace cache_detail {
 
 [[nodiscard]] constexpr std::uint64_t splitmix64(std::uint64_t x) noexcept {
-    x ^= x >> 30;
+    x ^= x >> 30U;
     x *= 0xbf58476d1ce4e5b9ULL;
-    x ^= x >> 27;
+    x ^= x >> 27U;
     x *= 0x94d049bb133111ebULL;
-    x ^= x >> 31;
+    x ^= x >> 31U;
     return x;
 }
 
@@ -68,7 +68,7 @@ struct guild_scoped_id {
 
     [[nodiscard]] friend constexpr std::size_t hash_value(const guild_scoped_id& k) noexcept {
         std::uint64_t h = (k.guild_id.value ^ 0x9e3779b97f4a7c15ULL) * 0xbf58476d1ce4e5b9ULL;
-        h ^= k.id.value + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        h ^= k.id.value + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
         return static_cast<std::size_t>(cache_detail::splitmix64(h));
     }
 };
@@ -150,7 +150,7 @@ public:
 
     // null if absent
     [[nodiscard]] ptr get(const Key& key) const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         const auto& key_idx = container_.template get<by_key>();
         const auto it = key_idx.find(key);
         return (it == key_idx.end()) ? ptr{} : it->value;
@@ -163,17 +163,17 @@ public:
     }
 
     [[nodiscard]] bool contains(const Key& key) const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         return container_.template get<by_key>().contains(key);
     }
 
     [[nodiscard]] std::size_t size() const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         return container_.size();
     }
 
     [[nodiscard]] bool empty() const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         return container_.empty();
     }
 
@@ -254,7 +254,7 @@ public:
     [[nodiscard]] std::vector<ptr> in_group(const group_key_type& group) const {
         std::vector<ptr> out;
         {
-            std::shared_lock lock{mtx_};
+            const std::shared_lock lock{mtx_};
             const auto& group_idx = container_.template get<by_group>();
             const auto [first, last] = group_idx.equal_range(group);
             if (first != last) {
@@ -284,7 +284,7 @@ public:
     }
 
     [[nodiscard]] std::size_t group_size(const group_key_type& group) const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         return container_.template get<by_group>().count(group);
     }
 
@@ -322,7 +322,7 @@ public:
 
         ptr old;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             insert_locked(key, std::move(value), group, old);
         }
     }
@@ -332,7 +332,7 @@ public:
     bool modify(const Key& key, F&& f) {
         ptr old;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             auto& key_idx = container_.template get<by_key>();
             const auto it = key_idx.find(key);
             if ((it == key_idx.end()) || !it->value) return false;
@@ -357,7 +357,7 @@ public:
     bool erase(const Key& key) {
         ptr old;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             auto& key_idx = container_.template get<by_key>();
             const auto it = key_idx.find(key);
             if (it == key_idx.end()) return false;
@@ -370,7 +370,7 @@ public:
     void erase_group(const group_key_type& group) {
         std::vector<ptr> dropped;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             erase_group_locked(group, dropped);
         }
     }
@@ -378,7 +378,7 @@ public:
     void clear() {
         container_t tmp;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             container_.swap(tmp);
         }
     }
@@ -429,7 +429,7 @@ private:
         if (!value) {
             container_t tmp;
             {
-                std::scoped_lock lock{mtx_};
+                const std::scoped_lock lock{mtx_};
                 enabled_.store(false, std::memory_order_release);
                 container_.swap(tmp);
             }
@@ -437,7 +437,7 @@ private:
             enabled_.store(true, std::memory_order_release);
         }
 
-        if (notify && on_enabled_change_) {
+        if (notify && on_enabled_change_ != nullptr) {
             on_enabled_change_(on_enabled_change_ctx_);
         }
     }
@@ -513,7 +513,7 @@ private:
 
         ptr old;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             if (!enabled_.load(std::memory_order_acquire)) return false;
             insert_locked(key, std::move(value), group, old);
         }
@@ -527,7 +527,7 @@ private:
 
         ptr old;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             if (!enabled_.load(std::memory_order_acquire)) return false;
             upsert_locked(key, group, std::forward<F>(f), old);
         }
@@ -539,7 +539,7 @@ private:
 
         std::vector<ptr> dropped;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             if (!enabled_.load(std::memory_order_acquire)) return false;
             erase_group_locked(group, dropped);
             if (!items.empty()) {
@@ -566,7 +566,7 @@ private:
 
         std::vector<ptr> dropped;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             if (!enabled_.load(std::memory_order_acquire)) return false;
             const auto needed = container_.size() + items.size();
             container_.template get<by_key>().reserve(needed);
@@ -590,7 +590,7 @@ private:
     void erase_groups_if(Pred&& pred) {
         std::vector<ptr> dropped;
         {
-            std::scoped_lock lock{mtx_};
+            const std::scoped_lock lock{mtx_};
             auto& group_idx = container_.template get<by_group>();
             for (auto it = group_idx.begin(); it != group_idx.end(); ) {
                 const auto group = it->group;
@@ -617,7 +617,7 @@ private:
     template <typename F>
     requires ( std::invocable<F&, const Key&, const ptr&> )
     void visit_group_locked(const group_key_type& group, F&& f) const {
-        std::shared_lock lock{mtx_};
+        const std::shared_lock lock{mtx_};
         const auto& group_idx = container_.template get<by_group>();
         const auto [first, last] = group_idx.equal_range(group);
         for (auto it = first; it != last; ++it) {
@@ -819,7 +819,7 @@ private:
         enabled_.store(value, std::memory_order_release);
         if (!value) clear();
 
-        if (notify && on_enabled_change_) {
+        if (notify && on_enabled_change_ != nullptr) {
             on_enabled_change_(on_enabled_change_ctx_);
         }
     }
@@ -1143,7 +1143,7 @@ public:
     }
 
     void attach() {
-        std::scoped_lock lock{listeners_mtx_};
+        const std::scoped_lock lock{listeners_mtx_};
         if (attached_.load(std::memory_order_acquire)) return;
         attached_.store(true, std::memory_order_release);
         try {
@@ -1156,7 +1156,7 @@ public:
     }
 
     void detach() noexcept {
-        std::scoped_lock lock{listeners_mtx_};
+        const std::scoped_lock lock{listeners_mtx_};
         attached_.store(false, std::memory_order_release);
         unregister_all_locked();
     }
@@ -1212,7 +1212,7 @@ private:
 
     void sync_listeners() {
         if (!attached_.load(std::memory_order_acquire)) return;
-        std::scoped_lock lock{listeners_mtx_};
+        const std::scoped_lock lock{listeners_mtx_};
         if (!attached_.load(std::memory_order_acquire)) return;
         sync_listeners_locked();
     }
@@ -1451,7 +1451,7 @@ private:
         if (channels.enabled()) {
             cache<snowflake, discusy::channel::channel, snowflake>::snapshot_t batch;
             batch.reserve(incoming.other.channels.size() + incoming.other.threads.size());
-            auto append_channel = [&](const discusy::channel::channel& ch) {
+            const auto append_channel = [&](const discusy::channel::channel& ch) {
                 auto copy = std::make_shared<discusy::channel::channel>(ch);
                 copy->guild_id = guild_id;
                 attach_bot(*copy, bot_ptr);

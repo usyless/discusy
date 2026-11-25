@@ -188,7 +188,7 @@ auto force_remake_commands(bot& bot, Token&& token) {
 
     for (const auto& channel : COMMAND_CHANNELS) {
         if (!channel.name || *channel.name == FIND_CHANNEL_NAME) continue;
-        if (is_empty_topic(channel.topic)) continue;
+        if (!channel.topic || is_empty_topic(channel.topic)) continue;
 
         commands.emplace_back(anywhere_slash(
             std::string{command_name_from_channel_name(*channel.name)}, *channel.topic));
@@ -204,7 +204,7 @@ static constexpr auto DUP_TIMEOUT = std::chrono::seconds{60};
 static size_t pick_image_index(const std::string* cmd_ptr, const snowflake user_id, const size_t total_images) {
     const auto now = std::chrono::steady_clock::now();
 
-    std::scoped_lock dup_lock{dup_mtx};
+    const std::scoped_lock dup_lock{dup_mtx};
 
     auto& tracker = prevent_duplicates[cmd_ptr];
     auto& user_map = tracker.user_map;
@@ -215,8 +215,8 @@ static size_t pick_image_index(const std::string* cmd_ptr, const snowflake user_
 
         if (now - q_time <= DUP_TIMEOUT) break;
 
-        if (const auto it = user_map.find(q_user_id); it != user_map.end()) {
-            if (now - it->second.last_use > DUP_TIMEOUT) user_map.erase(it);
+        if (const auto it = user_map.find(q_user_id); it != user_map.end() && now - it->second.last_use > DUP_TIMEOUT) {
+            user_map.erase(it);
         }
 
         expiry_queue.pop_front();
@@ -292,7 +292,7 @@ int main(int, char* argv[]) {
     }
 
     {
-    std::scoped_lock dup_lock{dup_mtx};
+    const std::scoped_lock dup_lock{dup_mtx};
     prevent_duplicates.reserve(::cache.command_images.size());
     }
 
@@ -348,7 +348,7 @@ int main(int, char* argv[]) {
 
                 const auto command_name = command_name_from_channel_name(*e.name);
                 if (command_name == FIND_COMMAND_NAME) {
-                    std::unique_lock lock(mtx);
+                    const std::unique_lock lock(mtx);
                     if (std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id) == COMMAND_CHANNELS.end()) {
                         COMMAND_CHANNELS.emplace_back(e);
                     }
@@ -357,7 +357,7 @@ int main(int, char* argv[]) {
 
                 bool is_full{false};
                 {
-                std::unique_lock lock(mtx);
+                const std::unique_lock lock(mtx);
                 if (COMMAND_CHANNELS.size() >= MAX_COMMAND_CHANNELS) {
                     is_full = true;
                 } else if (std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id) == COMMAND_CHANNELS.end()) {
@@ -380,13 +380,13 @@ int main(int, char* argv[]) {
 
                 if (!is_command_channel(e)) {
                     std::unique_lock lock(mtx);
-                    auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                    const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
                     if (channel_it != COMMAND_CHANNELS.end()) {
                         if (channel_it->name) {
                             const auto old_cmd = command_name_from_channel_name(*channel_it->name);
-                            if (auto it = ::cache.command_images.find(old_cmd); it != ::cache.command_images.end()) {
+                            if (const auto it = ::cache.command_images.find(old_cmd); it != ::cache.command_images.end()) {
                                 {
-                                    std::scoped_lock dup_lock{dup_mtx};
+                                    const std::scoped_lock dup_lock{dup_mtx};
                                     prevent_duplicates.erase(&it->first);
                                 }
                                 ::cache.command_images.erase(it);
@@ -404,8 +404,8 @@ int main(int, char* argv[]) {
 
                 const auto command_name = command_name_from_channel_name(*e.name);
                 if (command_name == FIND_COMMAND_NAME) {
-                    std::unique_lock lock(mtx);
-                    auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                    const std::unique_lock lock(mtx);
+                    const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
                     if (channel_it != COMMAND_CHANNELS.end()) {
                         *channel_it = e;
                     } else if (COMMAND_CHANNELS.size() < MAX_COMMAND_CHANNELS) {
@@ -417,7 +417,7 @@ int main(int, char* argv[]) {
                 const bool topic_empty_new = is_empty_topic(e.topic);
 
                 std::unique_lock lock(mtx);
-                auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
 
                 if (channel_it != COMMAND_CHANNELS.end()) {
                     const bool topic_empty_old = is_empty_topic(channel_it->topic);
@@ -441,10 +441,10 @@ int main(int, char* argv[]) {
                         if (channel_it->name) {
                             const auto old_cmd_name = command_name_from_channel_name(*channel_it->name);
                             if (old_cmd_name != command_name) {
-                                if (auto it = ::cache.command_images.find(old_cmd_name); it != ::cache.command_images.end()) {
+                                if (const auto it = ::cache.command_images.find(old_cmd_name); it != ::cache.command_images.end()) {
                                     ::cache.command_images[std::string{command_name}] = std::move(it->second);
                                     {
-                                        std::scoped_lock dup_lock{dup_mtx};
+                                        const std::scoped_lock dup_lock{dup_mtx};
                                         prevent_duplicates.erase(&it->first);
                                     }
                                     ::cache.command_images.erase(it);
@@ -485,7 +485,7 @@ int main(int, char* argv[]) {
 
                 bot.api.create_global_application_command<false>(
                     anywhere_slash(std::string{command_name}, *e.topic)
-                )([&bot, id = e.id, command_name = std::string{command_name}](const auto& resp_ec, auto resp) {
+                )([&bot, id = e.id, command_name = std::string{command_name}](const auto& resp_ec, const auto& resp) {
                     const channel::channel channel{
                         .id = id,
                         .bot_ptr_ = &bot,
@@ -493,12 +493,12 @@ int main(int, char* argv[]) {
 
                     if (resp_ec || !resp) {
                         {
-                        std::unique_lock lock(mtx);
-                        auto channel_it = std::ranges::find(COMMAND_CHANNELS, id, &channel::channel::id);
+                        const std::unique_lock lock(mtx);
+                        const auto channel_it = std::ranges::find(COMMAND_CHANNELS, id, &channel::channel::id);
                         if (channel_it != COMMAND_CHANNELS.end()) COMMAND_CHANNELS.erase(channel_it);
-                        if (auto it = ::cache.command_images.find(command_name); it != ::cache.command_images.end()) {
+                        if (const auto it = ::cache.command_images.find(command_name); it != ::cache.command_images.end()) {
                             {
-                            std::scoped_lock dup_lock{dup_mtx};
+                            const std::scoped_lock dup_lock{dup_mtx};
                             prevent_duplicates.erase(&it->first);
                             }
                             ::cache.command_images.erase(it);
@@ -522,7 +522,7 @@ int main(int, char* argv[]) {
                 const auto command_name = command_name_from_channel_name(*e.name);
                 {
                 std::unique_lock lock(mtx);
-                auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
+                const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.id, &channel::channel::id);
 
                 if (channel_it == COMMAND_CHANNELS.end()) return;
 
@@ -537,9 +537,9 @@ int main(int, char* argv[]) {
                     return;
                 }
 
-                if (auto it = cache.command_images.find(command_name); it != cache.command_images.end()) {
+                if (const auto it = cache.command_images.find(command_name); it != cache.command_images.end()) {
                     {
-                    std::scoped_lock dup_lock{dup_mtx};
+                    const std::scoped_lock dup_lock{dup_mtx};
                     prevent_duplicates.erase(&it->first);
                     }
                     cache.command_images.erase(it);
@@ -556,7 +556,7 @@ int main(int, char* argv[]) {
 
                 {
                 std::unique_lock lock(mtx);
-                auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.message.channel_id, &channel::channel::id);
+                const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.message.channel_id, &channel::channel::id);
 
                 if (channel_it == COMMAND_CHANNELS.end() || !channel_it->name) return;
 
@@ -575,7 +575,10 @@ int main(int, char* argv[]) {
                     bool no_duplicate_name = true;
                     ulp::str::split_by_for_each(e.message.content, ',', [&no_duplicate_name, &items](const std::string_view _item) {
                         auto item = preprocess_f_keyword(_item);
-                        if (!(no_duplicate_name &= (!cache.f_command_images.contains(item)))) return false;
+                        if (cache.f_command_images.contains(item)) {
+                            no_duplicate_name = false;
+                            return false;
+                        }
                         items.emplace_back(std::move(item));
                         return true;
                     });
@@ -615,8 +618,8 @@ int main(int, char* argv[]) {
 
                 std::string channel_name;
                 {
-                std::shared_lock lock{mtx};
-                auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.channel_id, &channel::channel::id);
+                const std::shared_lock lock{mtx};
+                const auto channel_it = std::ranges::find(COMMAND_CHANNELS, e.channel_id, &channel::channel::id);
 
                 if (channel_it == COMMAND_CHANNELS.end()) return;
                 
@@ -649,7 +652,7 @@ int main(int, char* argv[]) {
                     const auto command_name = command_name_from_channel_name(channel_name);
 
                     {
-                    std::unique_lock lock{mtx};
+                    const std::unique_lock lock{mtx};
                     if (command_name == FIND_COMMAND_NAME) {
                         if (msg.content.empty() || (msg.attachments.size() > 1)) return;
 
@@ -658,19 +661,19 @@ int main(int, char* argv[]) {
                         });
 
                     } else {
-                        auto vec = cache.command_images.find(command_name);
+                        const auto vec = cache.command_images.find(command_name);
 
                         if (vec == cache.command_images.end()) {
                             goto cleanup;
                         }
 
                         {
-                        std::scoped_lock dup_lock{dup_mtx};
+                        const std::scoped_lock dup_lock{dup_mtx};
                         prevent_duplicates.erase(&vec->first);
                         }
 
                         for (const auto& attachment : msg.attachments) {
-                            auto img_it = std::ranges::find(vec->second, fix_attachment_url(attachment));
+                            const auto img_it = std::ranges::find(vec->second, fix_attachment_url(attachment));
                             if (img_it == vec->second.end()) continue;
                             vec->second.erase(img_it);
                         }
@@ -697,7 +700,7 @@ int main(int, char* argv[]) {
                     std::vector<application_commands::application_command_option_choice> choices;
 
                     {
-                    std::shared_lock lock{mtx};
+                    const std::shared_lock lock{mtx};
                     for (const auto& [keyword, _] : cache.f_command_images) {
                         if ((!userinput.empty()) && keyword.contains(userinput)) continue;
 
@@ -734,7 +737,7 @@ int main(int, char* argv[]) {
                     std::optional<api::interaction::interaction_callback_data_message> msg;
 
                     {
-                    std::shared_lock lock(mtx);
+                    const std::shared_lock lock(mtx);
                     if (const auto it = cache.f_command_images.find(*keyword); it != cache.f_command_images.end()) {
                         msg = get_send_message(it->second);
                     }
@@ -753,7 +756,7 @@ int main(int, char* argv[]) {
 
                 {
                 std::shared_lock lock(mtx);
-                auto command_it = cache.command_images.find(command_name);
+                const auto command_it = cache.command_images.find(command_name);
 
                 if (command_it == cache.command_images.end()) {
                     lock.unlock();

@@ -70,7 +70,7 @@ public:
                 static_cast<void*>(obj),
                 [](void* p, Args... args) {
                     (static_cast<Obj*>(p)->*Method)(std::forward<Args>(args)...);
-                }
+                },
             };
         }
     };

@@ -32,7 +32,7 @@ TEST_CASE("Components: JSON serialization and deserialization", "[components][js
             "Click Me",
             "btn_1"
         );
-        discusy::components::action_row_component arc = btn;
+        const discusy::components::action_row_component arc = btn;
 
         std::string json_str;
         REQUIRE_FALSE(discusy::json::write(arc, json_str));
@@ -57,7 +57,7 @@ TEST_CASE("Components: JSON serialization and deserialization", "[components][js
             discusy::components::button_style::Success, "OK", "btn_ok"));
         row.add_string_select(discusy::components::StringSelect::create("select_1"));
 
-        discusy::components::component comp = row;
+        const discusy::components::component comp = row;
         std::string json_str;
         REQUIRE_FALSE(discusy::json::write(comp, json_str));
 
@@ -163,7 +163,7 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
             "Click Me",
             "btn_1"
         );
-        discusy::components::action_row_component arc = btn;
+        const discusy::components::action_row_component arc = btn;
 
         std::string encoded;
         REQUIRE_FALSE(glz::write_etf(arc, encoded));
@@ -186,7 +186,7 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
             discusy::components::button_style::Success, "OK", "btn_ok"));
         row.add_string_select(discusy::components::StringSelect::create("select_1"));
 
-        discusy::components::component comp = row;
+        const discusy::components::component comp = row;
         std::string comp_encoded;
         REQUIRE_FALSE(glz::write_etf(comp, comp_encoded));
 
@@ -213,7 +213,7 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
     SECTION("Component interaction response with type field (ETF)") {
         auto ir = discusy::components::StringSelectInteractionResponse::create(
             1, "my_select", discusy::make_vector<std::string>("val1", "val2"));
-        discusy::interaction::component_interaction_response cir = ir;
+        const discusy::interaction::component_interaction_response cir = ir;
 
         std::string cir_encoded;
         REQUIRE_FALSE(glz::write_etf(cir, cir_encoded));
@@ -253,12 +253,12 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
         REQUIRE_FALSE(glz::write_etf(inv, inv_encoded));
 
         discusy::components::action_row_component bad_arc;
-        auto ec = glz::read_etf(bad_arc, inv_encoded);
+        const auto ec = glz::read_etf(bad_arc, inv_encoded);
         CHECK(bool(ec));
     }
 
     SECTION("Thread-local scratch buffer serialization") {
-        auto btn = discusy::components::Button::create(
+        const auto btn = discusy::components::Button::create(
             discusy::components::button_style::Secondary,
             "Scratch Test",
             "btn_scratch"

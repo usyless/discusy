@@ -21,9 +21,9 @@ inline void nonce(std::span<char, 32> str) noexcept {
     using State = std::array<std::uint64_t, 2>;
     static std::atomic_uint64_t thread_counter{0};
 
-    thread_local auto state = []() -> State {
+    thread_local auto state = [] -> State {
         std::random_device rd;
-        return State{0, ((static_cast<std::uint64_t>(rd()) << 32) | rd()) ^ (++thread_counter)};
+        return State{0, ((static_cast<std::uint64_t>(rd()) << 32U) | rd()) ^ (++thread_counter)};
     }();
 
     if (++state[0] == 0) {
@@ -32,12 +32,12 @@ inline void nonce(std::span<char, 32> str) noexcept {
 
     static constexpr std::array<char, 16> hex_digits{
         '0', '1', '2', '3', '4', '5', '6', '7',
-        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
     };
     for (std::size_t i = 0; i < 2; ++i) {
         const auto val = state[i];
         for (std::size_t j = 0; j < 16; ++j) {
-            str[i * 16 + j] = hex_digits[(val >> (j * 4)) & 0x0F];
+            str[((i * 16)) + j] = hex_digits[(val >> (j * 4U)) & 0x0FU];
         }
     }
 }
@@ -50,9 +50,9 @@ public:
 
     [[nodiscard]] constexpr int64_t next() noexcept {
         uint64_t z = (state += 0x9e3779b97f4a7c15ULL);
-        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-        return static_cast<int64_t>(z ^ (z >> 31));
+        z = (z ^ (z >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+        z = (z ^ (z >> 27U)) * 0x94d049bb133111ebULL;
+        return static_cast<int64_t>(z ^ (z >> 31U));
     }
 };
 

@@ -408,7 +408,7 @@ struct http_client_callback::request_state {
         finish(std::move(self_ptr), boost::asio::error::operation_aborted);
     }
 
-    void init(std::shared_ptr<request_state> self_ptr) {
+    void init(std::shared_ptr<request_state> self_ptr) const {
         const auto alloc = allocator;
         const auto strand = strand_;
         boost::asio::post(strand, boost::asio::bind_allocator(alloc, [self_ptr = std::move(self_ptr)] mutable {
@@ -422,7 +422,7 @@ struct http_client_callback::request_state {
         log::Logger{}("Making request to {} with body {} and headers {}", url, body, req_headers);
         #endif
 
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         if (is_api) {
             route_key = http::generate_route_key(current_method, url);
@@ -440,9 +440,11 @@ struct http_client_callback::request_state {
                                     auto* ptr = self_ptr.get();
                                     if (ec) {
                                         if (ptr->is_cancelled() || ec == boost::asio::error::operation_aborted) {
-                                            return ptr->operation_cancelled(std::move(self_ptr));
+                                            ptr->operation_cancelled(std::move(self_ptr));
+                                            return;
                                         }
-                                        return ptr->finish(std::move(self_ptr), ec);
+                                        ptr->finish(std::move(self_ptr), ec);
+                                        return;
                                     }
                                     ptr->step_loop_start(std::move(self_ptr));
                                 }
@@ -487,14 +489,14 @@ struct http_client_callback::request_state {
     }
 
     void step_loop_start(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         close_stream_immediately();
         step_acquire_connection(std::move(self_ptr));
     }
 
     void step_acquire_connection(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         if (!skip_pool) {
             if (auto conn = self->checkout_connection(host, port, is_ssl)) {
@@ -508,7 +510,8 @@ struct http_client_callback::request_state {
 
                 auto new_strand = http::get_stream_executor(*stream);
                 if (new_strand == strand_) {
-                    return step_write_request(std::move(self_ptr));
+                    step_write_request(std::move(self_ptr));
+                    return;
                 }
 
                 // Rebind resolver and timer onto the pooled stream's strand so all I/O
@@ -548,7 +551,8 @@ struct http_client_callback::request_state {
             // RFC 6066 §3: SNI HostName must only be set for DNS hostnames, not IP literals.
             if (host_is_name && !SSL_set_tlsext_host_name(ssl_str.native_handle(), host.c_str())) {
                 const boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
-                return finish(std::move(self_ptr), ec ? ec : boost::asio::ssl::error::unspecified_system_error);
+                finish(std::move(self_ptr), ec ? ec : boost::asio::ssl::error::unspecified_system_error);
+                return;
             }
 
             ssl_str.set_verify_callback(boost::asio::ssl::host_name_verification(host));
@@ -560,7 +564,7 @@ struct http_client_callback::request_state {
     }
 
     void step_resolve(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         resolver.async_resolve(
             host,
@@ -575,15 +579,18 @@ struct http_client_callback::request_state {
                             auto* ptr = self_ptr.get();
                             if (res_ec) {
                                 if (ptr->is_cancelled()) {
-                                    return ptr->operation_cancelled(std::move(self_ptr));
+                                    ptr->operation_cancelled(std::move(self_ptr));
+                                    return;
                                 }
                                 if (res_ec == boost::asio::error::operation_aborted) {
-                                    return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                    ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                    return;
                                 }
                                 #ifdef DISCUSY_LOGGING
                                 log::Logger{}("[http_client] resolve error for {}: {} ({})", ptr->host, res_ec.message(), res_ec.value());
                                 #endif
-                                return ptr->finish(std::move(self_ptr), res_ec);
+                                ptr->finish(std::move(self_ptr), res_ec);
+                                return;
                             }
                             ptr->step_connect(std::move(self_ptr), results);
                         }
@@ -594,7 +601,7 @@ struct http_client_callback::request_state {
     }
 
     void step_connect(std::shared_ptr<request_state> self_ptr, const boost::asio::ip::tcp::resolver::results_type& results) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         auto& lowest = http::get_lowest_layer(*stream);
         lowest.expires_after(opts.request_timeout);
@@ -609,15 +616,18 @@ struct http_client_callback::request_state {
                         auto* ptr = self_ptr.get();
                         if (conn_ec) {
                             if (ptr->is_cancelled() || conn_ec == boost::asio::error::operation_aborted) {
-                                return ptr->operation_cancelled(std::move(self_ptr));
+                                ptr->operation_cancelled(std::move(self_ptr));
+                                return;
                             }
                             if (conn_ec == boost::beast::error::timeout) {
-                                return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                return;
                             }
                             #ifdef DISCUSY_LOGGING
                             log::Logger{}("[http_client] connect error to {}:{}: {} ({})", ptr->host, ptr->port, conn_ec.message(), conn_ec.value());
                             #endif
-                            return ptr->finish(std::move(self_ptr), conn_ec);
+                            ptr->finish(std::move(self_ptr), conn_ec);
+                            return;
                         }
                         boost::system::error_code opt_ec;
                         auto& sock = http::get_lowest_layer(*ptr->stream).socket();
@@ -635,7 +645,7 @@ struct http_client_callback::request_state {
     }
 
     void step_handshake(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         auto& lowest = http::get_lowest_layer(*stream);
         lowest.expires_after(opts.request_timeout);
@@ -651,15 +661,18 @@ struct http_client_callback::request_state {
                         auto* ptr = self_ptr.get();
                         if (hs_ec) {
                             if (ptr->is_cancelled() || hs_ec == boost::asio::error::operation_aborted) {
-                                return ptr->operation_cancelled(std::move(self_ptr));
+                                ptr->operation_cancelled(std::move(self_ptr));
+                                return;
                             }
                             if (hs_ec == boost::beast::error::timeout) {
-                                return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                                return;
                             }
                             #ifdef DISCUSY_LOGGING
                             log::Logger{}("[http_client] handshake error with {}: {} ({})", ptr->host, hs_ec.message(), hs_ec.value());
                             #endif
-                            return ptr->finish(std::move(self_ptr), hs_ec);
+                            ptr->finish(std::move(self_ptr), hs_ec);
+                            return;
                         }
                         ptr->step_write_request(std::move(self_ptr));
                     }
@@ -686,7 +699,7 @@ struct http_client_callback::request_state {
     }
 
     void step_write_request(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         if (!req) {
             req.emplace(current_method, target, 11);
@@ -730,17 +743,21 @@ struct http_client_callback::request_state {
             auto* ptr = self_ptr.get();
             if (write_ec) {
                 if (ptr->is_cancelled() || write_ec == boost::asio::error::operation_aborted) {
-                    return ptr->operation_cancelled(std::move(self_ptr));
+                    ptr->operation_cancelled(std::move(self_ptr));
+                    return;
                 }
                 if (write_ec == boost::beast::error::timeout) {
-                    return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    return;
                 }
                 if (ptr->is_reused && is_stale_write_error(write_ec)) {
                     ptr->close_stream_immediately();
                     ptr->skip_pool = true;
-                    return ptr->step_acquire_connection(std::move(self_ptr));
+                    ptr->step_acquire_connection(std::move(self_ptr));
+                    return;
                 }
-                return ptr->finish(std::move(self_ptr), write_ec);
+                ptr->finish(std::move(self_ptr), write_ec);
+                return;
             }
             ptr->step_read_response(std::move(self_ptr));
         };
@@ -758,7 +775,7 @@ struct http_client_callback::request_state {
     }
 
     void step_read_response(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         auto& lowest = http::get_lowest_layer(*stream);
         lowest.expires_after(opts.request_timeout);
@@ -773,17 +790,21 @@ struct http_client_callback::request_state {
             auto* ptr = self_ptr.get();
             if (read_ec) {
                 if (ptr->is_cancelled() || read_ec == boost::asio::error::operation_aborted) {
-                    return ptr->operation_cancelled(std::move(self_ptr));
+                    ptr->operation_cancelled(std::move(self_ptr));
+                    return;
                 }
                 if (read_ec == boost::beast::error::timeout) {
-                    return ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    ptr->finish(std::move(self_ptr), boost::asio::error::timed_out);
+                    return;
                 }
                 if (ptr->is_reused && !ptr->parser->got_some() && is_stale_read_error(read_ec)) {
                     ptr->close_stream_immediately();
                     ptr->skip_pool = true;
-                    return ptr->step_acquire_connection(std::move(self_ptr));
+                    ptr->step_acquire_connection(std::move(self_ptr));
+                    return;
                 }
-                return ptr->finish(std::move(self_ptr), read_ec);
+                ptr->finish(std::move(self_ptr), read_ec);
+                return;
             }
             ptr->step_handle_response(std::move(self_ptr));
         };
@@ -840,8 +861,8 @@ struct http_client_callback::request_state {
     }
 
     void step_handle_response(std::shared_ptr<request_state> self_ptr) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
-        if (!parser) return finish(std::move(self_ptr), boost::asio::error::fault);
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
+        if (!parser) { finish(std::move(self_ptr), boost::asio::error::fault); return; }
 
         auto res = parser->release();
         const auto status = res.result_int();
@@ -857,14 +878,16 @@ struct http_client_callback::request_state {
                     if (resolved_url.resolve(*loc_ref)) {
                         auto next_url = http::parse_http_url(resolved_url);
                         if (!next_url) {
-                            return finish(std::move(self_ptr), boost::asio::error::invalid_argument);
+                            finish(std::move(self_ptr), boost::asio::error::invalid_argument);
+                            return;
                         }
 
                         if (is_ssl && !next_url->is_ssl && !opts.allow_http_downgrade) {
                             #ifdef DISCUSY_LOGGING
                             log::Logger{}("[http_client] Prevented HTTPS to HTTP downgrade redirect from {} to {}", url, resolved_url.buffer());
                             #endif
-                            return finish(std::move(self_ptr), boost::asio::error::no_permission);
+                            finish(std::move(self_ptr), boost::asio::error::no_permission);
+                            return;
                         }
 
                         const bool origin_changed =
@@ -951,7 +974,8 @@ struct http_client_callback::request_state {
                         req.reset();
                         skip_pool = false;
 
-                        return step_acquire_connection(std::move(self_ptr));
+                        step_acquire_connection(std::move(self_ptr));
+                        return;
                     }
                 }
             }
@@ -1029,7 +1053,7 @@ struct http_client_callback::request_state {
     }
 
     void step_wait_429(std::shared_ptr<request_state> self_ptr, const std::chrono::steady_clock::duration delay) {
-        if (is_cancelled()) return operation_cancelled(std::move(self_ptr));
+        if (is_cancelled()) { operation_cancelled(std::move(self_ptr)); return; }
 
         timer.expires_after(delay);
         timer.async_wait(
@@ -1041,9 +1065,11 @@ struct http_client_callback::request_state {
                         auto* ptr = self_ptr.get();
                         if (ec) {
                             if (ptr->is_cancelled() || ec == boost::asio::error::operation_aborted) {
-                                return ptr->operation_cancelled(std::move(self_ptr));
+                                ptr->operation_cancelled(std::move(self_ptr));
+                                return;
                             }
-                            return ptr->finish(std::move(self_ptr), ec);
+                            ptr->finish(std::move(self_ptr), ec);
+                            return;
                         }
                         ptr->skip_pool = false;
                         ptr->step_loop_start(std::move(self_ptr));

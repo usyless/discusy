@@ -38,6 +38,6 @@ TEST_CASE("Multipart: Multipart MIME boundary and header construction", "[multip
     CHECK(body.contains("Content-Type: image/png\r\n\r\n"));
 
     // Check terminating boundary
-    std::string expected_terminator = std::string(discusy::multipart::BOUNDARY) + "--\r\n";
+    const std::string expected_terminator = std::string(discusy::multipart::BOUNDARY) + "--\r\n";
     CHECK(body.ends_with(expected_terminator));
 }

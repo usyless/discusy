@@ -68,7 +68,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t uncompressed_size = read_be<uint32_t>(it);
+            const auto uncompressed_size = read_be<uint32_t>(it);
             it += 4;
             if (uncompressed_size == 0) [[unlikely]] {
                ctx.error = error_code::syntax_error;
@@ -88,7 +88,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint16_t len = read_be<uint16_t>(it);
+            const auto len = read_be<uint16_t>(it);
             it += 2;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -116,7 +116,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t len = read_be<uint32_t>(it);
+            const auto len = read_be<uint32_t>(it);
             it += 4;
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -130,7 +130,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t len = read_be<uint32_t>(it);
+            const auto len = read_be<uint32_t>(it);
             it += 5; // 4 bytes len + 1 byte bits
             if (static_cast<size_t>(end - it) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -157,7 +157,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t n = read_be<uint32_t>(it);
+            const auto n = read_be<uint32_t>(it);
             it += 4;
             if (end - it < 1 || static_cast<size_t>(end - it - 1) < n) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -191,7 +191,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t arity = read_be<uint32_t>(it);
+            const auto arity = read_be<uint32_t>(it);
             it += 4;
             if (arity > static_cast<size_t>(end - it)) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -208,7 +208,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t len = read_be<uint32_t>(it);
+            const auto len = read_be<uint32_t>(it);
             it += 4;
             if (end - it < 1 || static_cast<size_t>(end - it - 1) < len) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -227,7 +227,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t arity = read_be<uint32_t>(it);
+            const auto arity = read_be<uint32_t>(it);
             it += 4;
             if (arity > static_cast<size_t>(end - it) / 2) [[unlikely]] {
                ctx.error = error_code::unexpected_end;
@@ -264,7 +264,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint16_t n = read_be<uint16_t>(it);
+            const auto n = read_be<uint16_t>(it);
             it += 2;
             op<Opts>(ctx, it, end); // node
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
@@ -280,7 +280,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint16_t n = read_be<uint16_t>(it);
+            const auto n = read_be<uint16_t>(it);
             it += 2;
             op<Opts>(ctx, it, end); // node
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;
@@ -354,7 +354,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t total_size = read_be<uint32_t>(it);
+            const auto total_size = read_be<uint32_t>(it);
             it += 4;
             if (total_size < 4) [[unlikely]] {
                ctx.error = error_code::syntax_error;
@@ -373,7 +373,7 @@ namespace glz
                ctx.error = error_code::unexpected_end;
                return;
             }
-            const uint32_t num_free = read_be<uint32_t>(it);
+            const auto num_free = read_be<uint32_t>(it);
             it += 4;
             op<Opts>(ctx, it, end); // Pid
             if (static_cast<bool>(ctx.error)) [[unlikely]] return;

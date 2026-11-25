@@ -52,7 +52,7 @@ int main() {
         // Use std::call_once to protect against potential duplicate invocation during reconnects
         static std::once_flag flag;
 
-        std::call_once(flag, [&bot, &me]() {
+        std::call_once(flag, [&bot, &me] {
             std::println("Logged in as {} (ID: {})", me.username, me.id);
             std::println("Registering slash commands...");
 
@@ -102,7 +102,7 @@ int main() {
             }
             else if (cmd->name == "select") {
                 // Construct a StringSelect menu with a unique custom ID
-                auto current_id = std::format("favorite_language{}", custom_id_counter.fetch_add(1));
+                const auto current_id = std::format("favorite_language{}", custom_id_counter.fetch_add(1));
                 auto select = h::string_select(current_id, make_vector(
                     h::select_option("C++", "cpp", "Fast, modern, systems programming"),
                     h::select_option("Python", "python", "Readable and versatile"),

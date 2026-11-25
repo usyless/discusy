@@ -28,6 +28,8 @@ Checks: >
   -readability-identifier-naming,
   -readability-redundant-member-init,
   -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -readability-trailing-comma,
   -readability-avoid-nested-conditional-operator
 
 WarningsAsErrors: ''

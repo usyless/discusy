@@ -19,10 +19,10 @@ TEST_CASE("Cache: Grouped cache insertion, querying, and unlinking", "[cache]") 
     discusy::cache<discusy::snowflake, test_entity, discusy::snowflake> cache;
     cache.set_enabled(true);
 
-    discusy::snowflake g1{100};
-    discusy::snowflake g2{200};
-    discusy::snowflake item_a{1};
-    discusy::snowflake item_b{2};
+    const discusy::snowflake g1{100};
+    const discusy::snowflake g2{200};
+    const discusy::snowflake item_a{1};
+    const discusy::snowflake item_b{2};
 
     // Insert into group 1
     cache.insert(item_a, test_entity{.id=item_a, .name="alpha", .counter=10}, g1);
@@ -45,7 +45,7 @@ TEST_CASE("Cache: Grouped cache insertion, querying, and unlinking", "[cache]") 
     CHECK(cache.get(item_a)->name == "alpha-moved");
 
     // Modify in place
-    bool modified = cache.modify(item_a, [](test_entity& e) {
+    bool const modified = cache.modify(item_a, [](test_entity& e) {
         e.counter += 5;
     });
     CHECK(modified);
@@ -73,7 +73,7 @@ TEST_CASE("Cache: Null ptr insertion maintains invariants", "[cache]") {
 
     grouped.insert(k1, grouped_t::ptr{}, g1);
     CHECK(grouped.empty());
-    CHECK(grouped.size() == 0);
+    CHECK(grouped.empty());
     CHECK(grouped.group_size(g1) == 0);
     CHECK_FALSE(grouped.contains(k1));
 
@@ -81,20 +81,20 @@ TEST_CASE("Cache: Null ptr insertion maintains invariants", "[cache]") {
     CHECK(grouped.size() == 1);
     grouped.insert(k1, grouped_t::ptr{}, g1);
     CHECK(grouped.empty());
-    CHECK(grouped.size() == 0);
+    CHECK(grouped.empty());
     CHECK(grouped.group_size(g1) == 0);
     CHECK_FALSE(grouped.contains(k1));
 
     flat.insert(k1, flat_t::ptr{});
     CHECK(flat.empty());
-    CHECK(flat.size() == 0);
+    CHECK(flat.empty());
     CHECK_FALSE(flat.contains(k1));
 
     flat.insert(k1, test_entity{.id=k1, .name="live", .counter=1});
     CHECK(flat.size() == 1);
     flat.insert(k1, flat_t::ptr{});
     CHECK(flat.empty());
-    CHECK(flat.size() == 0);
+    CHECK(flat.empty());
     CHECK_FALSE(flat.contains(k1));
 }
 
@@ -147,7 +147,7 @@ TEST_CASE("Cache: Concurrent ungrouped upsert exact-once under contention", "[ca
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&]() {
+        threads.emplace_back([&] {
             for (int i = 0; i < iters_per_thread; ++i) {
                 cache.upsert(key, [&](test_entity& e) {
                     invocations.fetch_add(1, std::memory_order_relaxed);
@@ -166,8 +166,8 @@ TEST_CASE("Cache: Concurrent ungrouped upsert exact-once under contention", "[ca
 TEST_CASE("Cache: Required intents calculation", "[cache]") {
     using namespace discusy;
 
-    auto flags_all = cache_flags::all;
-    auto intents_all = cache_manager::required_intents(flags_all);
+    const auto flags_all = cache_flags::all;
+    const auto intents_all = cache_manager::required_intents(flags_all);
 
     // Verify guild, members, voice state, and emoji intents are required when all caches enabled
     CHECK(contains_bit(intents_all, intent::guilds));
@@ -176,7 +176,7 @@ TEST_CASE("Cache: Required intents calculation", "[cache]") {
     CHECK(contains_bit(intents_all, intent::guild_voice_states));
 
     // When only guilds flag is set, only intent::guilds is needed
-    auto intents_guilds = cache_manager::required_intents(cache_flags::guilds);
+    const auto intents_guilds = cache_manager::required_intents(cache_flags::guilds);
     CHECK(intents_guilds == intent::guilds);
 }
 
@@ -249,8 +249,8 @@ TEST_CASE("Cache manager: Guild create, ready purge without shard/guilds, and vo
     mgr.enable(cache_flags::all);
     mgr.attach();
 
-    const snowflake g1{1ULL << 22};
-    const snowflake g2{2ULL << 22};
+    const snowflake g1{1ULL << 22U};
+    const snowflake g2{2ULL << 22U};
     const snowflake dm_ch{9001};
     const snowflake vc1{3001};
     const snowflake vc2{3002};
@@ -261,7 +261,7 @@ TEST_CASE("Cache manager: Guild create, ready purge without shard/guilds, and vo
     cbs.on_channel_create.fire(channel::channel::create(dm_ch, channel::channel_type::DM));
 
     // Populate two guilds via GUILD_CREATE
-    auto make_guild_create = [&](snowflake gid, snowflake ch_id, snowflake user_id, snowflake voice_ch) {
+    const auto make_guild_create = [&](snowflake gid, snowflake ch_id, snowflake user_id, snowflake voice_ch) {
         recieve_event::guild_create_struct gc{};
         gc.guild = guild::guild::create(gid, "guild");
         gc.guild.roles.push_back(permissions::role::create(snowflake{gid.value + 1}, "role"));
@@ -341,7 +341,7 @@ TEST_CASE("Cache manager: Concurrent event writes and disable races leave no sta
 
     std::atomic<bool> stop{false};
 
-    std::thread writer([&]() {
+    std::thread writer([&] {
         for (std::uint64_t i = 1; i <= 500; ++i) {
             recieve_event::user_update u{};
             u.id = snowflake{i};
@@ -355,7 +355,7 @@ TEST_CASE("Cache manager: Concurrent event writes and disable races leave no sta
         }
     });
 
-    std::thread toggler([&]() {
+    std::thread toggler([&] {
         for (int i = 0; i < 60; ++i) {
             mgr.enable(cache_flags::users | cache_flags::channels);
             std::this_thread::yield();
@@ -363,7 +363,7 @@ TEST_CASE("Cache manager: Concurrent event writes and disable races leave no sta
         }
     });
 
-    std::thread runner([&]() {
+    std::thread runner([&] {
         while (!stop.load(std::memory_order_acquire)) {
             io_ctx->poll();
             std::this_thread::yield();
