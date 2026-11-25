@@ -23,15 +23,19 @@ class bot;
 
 struct gateway_callbacks {
     discusy::ctx::io_context& io_ctx_;
-    discusy::bot* bot_ptr_{nullptr};
+    std::atomic<discusy::bot*> bot_ptr_{nullptr};
 
     explicit gateway_callbacks(discusy::ctx::io_context& ctx) noexcept : io_ctx_{ctx} {}
 
     void set_bot(bot* b) noexcept {
-        bot_ptr_ = b;
+        bot_ptr_.store(b, std::memory_order_release);
 #define DISCUSY_X(UPPER, LOWER) on_##LOWER.set_bot(b);
         DISCORD_GATEWAY_EVENTS
 #undef DISCUSY_X
+    }
+
+    [[nodiscard]] bot* get_bot() const noexcept {
+        return bot_ptr_.load(std::memory_order_acquire);
     }
 
 #define DISCUSY_X(UPPER, LOWER) Callback<discusy::recieve_event::LOWER> on_##LOWER{io_ctx_};

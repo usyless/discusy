@@ -44,6 +44,9 @@
 #include "http_api.hpp"
 #include "shard.hpp"
 #include "asio_helpers.hpp"
+#ifndef DISCUSY_NO_CACHES
+#include "caches.hpp" // IWYU pragma: export
+#endif
 
 #include "api_constants.hpp" // IWYU pragma: export
 #include <discusy/version.hpp> // IWYU pragma: export
@@ -1424,9 +1427,5 @@ public:
 }
 
 #include "model_methods.hpp" // IWYU pragma: keep
-
-#ifndef DISCUSY_NO_CACHES
-#include "caches.hpp" // IWYU pragma: export
-#endif
 
 #include "end_macros.hpp" // IWYU pragma: keep
