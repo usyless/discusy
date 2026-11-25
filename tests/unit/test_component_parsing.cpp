@@ -294,3 +294,35 @@ TEST_CASE("Components: ETF serialization and deserialization", "[components][etf
         CHECK(*etf_view == etf_out);
     }
 }
+
+TEST_CASE("Embed: audio type and embed_audio JSON/ETF roundtrip", "[embed][json][etf]") {
+    std::string raw_json = R"({"type":"audio","url":"https://example.com/track.mp3","audio":{"url":"https://example.com/track.mp3","proxy_url":"https://media.discordapp.net/external/abc/https/example.com/track.mp3","content_type":"audio/mpeg","description":"Sample audio clip"}})";
+
+    discusy::message::embed parsed{};
+    REQUIRE_FALSE(discusy::json::parse(parsed, raw_json));
+    REQUIRE(parsed.type.has_value());
+    CHECK(*parsed.type == discusy::message::embed_type::audio);
+    CHECK(parsed.url == "https://example.com/track.mp3");
+    REQUIRE(parsed.audio.has_value());
+    CHECK(parsed.audio->url == "https://example.com/track.mp3");
+    CHECK(parsed.audio->proxy_url == "https://media.discordapp.net/external/abc/https/example.com/track.mp3");
+    CHECK(parsed.audio->content_type == "audio/mpeg");
+    CHECK(parsed.audio->description == "Sample audio clip");
+
+    std::string json_out;
+    REQUIRE_FALSE(discusy::json::write(parsed, json_out));
+    CHECK(json_out.contains("\"type\":\"audio\""));
+    CHECK(json_out.contains("\"content_type\":\"audio/mpeg\""));
+
+    std::string etf_out;
+    REQUIRE_FALSE(glz::write_etf(parsed, etf_out));
+    discusy::message::embed etf_parsed{};
+    REQUIRE_FALSE(glz::read_etf(etf_parsed, etf_out));
+    REQUIRE(etf_parsed.type.has_value());
+    CHECK(*etf_parsed.type == discusy::message::embed_type::audio);
+    REQUIRE(etf_parsed.audio.has_value());
+    CHECK(etf_parsed.audio->url == "https://example.com/track.mp3");
+    CHECK(etf_parsed.audio->proxy_url == "https://media.discordapp.net/external/abc/https/example.com/track.mp3");
+    CHECK(etf_parsed.audio->content_type == "audio/mpeg");
+    CHECK(etf_parsed.audio->description == "Sample audio clip");
+}

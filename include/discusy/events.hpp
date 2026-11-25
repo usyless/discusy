@@ -3288,6 +3288,7 @@ namespace message {
         rich, // generic embed rendered from embed attributes
         image, // image embed
         video, // video embed
+        audio, // audio embed rendered with an inline audio player
         gifv, // animated gif image embed rendered as a video embed
         article, // article embed
         link, // link embed
@@ -3377,6 +3378,21 @@ namespace message {
         decltype(auto) add_flag(this auto&& self, embed_media_flags f) noexcept { return std::forward<decltype(self)>(self).add_flags(f); }
     };
 
+    struct embed_audio {
+        opt<std::string> url{};
+        opt<std::string> proxy_url{};
+        opt<std::string> content_type{};
+        opt<std::string> description{};
+
+        static embed_audio create(opt<std::string> url_ = {}) {
+            return embed_audio{.url = std::move(url_)};
+        }
+        decltype(auto) set_url(this auto&& self, opt<std::string> url_) { self.url = std::move(url_); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_proxy_url(this auto&& self, opt<std::string> proxy_url_) { self.proxy_url = std::move(proxy_url_); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_content_type(this auto&& self, opt<std::string> content_type_) { self.content_type = std::move(content_type_); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_description(this auto&& self, opt<std::string> description_) { self.description = std::move(description_); return std::forward<decltype(self)>(self); }
+    };
+
     struct embed_provider {
         opt<std::string> name{};
         opt<std::string> url{};
@@ -3450,6 +3466,7 @@ namespace message {
         opt<embed_image> image{};
         opt<embed_image> thumbnail{};
         opt<embed_video> video{};
+        opt<embed_audio> audio{};
         opt<embed_provider> provider{};
         opt<embed_author> author{};
         opt<std::vector<embed_field>> fields{};
@@ -3471,6 +3488,7 @@ namespace message {
         decltype(auto) set_image(this auto&& self, opt<embed_image> image_) { self.image = std::move(image_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_thumbnail(this auto&& self, opt<embed_image> thumbnail_) { self.thumbnail = std::move(thumbnail_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_video(this auto&& self, opt<embed_video> video_) { self.video = std::move(video_); return std::forward<decltype(self)>(self); }
+        decltype(auto) set_audio(this auto&& self, opt<embed_audio> audio_) { self.audio = std::move(audio_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_provider(this auto&& self, opt<embed_provider> provider_) { self.provider = std::move(provider_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_author(this auto&& self, opt<embed_author> author_) { self.author = std::move(author_); return std::forward<decltype(self)>(self); }
         decltype(auto) set_fields(this auto&& self, opt<std::vector<embed_field>> fields_) { self.fields = std::move(fields_); return std::forward<decltype(self)>(self); }
@@ -5921,7 +5939,7 @@ template <>
 struct glz::meta<discusy::message::embed_type> {
     using enum discusy::message::embed_type;
     static constexpr auto value = glz::enumerate(
-        rich, image, video, gifv, article, link, poll_result, components
+        rich, image, video, audio, gifv, article, link, poll_result, components
     );
 };
 
