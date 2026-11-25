@@ -16,6 +16,8 @@
 #include <sodium.h>
 #include <boost/container/deque.hpp>
 
+#include <glaze/util/inline.hpp>
+
 #include "../types.hpp"
 #include "../audio_runtime.hpp"
 #include "../io_context.hpp"

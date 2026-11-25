@@ -19,6 +19,8 @@
 
 #include <boost/container/small_vector.hpp>
 
+#include <glaze/util/inline.hpp>
+
 #include "coro.hpp"
 #include "io_context.hpp"
 #include "types.hpp"

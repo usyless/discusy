@@ -13,6 +13,8 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
+#include <glaze/util/inline.hpp>
+
 #include "coro.hpp"
 #include "log.hpp" // IWYU pragma: keep
 #include "asio_helpers.hpp"
