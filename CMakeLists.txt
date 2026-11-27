@@ -5,7 +5,7 @@ set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF CACHE BOOL "" FORCE)
 
 project(
     discusy
-    VERSION 1.1.1
+    VERSION 1.1.2
     LANGUAGES C CXX
 )
 
@@ -649,6 +649,9 @@ if(DISCUSY_USE_MIMALLOC)
 
     target_link_libraries(${LIBRARY_NAME} ${DISCUSY_VISIBILITY}
         mimalloc-obj
+    )
+    target_sources(${LIBRARY_NAME} INTERFACE
+        $<TARGET_OBJECTS:mimalloc-obj>
     )
 endif()
 
